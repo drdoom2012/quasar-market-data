@@ -11,14 +11,14 @@ Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned in `.python-ver
 | `make test` | `uv run pytest` |
 | `make lint` | `ruff check` and `ruff format --check` on `src tests spikes` |
 | `make typecheck` | `mypy` (strict) |
-| `make imports` | `lint-imports` (module boundaries; configured in a later task) |
+| `make imports` | `lint-imports` (module boundaries) |
 | `make check` | `lint`, `typecheck`, `imports`, `test` |
 
-CI runs `make check` on pull requests and pushes to `main`.
+CI is configured to run `make check` on pull requests and pushes to `main` (not yet observed running). Making it an authoritative gate also needs a required status check on `main`, which is a repository setting not made here.
 
 ## Local hook
 
-`.claude/settings.json` registers one Claude Code `PreToolUse` hook (matcher `Bash`) that runs `scripts/hooks/pre_commit_check.sh`. When the Bash command contains the text "git commit", it runs `make check` first and blocks the call (exit 2, tail of the output on stderr) if it fails. This is a local convenience only; CI is the authoritative gate. Override the command with `QUASAR_CHECK_CMD` (used by `tests/test_pre_commit_hook.py`).
+`.claude/settings.json` registers one Claude Code `PreToolUse` hook (matcher `Bash`) that runs `scripts/hooks/pre_commit_check.sh`. When the Bash command contains the text "git commit", it runs `make check` first and blocks the call (exit 2, tail of the output on stderr) if it fails. The hook runs `make check` on the working tree (not the staged content), so it also blocks WIP commits while the tree is red. It matches the text `git commit` anywhere in the command payload, so unrelated commands that mention it cost one `make check`, and forms such as `git -c k=v commit` are not matched. This is a local convenience only. Override the command with `QUASAR_CHECK_CMD` (used by `tests/test_pre_commit_hook.py`).
 
 Console scripts: `quasar-collector` and `quasar-api` (`--version` only for now).
 
