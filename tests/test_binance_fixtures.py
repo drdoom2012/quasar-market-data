@@ -169,3 +169,14 @@ def test_boundary_probe_meta_counts_match_polls() -> None:
     meta = load_obj("btcusdt_5m_boundary_probe.meta.json")
     assert len(meta["time_observations"]) == 21
     assert len(meta["requests"]) == 42
+
+
+def test_recheck_fixture_covers_the_same_range_one_hour_later() -> None:
+    first_meta = load_obj("btcusdt_5m_closed.meta.json")
+    meta = load_obj("btcusdt_5m_recheck.meta.json")
+    first, again = load_rows("btcusdt_5m_closed_raw.json"), load_rows("btcusdt_5m_recheck_raw.json")
+    assert [r[0] for r in again] == [r[0] for r in first]
+    assert (meta["start_time_ms"], meta["end_time_ms"]) == (first_meta["start_time_ms"], first_meta["end_time_ms"])
+    assert meta["market_id"] == first_meta["market_id"]
+    assert meta["seconds_since_first_capture"] >= 3600
+    assert all(len(row) == 12 for row in again)
