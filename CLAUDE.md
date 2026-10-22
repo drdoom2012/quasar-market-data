@@ -1,4 +1,4 @@
-# [CLAUDE.md](http://CLAUDE.md) — Quasar Market Data
+# CLAUDE.md — Quasar Market Data
 
 ## Project
 
@@ -17,7 +17,7 @@ Two independently deployable processes:
 
 SQLite WAL is the persistence boundary. The Collector is the only writer.
 
-Read `docs/[architecture.md](http://architecture.md)` before making architectural changes.
+Read `docs/architecture.md` before making architectural changes.
 
 ## Non-Negotiable Rules
 
@@ -79,7 +79,7 @@ After coding:
 - Verify deterministic indicator calculations.
 - Never use production market data storage for tests.
 
-Use the project commands documented in [`README.md`](http://README.md) or `Makefile`. Do not invent commands that have not been configured.
+Use the project commands documented in `README.md` or `Makefile`. Do not invent commands that have not been configured.
 
 ## Architectural Decisions
 
@@ -96,8 +96,9 @@ Do not silently reverse accepted decisions.
 
 ## References
 
-- `docs/[architecture.md](http://architecture.md)` — architecture and component responsibilities
+- `docs/architecture.md` — architecture and component responsibilities
 - `docs/adr/` — architectural decisions
 - `docs/contracts/` — data and API contracts
+- `docs/invariants.md` — invariant register with enforcement status
 
-If a referenced document does not exist, report i
+If a referenced document does not exist, report it before proceeding.
