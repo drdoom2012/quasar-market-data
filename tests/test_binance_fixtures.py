@@ -147,3 +147,25 @@ def test_market_survey_mapping_is_lossless() -> None:
         meta = load_obj(f"{name}_5m_closed.meta.json")
         assert (meta["instrument"], meta["market_id"]) in {(m["symbol"], m["id"]) for m in markets}
     assert {"captured_at_wall_ms", "ccxt_version", "excluded_counts"} <= set(survey)
+
+
+def test_boundary_probe_fixture_shape() -> None:
+    probe = load_obj("btcusdt_5m_boundary_probe.json")
+    boundaries = cast(list[dict[str, Any]], probe["boundaries"])
+    assert len(boundaries) == 3
+    starts = [b["boundary_ms"] for b in boundaries]
+    assert all(b - a == FIVE_MIN_MS for a, b in itertools.pairwise(starts))
+    assert all(s % FIVE_MIN_MS == 0 for s in starts)
+    for b in boundaries:
+        assert [p["offset_s"] for p in b["polls"]] == [0.2, 1, 2, 3, 5, 8, 13]
+        for p in b["polls"]:
+            row = p["row"]
+            assert row == "absent" or (len(row) == 12 and row[0] == b["boundary_ms"] - FIVE_MIN_MS)
+            obs = p["time_observation"]
+            assert obs["monotonic_after_ns"] >= obs["monotonic_before_ns"]
+
+
+def test_boundary_probe_meta_counts_match_polls() -> None:
+    meta = load_obj("btcusdt_5m_boundary_probe.meta.json")
+    assert len(meta["time_observations"]) == 21
+    assert len(meta["requests"]) == 42
