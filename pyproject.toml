@@ -12,7 +12,9 @@ quasar-api = "quasar_market_data.api.cli:main"
 
 [dependency-groups]
 dev = ["pytest", "ruff", "mypy", "import-linter"]
-spike = []
+spike = [
+    "ccxt>=4.5.89",
+]
 
 [build-system]
 requires = ["hatchling"]

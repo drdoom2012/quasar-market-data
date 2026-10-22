@@ -1,0 +1,59 @@
+{
+ "instrument": "BTC/USDT:USDT",
+ "market_id": "BTCUSDT",
+ "market_flags": {
+  "swap": true,
+  "linear": true,
+  "settle": "USDT",
+  "quote": "USDT",
+  "active": true,
+  "expiry": null
+ },
+ "interval": "5m",
+ "ccxt_version": "4.5.89",
+ "python_version": "3.12.15 (main, Oct 21 2026, 17:38:27) [Clang 23.1.3 ]",
+ "request_recording": "wrapped Exchange.fetch on the instance; every outgoing (method, url) logged",
+ "start_time_ms": 1792676700000,
+ "end_time_ms": 1792677299999,
+ "limit": 2,
+ "method": "fapiPublicGetKlines",
+ "params": {
+  "symbol": "BTCUSDT",
+  "interval": "5m",
+  "limit": 2
+ },
+ "requests": [
+  {
+   "label": "time_before",
+   "method": "GET",
+   "url": "https://fapi.binance.com/fapi/v1/time"
+  },
+  {
+   "label": "raw_klines",
+   "method": "GET",
+   "url": "https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=5m&limit=2"
+  },
+  {
+   "label": "time_after",
+   "method": "GET",
+   "url": "https://fapi.binance.com/fapi/v1/time"
+  }
+ ],
+ "time_observations": [
+  {
+   "wall_before_ms": 1792677035592,
+   "wall_after_ms": 1792677035861,
+   "monotonic_before_ns": 18053203565333,
+   "monotonic_after_ns": 18053472067250,
+   "server_time_ms": 1792677035725
+  },
+  {
+   "wall_before_ms": 1792677036205,
+   "wall_after_ms": 1792677036965,
+   "monotonic_before_ns": 18053815776541,
+   "monotonic_after_ns": 18054575698125,
+   "server_time_ms": 1792677036344
+  }
+ ],
+ "note": "start/end are the observed first openTime and last closeTime; the request had no startTime/endTime"
+}

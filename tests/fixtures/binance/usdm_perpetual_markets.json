@@ -1,0 +1,7949 @@
+{
+ "captured_at_wall_ms": 1792677032539,
+ "ccxt_version": "4.5.89",
+ "filter": "swap and linear and settle == USDT and quote == USDT and expiry is None",
+ "excluded_counts": {
+  "settle_not_usdt": 45,
+  "not_swap": 4
+ },
+ "markets": [
+  {
+   "symbol": "0G/USDT:USDT",
+   "id": "0GUSDT",
+   "base": "0G",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1000000BOB/USDT:USDT",
+   "id": "1000000BOBUSDT",
+   "base": "1000000BOB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "1000000MOG/USDT:USDT",
+   "id": "1000000MOGUSDT",
+   "base": "1000000MOG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1000BONK/USDT:USDT",
+   "id": "1000BONKUSDT",
+   "base": "1000BONK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1000CAT/USDT:USDT",
+   "id": "1000CATUSDT",
+   "base": "1000CAT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1000CHEEMS/USDT:USDT",
+   "id": "1000CHEEMSUSDT",
+   "base": "1000CHEEMS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1000FLOKI/USDT:USDT",
+   "id": "1000FLOKIUSDT",
+   "base": "1000FLOKI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1000LUNC/USDT:USDT",
+   "id": "1000LUNCUSDT",
+   "base": "1000LUNC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1000PEPE/USDT:USDT",
+   "id": "1000PEPEUSDT",
+   "base": "1000PEPE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1000RATS/USDT:USDT",
+   "id": "1000RATSUSDT",
+   "base": "1000RATS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1000SATS/USDT:USDT",
+   "id": "1000SATSUSDT",
+   "base": "1000SATS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1000SHIB/USDT:USDT",
+   "id": "1000SHIBUSDT",
+   "base": "1000SHIB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1000WHY/USDT:USDT",
+   "id": "1000WHYUSDT",
+   "base": "1000WHY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "1000X/USDT:USDT",
+   "id": "1000XUSDT",
+   "base": "1000X",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "1000XEC/USDT:USDT",
+   "id": "1000XECUSDT",
+   "base": "1000XEC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1INCH/USDT:USDT",
+   "id": "1INCHUSDT",
+   "base": "1INCH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "1MBABYDOGE/USDT:USDT",
+   "id": "1MBABYDOGEUSDT",
+   "base": "1MBABYDOGE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "2Z/USDT:USDT",
+   "id": "2ZUSDT",
+   "base": "2Z",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "4/USDT:USDT",
+   "id": "4USDT",
+   "base": "4",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "42/USDT:USDT",
+   "id": "42USDT",
+   "base": "42",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "A/USDT:USDT",
+   "id": "AUSDT",
+   "base": "A",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "A2Z/USDT:USDT",
+   "id": "A2ZUSDT",
+   "base": "A2Z",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "AAOI/USDT:USDT",
+   "id": "AAOIUSDT",
+   "base": "AAOI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AAPL/USDT:USDT",
+   "id": "AAPLUSDT",
+   "base": "AAPL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AAVE/USDT:USDT",
+   "id": "AAVEUSDT",
+   "base": "AAVE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ACE/USDT:USDT",
+   "id": "ACEUSDT",
+   "base": "ACE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ACH/USDT:USDT",
+   "id": "ACHUSDT",
+   "base": "ACH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ACN/USDT:USDT",
+   "id": "ACNUSDT",
+   "base": "ACN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ACT/USDT:USDT",
+   "id": "ACTUSDT",
+   "base": "ACT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ACU/USDT:USDT",
+   "id": "ACUUSDT",
+   "base": "ACU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ACX/USDT:USDT",
+   "id": "ACXUSDT",
+   "base": "ACX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "ADA/USDT:USDT",
+   "id": "ADAUSDT",
+   "base": "ADA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ADBE/USDT:USDT",
+   "id": "ADBEUSDT",
+   "base": "ADBE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AERO/USDT:USDT",
+   "id": "AEROUSDT",
+   "base": "AERO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AEVO/USDT:USDT",
+   "id": "AEVOUSDT",
+   "base": "AEVO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AGIX/USDT:USDT",
+   "id": "AGIXUSDT",
+   "base": "AGIX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "AGLD/USDT:USDT",
+   "id": "AGLDUSDT",
+   "base": "AGLD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AGPU/USDT:USDT",
+   "id": "AGPUUSDT",
+   "base": "AGPU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AGT/USDT:USDT",
+   "id": "AGTUSDT",
+   "base": "AGT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AI/USDT:USDT",
+   "id": "AIUSDT",
+   "base": "AI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "AI16Z/USDT:USDT",
+   "id": "AI16ZUSDT",
+   "base": "AI16Z",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "AIA/USDT:USDT",
+   "id": "AIAUSDT",
+   "base": "AIA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AIGENSYN/USDT:USDT",
+   "id": "AIGENSYNUSDT",
+   "base": "AIGENSYN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AIN/USDT:USDT",
+   "id": "AINUSDT",
+   "base": "AIN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AIO/USDT:USDT",
+   "id": "AIOUSDT",
+   "base": "AIO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AIOT/USDT:USDT",
+   "id": "AIOTUSDT",
+   "base": "AIOT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AIXBT/USDT:USDT",
+   "id": "AIXBTUSDT",
+   "base": "AIXBT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AKAM/USDT:USDT",
+   "id": "AKAMUSDT",
+   "base": "AKAM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AKE/USDT:USDT",
+   "id": "AKEUSDT",
+   "base": "AKE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AKT/USDT:USDT",
+   "id": "AKTUSDT",
+   "base": "AKT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ALAB/USDT:USDT",
+   "id": "ALABUSDT",
+   "base": "ALAB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ALCH/USDT:USDT",
+   "id": "ALCHUSDT",
+   "base": "ALCH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ALGO/USDT:USDT",
+   "id": "ALGOUSDT",
+   "base": "ALGO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ALICE/USDT:USDT",
+   "id": "ALICEUSDT",
+   "base": "ALICE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ALL/USDT:USDT",
+   "id": "ALLUSDT",
+   "base": "ALL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ALLO/USDT:USDT",
+   "id": "ALLOUSDT",
+   "base": "ALLO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ALPACA/USDT:USDT",
+   "id": "ALPACAUSDT",
+   "base": "ALPACA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "ALPHA/USDT:USDT",
+   "id": "ALPHAUSDT",
+   "base": "ALPHA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "ALPINE/USDT:USDT",
+   "id": "ALPINEUSDT",
+   "base": "ALPINE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ALT/USDT:USDT",
+   "id": "ALTUSDT",
+   "base": "ALT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AMAT/USDT:USDT",
+   "id": "AMATUSDT",
+   "base": "AMAT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AMB/USDT:USDT",
+   "id": "AMBUSDT",
+   "base": "AMB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "AMC/USDT:USDT",
+   "id": "AMCUSDT",
+   "base": "AMC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AMD/USDT:USDT",
+   "id": "AMDUSDT",
+   "base": "AMD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AMZN/USDT:USDT",
+   "id": "AMZNUSDT",
+   "base": "AMZN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ANET/USDT:USDT",
+   "id": "ANETUSDT",
+   "base": "ANET",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ANIME/USDT:USDT",
+   "id": "ANIMEUSDT",
+   "base": "ANIME",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ANKR/USDT:USDT",
+   "id": "ANKRUSDT",
+   "base": "ANKR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ANTHROPIC/USDT:USDT",
+   "id": "ANTHROPICUSDT",
+   "base": "ANTHROPIC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "APE/USDT:USDT",
+   "id": "APEUSDT",
+   "base": "APE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "API3/USDT:USDT",
+   "id": "API3USDT",
+   "base": "API3",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "APLD/USDT:USDT",
+   "id": "APLDUSDT",
+   "base": "APLD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "APP/USDT:USDT",
+   "id": "APPUSDT",
+   "base": "APP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "APR/USDT:USDT",
+   "id": "APRUSDT",
+   "base": "APR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "APT/USDT:USDT",
+   "id": "APTUSDT",
+   "base": "APT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AR/USDT:USDT",
+   "id": "ARUSDT",
+   "base": "AR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ARB/USDT:USDT",
+   "id": "ARBUSDT",
+   "base": "ARB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ARC/USDT:USDT",
+   "id": "ARCUSDT",
+   "base": "ARC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ARIA/USDT:USDT",
+   "id": "ARIAUSDT",
+   "base": "ARIA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ARK/USDT:USDT",
+   "id": "ARKUSDT",
+   "base": "ARK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ARKM/USDT:USDT",
+   "id": "ARKMUSDT",
+   "base": "ARKM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ARM/USDT:USDT",
+   "id": "ARMUSDT",
+   "base": "ARM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ARPA/USDT:USDT",
+   "id": "ARPAUSDT",
+   "base": "ARPA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ARX/USDT:USDT",
+   "id": "ARXUSDT",
+   "base": "ARX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ASML/USDT:USDT",
+   "id": "ASMLUSDT",
+   "base": "ASML",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ASR/USDT:USDT",
+   "id": "ASRUSDT",
+   "base": "ASR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ASTER/USDT:USDT",
+   "id": "ASTERUSDT",
+   "base": "ASTER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ASTR/USDT:USDT",
+   "id": "ASTRUSDT",
+   "base": "ASTR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ASTS/USDT:USDT",
+   "id": "ASTSUSDT",
+   "base": "ASTS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AT/USDT:USDT",
+   "id": "ATUSDT",
+   "base": "AT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ATA/USDT:USDT",
+   "id": "ATAUSDT",
+   "base": "ATA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "ATH/USDT:USDT",
+   "id": "ATHUSDT",
+   "base": "ATH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ATOM/USDT:USDT",
+   "id": "ATOMUSDT",
+   "base": "ATOM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AUCTION/USDT:USDT",
+   "id": "AUCTIONUSDT",
+   "base": "AUCTION",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AVA/USDT:USDT",
+   "id": "AVAUSDT",
+   "base": "AVA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AVAAI/USDT:USDT",
+   "id": "AVAAIUSDT",
+   "base": "AVAAI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AVAX/USDT:USDT",
+   "id": "AVAXUSDT",
+   "base": "AVAX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AVGO/USDT:USDT",
+   "id": "AVGOUSDT",
+   "base": "AVGO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AVNT/USDT:USDT",
+   "id": "AVNTUSDT",
+   "base": "AVNT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AWE/USDT:USDT",
+   "id": "AWEUSDT",
+   "base": "AWE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AXL/USDT:USDT",
+   "id": "AXLUSDT",
+   "base": "AXL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AXS/USDT:USDT",
+   "id": "AXSUSDT",
+   "base": "AXS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AXTI/USDT:USDT",
+   "id": "AXTIUSDT",
+   "base": "AXTI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "AZTEC/USDT:USDT",
+   "id": "AZTECUSDT",
+   "base": "AZTEC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "B/USDT:USDT",
+   "id": "BUSDT",
+   "base": "B",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "B2/USDT:USDT",
+   "id": "B2USDT",
+   "base": "B2",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "B3/USDT:USDT",
+   "id": "B3USDT",
+   "base": "B3",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "BABA/USDT:USDT",
+   "id": "BABAUSDT",
+   "base": "BABA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BABY/USDT:USDT",
+   "id": "BABYUSDT",
+   "base": "BABY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BAC/USDT:USDT",
+   "id": "BACUSDT",
+   "base": "BAC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BADGER/USDT:USDT",
+   "id": "BADGERUSDT",
+   "base": "BADGER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "BAKE/USDT:USDT",
+   "id": "BAKEUSDT",
+   "base": "BAKE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "BAL/USDT:USDT",
+   "id": "BALUSDT",
+   "base": "BAL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "BAN/USDT:USDT",
+   "id": "BANUSDT",
+   "base": "BAN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BANANA/USDT:USDT",
+   "id": "BANANAUSDT",
+   "base": "BANANA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BANANAS31/USDT:USDT",
+   "id": "BANANAS31USDT",
+   "base": "BANANAS31",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BAND/USDT:USDT",
+   "id": "BANDUSDT",
+   "base": "BAND",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BANK/USDT:USDT",
+   "id": "BANKUSDT",
+   "base": "BANK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BARD/USDT:USDT",
+   "id": "BARDUSDT",
+   "base": "BARD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BAS/USDT:USDT",
+   "id": "BASUSDT",
+   "base": "BAS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BASED/USDT:USDT",
+   "id": "BASEDUSDT",
+   "base": "BASED",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BAT/USDT:USDT",
+   "id": "BATUSDT",
+   "base": "BAT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BB/USDT:USDT",
+   "id": "BBUSDT",
+   "base": "BB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BBX/USDT:USDT",
+   "id": "BBXUSDT",
+   "base": "BBX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BCH/USDT:USDT",
+   "id": "BCHUSDT",
+   "base": "BCH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BE/USDT:USDT",
+   "id": "BEUSDT",
+   "base": "BE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BEAMX/USDT:USDT",
+   "id": "BEAMXUSDT",
+   "base": "BEAMX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BEAT/USDT:USDT",
+   "id": "BEATUSDT",
+   "base": "BEAT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BEL/USDT:USDT",
+   "id": "BELUSDT",
+   "base": "BEL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BERA/USDT:USDT",
+   "id": "BERAUSDT",
+   "base": "BERA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BICO/USDT:USDT",
+   "id": "BICOUSDT",
+   "base": "BICO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BID/USDT:USDT",
+   "id": "BIDUSDT",
+   "base": "BID",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "BIGTIME/USDT:USDT",
+   "id": "BIGTIMEUSDT",
+   "base": "BIGTIME",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BILL/USDT:USDT",
+   "id": "BILLUSDT",
+   "base": "BILL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BIO/USDT:USDT",
+   "id": "BIOUSDT",
+   "base": "BIO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BIRB/USDT:USDT",
+   "id": "BIRBUSDT",
+   "base": "BIRB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BITO/USDT:USDT",
+   "id": "BITOUSDT",
+   "base": "BITO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BLESS/USDT:USDT",
+   "id": "BLESSUSDT",
+   "base": "BLESS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BLUAI/USDT:USDT",
+   "id": "BLUAIUSDT",
+   "base": "BLUAI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BLUR/USDT:USDT",
+   "id": "BLURUSDT",
+   "base": "BLUR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BLZ/USDT:USDT",
+   "id": "BLZUSDT",
+   "base": "BLZ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "BMNR/USDT:USDT",
+   "id": "BMNRUSDT",
+   "base": "BMNR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BMT/USDT:USDT",
+   "id": "BMTUSDT",
+   "base": "BMT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BNB/USDT:USDT",
+   "id": "BNBUSDT",
+   "base": "BNB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BNC/USDT:USDT",
+   "id": "BNCUSDT",
+   "base": "BNC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BNT/USDT:USDT",
+   "id": "BNTUSDT",
+   "base": "BNT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BNX/USDT:USDT",
+   "id": "BNXUSDT",
+   "base": "BNX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "BOB/USDT:USDT",
+   "id": "BOBUSDT",
+   "base": "BOB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "BOME/USDT:USDT",
+   "id": "BOMEUSDT",
+   "base": "BOME",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BOND/USDT:USDT",
+   "id": "BONDUSDT",
+   "base": "BOND",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "BOT/USDT:USDT",
+   "id": "BOTUSDT",
+   "base": "BOT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BR/USDT:USDT",
+   "id": "BRUSDT",
+   "base": "BR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BRETT/USDT:USDT",
+   "id": "BRETTUSDT",
+   "base": "BRETT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BREV/USDT:USDT",
+   "id": "BREVUSDT",
+   "base": "BREV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BRKB/USDT:USDT",
+   "id": "BRKBUSDT",
+   "base": "BRKB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BROCCOLI714/USDT:USDT",
+   "id": "BROCCOLI714USDT",
+   "base": "BROCCOLI714",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BROCCOLIF3B/USDT:USDT",
+   "id": "BROCCOLIF3BUSDT",
+   "base": "BROCCOLIF3B",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BSB/USDT:USDT",
+   "id": "BSBUSDT",
+   "base": "BSB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BSP/USDT:USDT",
+   "id": "BSPUSDT",
+   "base": "BSP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BSV/USDT:USDT",
+   "id": "BSVUSDT",
+   "base": "BSV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BSW/USDT:USDT",
+   "id": "BSWUSDT",
+   "base": "BSW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "BTC/USDT:USDT",
+   "id": "BTCUSDT",
+   "base": "BTC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BTCDOM/USDT:USDT",
+   "id": "BTCDOMUSDT",
+   "base": "BTCDOM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BTR/USDT:USDT",
+   "id": "BTRUSDT",
+   "base": "BTR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BTW/USDT:USDT",
+   "id": "BTWUSDT",
+   "base": "BTW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BULLA/USDT:USDT",
+   "id": "BULLAUSDT",
+   "base": "BULLA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BWET/USDT:USDT",
+   "id": "BWETUSDT",
+   "base": "BWET",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BX/USDT:USDT",
+   "id": "BXUSDT",
+   "base": "BX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BYD/USDT:USDT",
+   "id": "BYDUSDT",
+   "base": "BYD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "BZ/USDT:USDT",
+   "id": "BZUSDT",
+   "base": "BZ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "C/USDT:USDT",
+   "id": "CUSDT",
+   "base": "C",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "C98/USDT:USDT",
+   "id": "C98USDT",
+   "base": "C98",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CAKE/USDT:USDT",
+   "id": "CAKEUSDT",
+   "base": "CAKE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CAP/USDT:USDT",
+   "id": "CAPUSDT",
+   "base": "CAP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CARV/USDT:USDT",
+   "id": "CARVUSDT",
+   "base": "CARV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CAT/USDT:USDT",
+   "id": "CATUSDT",
+   "base": "CAT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CATI/USDT:USDT",
+   "id": "CATIUSDT",
+   "base": "CATI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CBRS/USDT:USDT",
+   "id": "CBRSUSDT",
+   "base": "CBRS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CC/USDT:USDT",
+   "id": "CCUSDT",
+   "base": "CC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CEG/USDT:USDT",
+   "id": "CEGUSDT",
+   "base": "CEG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CELO/USDT:USDT",
+   "id": "CELOUSDT",
+   "base": "CELO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CELR/USDT:USDT",
+   "id": "CELRUSDT",
+   "base": "CELR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CETUS/USDT:USDT",
+   "id": "CETUSUSDT",
+   "base": "CETUS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CFG/USDT:USDT",
+   "id": "CFGUSDT",
+   "base": "CFG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CFX/USDT:USDT",
+   "id": "CFXUSDT",
+   "base": "CFX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CGPT/USDT:USDT",
+   "id": "CGPTUSDT",
+   "base": "CGPT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CHESS/USDT:USDT",
+   "id": "CHESSUSDT",
+   "base": "CHESS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "CHILLGUY/USDT:USDT",
+   "id": "CHILLGUYUSDT",
+   "base": "CHILLGUY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CHIP/USDT:USDT",
+   "id": "CHIPUSDT",
+   "base": "CHIP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CHR/USDT:USDT",
+   "id": "CHRUSDT",
+   "base": "CHR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CHZ/USDT:USDT",
+   "id": "CHZUSDT",
+   "base": "CHZ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CIEN/USDT:USDT",
+   "id": "CIENUSDT",
+   "base": "CIEN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CKB/USDT:USDT",
+   "id": "CKBUSDT",
+   "base": "CKB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CL/USDT:USDT",
+   "id": "CLUSDT",
+   "base": "CL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CLANKER/USDT:USDT",
+   "id": "CLANKERUSDT",
+   "base": "CLANKER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CLO/USDT:USDT",
+   "id": "CLOUSDT",
+   "base": "CLO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "COAI/USDT:USDT",
+   "id": "COAIUSDT",
+   "base": "COAI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "COHR/USDT:USDT",
+   "id": "COHRUSDT",
+   "base": "COHR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "COIN/USDT:USDT",
+   "id": "COINUSDT",
+   "base": "COIN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "COLLECT/USDT:USDT",
+   "id": "COLLECTUSDT",
+   "base": "COLLECT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "COMBO/USDT:USDT",
+   "id": "COMBOUSDT",
+   "base": "COMBO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "COMMON/USDT:USDT",
+   "id": "COMMONUSDT",
+   "base": "COMMON",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "COMP/USDT:USDT",
+   "id": "COMPUSDT",
+   "base": "COMP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "COOKIE/USDT:USDT",
+   "id": "COOKIEUSDT",
+   "base": "COOKIE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "COPPER/USDT:USDT",
+   "id": "COPPERUSDT",
+   "base": "COPPER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "COS/USDT:USDT",
+   "id": "COSUSDT",
+   "base": "COS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "COST/USDT:USDT",
+   "id": "COSTUSDT",
+   "base": "COST",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "COTI/USDT:USDT",
+   "id": "COTIUSDT",
+   "base": "COTI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "COW/USDT:USDT",
+   "id": "COWUSDT",
+   "base": "COW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CRCL/USDT:USDT",
+   "id": "CRCLUSDT",
+   "base": "CRCL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CRDO/USDT:USDT",
+   "id": "CRDOUSDT",
+   "base": "CRDO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CRM/USDT:USDT",
+   "id": "CRMUSDT",
+   "base": "CRM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CRML/USDT:USDT",
+   "id": "CRMLUSDT",
+   "base": "CRML",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CROSS/USDT:USDT",
+   "id": "CROSSUSDT",
+   "base": "CROSS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CRV/USDT:USDT",
+   "id": "CRVUSDT",
+   "base": "CRV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CRWD/USDT:USDT",
+   "id": "CRWDUSDT",
+   "base": "CRWD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CRWV/USDT:USDT",
+   "id": "CRWVUSDT",
+   "base": "CRWV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CSCO/USDT:USDT",
+   "id": "CSCOUSDT",
+   "base": "CSCO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CSOPSAMSUNG2L/USDT:USDT",
+   "id": "CSOPSAMSUNG2LUSDT",
+   "base": "CSOPSAMSUNG2L",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CSOPSKHYNIX2L/USDT:USDT",
+   "id": "CSOPSKHYNIX2LUSDT",
+   "base": "CSOPSKHYNIX2L",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CT/USDT:USDT",
+   "id": "CTUSDT",
+   "base": "CT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CTK/USDT:USDT",
+   "id": "CTKUSDT",
+   "base": "CTK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CTR/USDT:USDT",
+   "id": "CTRUSDT",
+   "base": "CTR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CTSI/USDT:USDT",
+   "id": "CTSIUSDT",
+   "base": "CTSI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CUDIS/USDT:USDT",
+   "id": "CUDISUSDT",
+   "base": "CUDIS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "CVC/USDT:USDT",
+   "id": "CVCUSDT",
+   "base": "CVC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CVNA/USDT:USDT",
+   "id": "CVNAUSDT",
+   "base": "CVNA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CVX/USDT:USDT",
+   "id": "CVXUSDT",
+   "base": "CVX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CXMT/USDT:USDT",
+   "id": "CXMTUSDT",
+   "base": "CXMT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CYBER/USDT:USDT",
+   "id": "CYBERUSDT",
+   "base": "CYBER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CYPH/USDT:USDT",
+   "id": "CYPHUSDT",
+   "base": "CYPH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "CYS/USDT:USDT",
+   "id": "CYSUSDT",
+   "base": "CYS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "D/USDT:USDT",
+   "id": "DUSDT",
+   "base": "D",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "DAM/USDT:USDT",
+   "id": "DAMUSDT",
+   "base": "DAM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "DAR/USDT:USDT",
+   "id": "DARUSDT",
+   "base": "DAR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "DASH/USDT:USDT",
+   "id": "DASHUSDT",
+   "base": "DASH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DATAIP/USDT:USDT",
+   "id": "DATAIPUSDT",
+   "base": "DATAIP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DDOG/USDT:USDT",
+   "id": "DDOGUSDT",
+   "base": "DDOG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DEEP/USDT:USDT",
+   "id": "DEEPUSDT",
+   "base": "DEEP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DEFI/USDT:USDT",
+   "id": "DEFIUSDT",
+   "base": "DEFI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "DEGEN/USDT:USDT",
+   "id": "DEGENUSDT",
+   "base": "DEGEN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "DEGO/USDT:USDT",
+   "id": "DEGOUSDT",
+   "base": "DEGO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "DELL/USDT:USDT",
+   "id": "DELLUSDT",
+   "base": "DELL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DENT/USDT:USDT",
+   "id": "DENTUSDT",
+   "base": "DENT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "DEXE/USDT:USDT",
+   "id": "DEXEUSDT",
+   "base": "DEXE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DF/USDT:USDT",
+   "id": "DFUSDT",
+   "base": "DF",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "DGB/USDT:USDT",
+   "id": "DGBUSDT",
+   "base": "DGB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "DIA/USDT:USDT",
+   "id": "DIAUSDT",
+   "base": "DIA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DIS/USDT:USDT",
+   "id": "DISUSDT",
+   "base": "DIS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DJT/USDT:USDT",
+   "id": "DJTUSDT",
+   "base": "DJT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DKNG/USDT:USDT",
+   "id": "DKNGUSDT",
+   "base": "DKNG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DMC/USDT:USDT",
+   "id": "DMCUSDT",
+   "base": "DMC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "DODOX/USDT:USDT",
+   "id": "DODOXUSDT",
+   "base": "DODOX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DOGE/USDT:USDT",
+   "id": "DOGEUSDT",
+   "base": "DOGE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DOGS/USDT:USDT",
+   "id": "DOGSUSDT",
+   "base": "DOGS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DOLO/USDT:USDT",
+   "id": "DOLOUSDT",
+   "base": "DOLO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DOOD/USDT:USDT",
+   "id": "DOODUSDT",
+   "base": "DOOD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DOS/USDT:USDT",
+   "id": "DOSUSDT",
+   "base": "DOS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DOT/USDT:USDT",
+   "id": "DOTUSDT",
+   "base": "DOT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DRAM/USDT:USDT",
+   "id": "DRAMUSDT",
+   "base": "DRAM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DRIFT/USDT:USDT",
+   "id": "DRIFTUSDT",
+   "base": "DRIFT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DUSK/USDT:USDT",
+   "id": "DUSKUSDT",
+   "base": "DUSK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DYDX/USDT:USDT",
+   "id": "DYDXUSDT",
+   "base": "DYDX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "DYM/USDT:USDT",
+   "id": "DYMUSDT",
+   "base": "DYM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EBAY/USDT:USDT",
+   "id": "EBAYUSDT",
+   "base": "EBAY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EDEN/USDT:USDT",
+   "id": "EDENUSDT",
+   "base": "EDEN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EDGE/USDT:USDT",
+   "id": "EDGEUSDT",
+   "base": "EDGE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EDU/USDT:USDT",
+   "id": "EDUUSDT",
+   "base": "EDU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EGLD/USDT:USDT",
+   "id": "EGLDUSDT",
+   "base": "EGLD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EIGEN/USDT:USDT",
+   "id": "EIGENUSDT",
+   "base": "EIGEN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ELSA/USDT:USDT",
+   "id": "ELSAUSDT",
+   "base": "ELSA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ENA/USDT:USDT",
+   "id": "ENAUSDT",
+   "base": "ENA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ENJ/USDT:USDT",
+   "id": "ENJUSDT",
+   "base": "ENJ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ENS/USDT:USDT",
+   "id": "ENSUSDT",
+   "base": "ENS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ENSO/USDT:USDT",
+   "id": "ENSOUSDT",
+   "base": "ENSO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EPIC/USDT:USDT",
+   "id": "EPICUSDT",
+   "base": "EPIC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "EPT/USDT:USDT",
+   "id": "EPTUSDT",
+   "base": "EPT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "ERA/USDT:USDT",
+   "id": "ERAUSDT",
+   "base": "ERA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ESP/USDT:USDT",
+   "id": "ESPUSDT",
+   "base": "ESP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ESPORTS/USDT:USDT",
+   "id": "ESPORTSUSDT",
+   "base": "ESPORTS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ETC/USDT:USDT",
+   "id": "ETCUSDT",
+   "base": "ETC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ETH/USDT:USDT",
+   "id": "ETHUSDT",
+   "base": "ETH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ETHFI/USDT:USDT",
+   "id": "ETHFIUSDT",
+   "base": "ETHFI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ETHW/USDT:USDT",
+   "id": "ETHWUSDT",
+   "base": "ETHW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EUL/USDT:USDT",
+   "id": "EULUSDT",
+   "base": "EUL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EVAA/USDT:USDT",
+   "id": "EVAAUSDT",
+   "base": "EVAA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EWJ/USDT:USDT",
+   "id": "EWJUSDT",
+   "base": "EWJ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EWT/USDT:USDT",
+   "id": "EWTUSDT",
+   "base": "EWT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EWY/USDT:USDT",
+   "id": "EWYUSDT",
+   "base": "EWY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "EWZ/USDT:USDT",
+   "id": "EWZUSDT",
+   "base": "EWZ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "F/USDT:USDT",
+   "id": "FUSDT",
+   "base": "F",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FARTCOIN/USDT:USDT",
+   "id": "FARTCOINUSDT",
+   "base": "FARTCOIN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FET/USDT:USDT",
+   "id": "FETUSDT",
+   "base": "FET",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FF/USDT:USDT",
+   "id": "FFUSDT",
+   "base": "FF",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FHE/USDT:USDT",
+   "id": "FHEUSDT",
+   "base": "FHE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FIDA/USDT:USDT",
+   "id": "FIDAUSDT",
+   "base": "FIDA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FIGHT/USDT:USDT",
+   "id": "FIGHTUSDT",
+   "base": "FIGHT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FIL/USDT:USDT",
+   "id": "FILUSDT",
+   "base": "FIL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FIO/USDT:USDT",
+   "id": "FIOUSDT",
+   "base": "FIO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "FIS/USDT:USDT",
+   "id": "FISUSDT",
+   "base": "FIS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "FLEX/USDT:USDT",
+   "id": "FLEXUSDT",
+   "base": "FLEX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FLM/USDT:USDT",
+   "id": "FLMUSDT",
+   "base": "FLM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "FLNC/USDT:USDT",
+   "id": "FLNCUSDT",
+   "base": "FLNC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FLOCK/USDT:USDT",
+   "id": "FLOCKUSDT",
+   "base": "FLOCK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FLOW/USDT:USDT",
+   "id": "FLOWUSDT",
+   "base": "FLOW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FLUID/USDT:USDT",
+   "id": "FLUIDUSDT",
+   "base": "FLUID",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FLUX/USDT:USDT",
+   "id": "FLUXUSDT",
+   "base": "FLUX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FOGO/USDT:USDT",
+   "id": "FOGOUSDT",
+   "base": "FOGO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FOLKS/USDT:USDT",
+   "id": "FOLKSUSDT",
+   "base": "FOLKS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FORM/USDT:USDT",
+   "id": "FORMUSDT",
+   "base": "FORM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FORTH/USDT:USDT",
+   "id": "FORTHUSDT",
+   "base": "FORTH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "FRAX/USDT:USDT",
+   "id": "FRAXUSDT",
+   "base": "FRAX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FTM/USDT:USDT",
+   "id": "FTMUSDT",
+   "base": "FTM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "FTT/USDT:USDT",
+   "id": "FTTUSDT",
+   "base": "FTT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "FUN/USDT:USDT",
+   "id": "FUNUSDT",
+   "base": "FUN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "FWDI/USDT:USDT",
+   "id": "FWDIUSDT",
+   "base": "FWDI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "FXS/USDT:USDT",
+   "id": "FXSUSDT",
+   "base": "FXS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "G/USDT:USDT",
+   "id": "GUSDT",
+   "base": "G",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GAIB/USDT:USDT",
+   "id": "GAIBUSDT",
+   "base": "GAIB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "GALA/USDT:USDT",
+   "id": "GALAUSDT",
+   "base": "GALA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GAS/USDT:USDT",
+   "id": "GASUSDT",
+   "base": "GAS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GDX/USDT:USDT",
+   "id": "GDXUSDT",
+   "base": "GDX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GENIUS/USDT:USDT",
+   "id": "GENIUSUSDT",
+   "base": "GENIUS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GEV/USDT:USDT",
+   "id": "GEVUSDT",
+   "base": "GEV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GHST/USDT:USDT",
+   "id": "GHSTUSDT",
+   "base": "GHST",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "GIGADEV/USDT:USDT",
+   "id": "GIGADEVUSDT",
+   "base": "GIGADEV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GIGGLE/USDT:USDT",
+   "id": "GIGGLEUSDT",
+   "base": "GIGGLE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GLM/USDT:USDT",
+   "id": "GLMUSDT",
+   "base": "GLM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GLMR/USDT:USDT",
+   "id": "GLMRUSDT",
+   "base": "GLMR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "GLW/USDT:USDT",
+   "id": "GLWUSDT",
+   "base": "GLW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GME/USDT:USDT",
+   "id": "GMEUSDT",
+   "base": "GME",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GMT/USDT:USDT",
+   "id": "GMTUSDT",
+   "base": "GMT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GMX/USDT:USDT",
+   "id": "GMXUSDT",
+   "base": "GMX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GOAT/USDT:USDT",
+   "id": "GOATUSDT",
+   "base": "GOAT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GOOGL/USDT:USDT",
+   "id": "GOOGLUSDT",
+   "base": "GOOGL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GPRO/USDT:USDT",
+   "id": "GPROUSDT",
+   "base": "GPRO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GPS/USDT:USDT",
+   "id": "GPSUSDT",
+   "base": "GPS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GRAM/USDT:USDT",
+   "id": "GRAMUSDT",
+   "base": "GRAM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GRASS/USDT:USDT",
+   "id": "GRASSUSDT",
+   "base": "GRASS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GRIFFAIN/USDT:USDT",
+   "id": "GRIFFAINUSDT",
+   "base": "GRIFFAIN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GRT/USDT:USDT",
+   "id": "GRTUSDT",
+   "base": "GRT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GRVT/USDT:USDT",
+   "id": "GRVTUSDT",
+   "base": "GRVT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GS/USDT:USDT",
+   "id": "GSUSDT",
+   "base": "GS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GTC/USDT:USDT",
+   "id": "GTCUSDT",
+   "base": "GTC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GTLB/USDT:USDT",
+   "id": "GTLBUSDT",
+   "base": "GTLB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GUA/USDT:USDT",
+   "id": "GUAUSDT",
+   "base": "GUA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GUN/USDT:USDT",
+   "id": "GUNUSDT",
+   "base": "GUN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "GWEI/USDT:USDT",
+   "id": "GWEIUSDT",
+   "base": "GWEI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "H/USDT:USDT",
+   "id": "HUSDT",
+   "base": "H",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HAEDAL/USDT:USDT",
+   "id": "HAEDALUSDT",
+   "base": "HAEDAL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HANA/USDT:USDT",
+   "id": "HANAUSDT",
+   "base": "HANA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HANMI/USDT:USDT",
+   "id": "HANMIUSDT",
+   "base": "HANMI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HBAR/USDT:USDT",
+   "id": "HBARUSDT",
+   "base": "HBAR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HD/USDT:USDT",
+   "id": "HDUSDT",
+   "base": "HD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HEI/USDT:USDT",
+   "id": "HEIUSDT",
+   "base": "HEI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HEMI/USDT:USDT",
+   "id": "HEMIUSDT",
+   "base": "HEMI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HFT/USDT:USDT",
+   "id": "HFTUSDT",
+   "base": "HFT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "HIFI/USDT:USDT",
+   "id": "HIFIUSDT",
+   "base": "HIFI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "HIGH/USDT:USDT",
+   "id": "HIGHUSDT",
+   "base": "HIGH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "HIMS/USDT:USDT",
+   "id": "HIMSUSDT",
+   "base": "HIMS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HIPPO/USDT:USDT",
+   "id": "HIPPOUSDT",
+   "base": "HIPPO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "HIVE/USDT:USDT",
+   "id": "HIVEUSDT",
+   "base": "HIVE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HK0625/USDT:USDT",
+   "id": "HK0625USDT",
+   "base": "HK0625",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HK0700/USDT:USDT",
+   "id": "HK0700USDT",
+   "base": "HK0700",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HK0992/USDT:USDT",
+   "id": "HK0992USDT",
+   "base": "HK0992",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HK1810/USDT:USDT",
+   "id": "HK1810USDT",
+   "base": "HK1810",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HMSTR/USDT:USDT",
+   "id": "HMSTRUSDT",
+   "base": "HMSTR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HOLO/USDT:USDT",
+   "id": "HOLOUSDT",
+   "base": "HOLO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HOME/USDT:USDT",
+   "id": "HOMEUSDT",
+   "base": "HOME",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HOOD/USDT:USDT",
+   "id": "HOODUSDT",
+   "base": "HOOD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HOOK/USDT:USDT",
+   "id": "HOOKUSDT",
+   "base": "HOOK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "HOT/USDT:USDT",
+   "id": "HOTUSDT",
+   "base": "HOT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HPE/USDT:USDT",
+   "id": "HPEUSDT",
+   "base": "HPE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HUMA/USDT:USDT",
+   "id": "HUMAUSDT",
+   "base": "HUMA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HUT/USDT:USDT",
+   "id": "HUTUSDT",
+   "base": "HUT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HYPE/USDT:USDT",
+   "id": "HYPEUSDT",
+   "base": "HYPE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HYPER/USDT:USDT",
+   "id": "HYPERUSDT",
+   "base": "HYPER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "HYUNDAI/USDT:USDT",
+   "id": "HYUNDAIUSDT",
+   "base": "HYUNDAI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IBKR/USDT:USDT",
+   "id": "IBKRUSDT",
+   "base": "IBKR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IBM/USDT:USDT",
+   "id": "IBMUSDT",
+   "base": "IBM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ICNT/USDT:USDT",
+   "id": "ICNTUSDT",
+   "base": "ICNT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ICP/USDT:USDT",
+   "id": "ICPUSDT",
+   "base": "ICP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ICX/USDT:USDT",
+   "id": "ICXUSDT",
+   "base": "ICX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "ID/USDT:USDT",
+   "id": "IDUSDT",
+   "base": "ID",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IDEX/USDT:USDT",
+   "id": "IDEXUSDT",
+   "base": "IDEX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "IDOL/USDT:USDT",
+   "id": "IDOLUSDT",
+   "base": "IDOL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ILV/USDT:USDT",
+   "id": "ILVUSDT",
+   "base": "ILV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IMX/USDT:USDT",
+   "id": "IMXUSDT",
+   "base": "IMX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IN/USDT:USDT",
+   "id": "INUSDT",
+   "base": "IN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "INIT/USDT:USDT",
+   "id": "INITUSDT",
+   "base": "INIT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "INJ/USDT:USDT",
+   "id": "INJUSDT",
+   "base": "INJ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "INTC/USDT:USDT",
+   "id": "INTCUSDT",
+   "base": "INTC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "INTW/USDT:USDT",
+   "id": "INTWUSDT",
+   "base": "INTW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "INX/USDT:USDT",
+   "id": "INXUSDT",
+   "base": "INX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IO/USDT:USDT",
+   "id": "IOUSDT",
+   "base": "IO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IONQ/USDT:USDT",
+   "id": "IONQUSDT",
+   "base": "IONQ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IOST/USDT:USDT",
+   "id": "IOSTUSDT",
+   "base": "IOST",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IOTA/USDT:USDT",
+   "id": "IOTAUSDT",
+   "base": "IOTA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IOTX/USDT:USDT",
+   "id": "IOTXUSDT",
+   "base": "IOTX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IP/USDT:USDT",
+   "id": "IPUSDT",
+   "base": "IP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "IR/USDT:USDT",
+   "id": "IRUSDT",
+   "base": "IR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "IREN/USDT:USDT",
+   "id": "IRENUSDT",
+   "base": "IREN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IRYS/USDT:USDT",
+   "id": "IRYSUSDT",
+   "base": "IRYS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "IWM/USDT:USDT",
+   "id": "IWMUSDT",
+   "base": "IWM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "JASMY/USDT:USDT",
+   "id": "JASMYUSDT",
+   "base": "JASMY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "JCT/USDT:USDT",
+   "id": "JCTUSDT",
+   "base": "JCT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "JELLYJELLY/USDT:USDT",
+   "id": "JELLYJELLYUSDT",
+   "base": "JELLYJELLY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "JOE/USDT:USDT",
+   "id": "JOEUSDT",
+   "base": "JOE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "JPM/USDT:USDT",
+   "id": "JPMUSDT",
+   "base": "JPM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "JST/USDT:USDT",
+   "id": "JSTUSDT",
+   "base": "JST",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "JTO/USDT:USDT",
+   "id": "JTOUSDT",
+   "base": "JTO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "JUP/USDT:USDT",
+   "id": "JUPUSDT",
+   "base": "JUP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KAIA/USDT:USDT",
+   "id": "KAIAUSDT",
+   "base": "KAIA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KAITO/USDT:USDT",
+   "id": "KAITOUSDT",
+   "base": "KAITO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KAS/USDT:USDT",
+   "id": "KASUSDT",
+   "base": "KAS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KAT/USDT:USDT",
+   "id": "KATUSDT",
+   "base": "KAT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KAVA/USDT:USDT",
+   "id": "KAVAUSDT",
+   "base": "KAVA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KDA/USDT:USDT",
+   "id": "KDAUSDT",
+   "base": "KDA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "KERNEL/USDT:USDT",
+   "id": "KERNELUSDT",
+   "base": "KERNEL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KEY/USDT:USDT",
+   "id": "KEYUSDT",
+   "base": "KEY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "KGEN/USDT:USDT",
+   "id": "KGENUSDT",
+   "base": "KGEN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KITE/USDT:USDT",
+   "id": "KITEUSDT",
+   "base": "KITE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KLAC/USDT:USDT",
+   "id": "KLACUSDT",
+   "base": "KLAC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KLAY/USDT:USDT",
+   "id": "KLAYUSDT",
+   "base": "KLAY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "KMNO/USDT:USDT",
+   "id": "KMNOUSDT",
+   "base": "KMNO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KNC/USDT:USDT",
+   "id": "KNCUSDT",
+   "base": "KNC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KO/USDT:USDT",
+   "id": "KOUSDT",
+   "base": "KO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KODEX200/USDT:USDT",
+   "id": "KODEX200USDT",
+   "base": "KODEX200",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KOMA/USDT:USDT",
+   "id": "KOMAUSDT",
+   "base": "KOMA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KORU/USDT:USDT",
+   "id": "KORUUSDT",
+   "base": "KORU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KSM/USDT:USDT",
+   "id": "KSMUSDT",
+   "base": "KSM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KSTR/USDT:USDT",
+   "id": "KSTRUSDT",
+   "base": "KSTR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "KUAISHOU/USDT:USDT",
+   "id": "KUAISHOUUSDT",
+   "base": "KUAISHOU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LA/USDT:USDT",
+   "id": "LAUSDT",
+   "base": "LA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LAB/USDT:USDT",
+   "id": "LABUSDT",
+   "base": "LAB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LAYER/USDT:USDT",
+   "id": "LAYERUSDT",
+   "base": "LAYER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LDO/USDT:USDT",
+   "id": "LDOUSDT",
+   "base": "LDO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LEVER/USDT:USDT",
+   "id": "LEVERUSDT",
+   "base": "LEVER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "LGELECTRONICS/USDT:USDT",
+   "id": "LGELECTRONICSUSDT",
+   "base": "LGELECTRONICS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LIGHT/USDT:USDT",
+   "id": "LIGHTUSDT",
+   "base": "LIGHT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LINA/USDT:USDT",
+   "id": "LINAUSDT",
+   "base": "LINA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "LINEA/USDT:USDT",
+   "id": "LINEAUSDT",
+   "base": "LINEA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LINK/USDT:USDT",
+   "id": "LINKUSDT",
+   "base": "LINK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LISTA/USDT:USDT",
+   "id": "LISTAUSDT",
+   "base": "LISTA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LIT/USDT:USDT",
+   "id": "LITUSDT",
+   "base": "LIT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LITE/USDT:USDT",
+   "id": "LITEUSDT",
+   "base": "LITE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LLY/USDT:USDT",
+   "id": "LLYUSDT",
+   "base": "LLY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LOKA/USDT:USDT",
+   "id": "LOKAUSDT",
+   "base": "LOKA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "LOOM/USDT:USDT",
+   "id": "LOOMUSDT",
+   "base": "LOOM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "LPT/USDT:USDT",
+   "id": "LPTUSDT",
+   "base": "LPT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LQTY/USDT:USDT",
+   "id": "LQTYUSDT",
+   "base": "LQTY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LRC/USDT:USDT",
+   "id": "LRCUSDT",
+   "base": "LRC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "LRCX/USDT:USDT",
+   "id": "LRCXUSDT",
+   "base": "LRCX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LSK/USDT:USDT",
+   "id": "LSKUSDT",
+   "base": "LSK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LTC/USDT:USDT",
+   "id": "LTCUSDT",
+   "base": "LTC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LUMIA/USDT:USDT",
+   "id": "LUMIAUSDT",
+   "base": "LUMIA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LUNA2/USDT:USDT",
+   "id": "LUNA2USDT",
+   "base": "LUNA2",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LYN/USDT:USDT",
+   "id": "LYNUSDT",
+   "base": "LYN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "LYTE/USDT:USDT",
+   "id": "LYTEUSDT",
+   "base": "LYTE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "M/USDT:USDT",
+   "id": "MUSDT",
+   "base": "M",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MAGIC/USDT:USDT",
+   "id": "MAGICUSDT",
+   "base": "MAGIC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MAGMA/USDT:USDT",
+   "id": "MAGMAUSDT",
+   "base": "MAGMA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MANA/USDT:USDT",
+   "id": "MANAUSDT",
+   "base": "MANA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MANTA/USDT:USDT",
+   "id": "MANTAUSDT",
+   "base": "MANTA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MANTRA/USDT:USDT",
+   "id": "MANTRAUSDT",
+   "base": "MANTRA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MARA/USDT:USDT",
+   "id": "MARAUSDT",
+   "base": "MARA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MARSCOIN/USDT:USDT",
+   "id": "MARSCOINUSDT",
+   "base": "MARSCOIN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MASK/USDT:USDT",
+   "id": "MASKUSDT",
+   "base": "MASK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MAV/USDT:USDT",
+   "id": "MAVUSDT",
+   "base": "MAV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MAVIA/USDT:USDT",
+   "id": "MAVIAUSDT",
+   "base": "MAVIA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MBOX/USDT:USDT",
+   "id": "MBOXUSDT",
+   "base": "MBOX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "MCD/USDT:USDT",
+   "id": "MCDUSDT",
+   "base": "MCD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MDB/USDT:USDT",
+   "id": "MDBUSDT",
+   "base": "MDB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MDT/USDT:USDT",
+   "id": "MDTUSDT",
+   "base": "MDT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ME/USDT:USDT",
+   "id": "MEUSDT",
+   "base": "ME",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MEGA/USDT:USDT",
+   "id": "MEGAUSDT",
+   "base": "MEGA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MEITUAN/USDT:USDT",
+   "id": "MEITUANUSDT",
+   "base": "MEITUAN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MELANIA/USDT:USDT",
+   "id": "MELANIAUSDT",
+   "base": "MELANIA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MEME/USDT:USDT",
+   "id": "MEMEUSDT",
+   "base": "MEME",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MEMEFI/USDT:USDT",
+   "id": "MEMEFIUSDT",
+   "base": "MEMEFI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "MERL/USDT:USDT",
+   "id": "MERLUSDT",
+   "base": "MERL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MET/USDT:USDT",
+   "id": "METUSDT",
+   "base": "MET",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "META/USDT:USDT",
+   "id": "METAUSDT",
+   "base": "META",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "METIS/USDT:USDT",
+   "id": "METISUSDT",
+   "base": "METIS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MEW/USDT:USDT",
+   "id": "MEWUSDT",
+   "base": "MEW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MILK/USDT:USDT",
+   "id": "MILKUSDT",
+   "base": "MILK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "MINA/USDT:USDT",
+   "id": "MINAUSDT",
+   "base": "MINA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MINIMAX/USDT:USDT",
+   "id": "MINIMAXUSDT",
+   "base": "MINIMAX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MIRA/USDT:USDT",
+   "id": "MIRAUSDT",
+   "base": "MIRA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MITO/USDT:USDT",
+   "id": "MITOUSDT",
+   "base": "MITO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MKR/USDT:USDT",
+   "id": "MKRUSDT",
+   "base": "MKR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "MLN/USDT:USDT",
+   "id": "MLNUSDT",
+   "base": "MLN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "MMT/USDT:USDT",
+   "id": "MMTUSDT",
+   "base": "MMT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MOCA/USDT:USDT",
+   "id": "MOCAUSDT",
+   "base": "MOCA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MON/USDT:USDT",
+   "id": "MONUSDT",
+   "base": "MON",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MOODENG/USDT:USDT",
+   "id": "MOODENGUSDT",
+   "base": "MOODENG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MOONSHOT/USDT:USDT",
+   "id": "MOONSHOTUSDT",
+   "base": "MOONSHOT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MORPHO/USDT:USDT",
+   "id": "MORPHOUSDT",
+   "base": "MORPHO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MOVE/USDT:USDT",
+   "id": "MOVEUSDT",
+   "base": "MOVE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MOVR/USDT:USDT",
+   "id": "MOVRUSDT",
+   "base": "MOVR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MP/USDT:USDT",
+   "id": "MPUSDT",
+   "base": "MP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MRK/USDT:USDT",
+   "id": "MRKUSDT",
+   "base": "MRK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MRNA/USDT:USDT",
+   "id": "MRNAUSDT",
+   "base": "MRNA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MRVL/USDT:USDT",
+   "id": "MRVLUSDT",
+   "base": "MRVL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MSFT/USDT:USDT",
+   "id": "MSFTUSDT",
+   "base": "MSFT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MSTR/USDT:USDT",
+   "id": "MSTRUSDT",
+   "base": "MSTR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MSTU/USDT:USDT",
+   "id": "MSTUUSDT",
+   "base": "MSTU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MTL/USDT:USDT",
+   "id": "MTLUSDT",
+   "base": "MTL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MU/USDT:USDT",
+   "id": "MUUSDT",
+   "base": "MU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MUBARAK/USDT:USDT",
+   "id": "MUBARAKUSDT",
+   "base": "MUBARAK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MUU/USDT:USDT",
+   "id": "MUUUSDT",
+   "base": "MUU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MVLL/USDT:USDT",
+   "id": "MVLLUSDT",
+   "base": "MVLL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "MYRO/USDT:USDT",
+   "id": "MYROUSDT",
+   "base": "MYRO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "MYX/USDT:USDT",
+   "id": "MYXUSDT",
+   "base": "MYX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NAORIS/USDT:USDT",
+   "id": "NAORISUSDT",
+   "base": "NAORIS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NATGAS/USDT:USDT",
+   "id": "NATGASUSDT",
+   "base": "NATGAS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NAVER/USDT:USDT",
+   "id": "NAVERUSDT",
+   "base": "NAVER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NBIS/USDT:USDT",
+   "id": "NBISUSDT",
+   "base": "NBIS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NEAR/USDT:USDT",
+   "id": "NEARUSDT",
+   "base": "NEAR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NEIRO/USDT:USDT",
+   "id": "NEIROUSDT",
+   "base": "NEIRO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NEIROETH/USDT:USDT",
+   "id": "NEIROETHUSDT",
+   "base": "NEIROETH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "NEO/USDT:USDT",
+   "id": "NEOUSDT",
+   "base": "NEO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NET/USDT:USDT",
+   "id": "NETUSDT",
+   "base": "NET",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NEWT/USDT:USDT",
+   "id": "NEWTUSDT",
+   "base": "NEWT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NFLX/USDT:USDT",
+   "id": "NFLXUSDT",
+   "base": "NFLX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NFP/USDT:USDT",
+   "id": "NFPUSDT",
+   "base": "NFP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "NIGHT/USDT:USDT",
+   "id": "NIGHTUSDT",
+   "base": "NIGHT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NIL/USDT:USDT",
+   "id": "NILUSDT",
+   "base": "NIL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NKE/USDT:USDT",
+   "id": "NKEUSDT",
+   "base": "NKE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NKN/USDT:USDT",
+   "id": "NKNUSDT",
+   "base": "NKN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "NMR/USDT:USDT",
+   "id": "NMRUSDT",
+   "base": "NMR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NOK/USDT:USDT",
+   "id": "NOKUSDT",
+   "base": "NOK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NOM/USDT:USDT",
+   "id": "NOMUSDT",
+   "base": "NOM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NOT/USDT:USDT",
+   "id": "NOTUSDT",
+   "base": "NOT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NOW/USDT:USDT",
+   "id": "NOWUSDT",
+   "base": "NOW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NTRN/USDT:USDT",
+   "id": "NTRNUSDT",
+   "base": "NTRN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "NULS/USDT:USDT",
+   "id": "NULSUSDT",
+   "base": "NULS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "NVDA/USDT:USDT",
+   "id": "NVDAUSDT",
+   "base": "NVDA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NVDL/USDT:USDT",
+   "id": "NVDLUSDT",
+   "base": "NVDL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NVO/USDT:USDT",
+   "id": "NVOUSDT",
+   "base": "NVO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "NXPC/USDT:USDT",
+   "id": "NXPCUSDT",
+   "base": "NXPC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "O/USDT:USDT",
+   "id": "OUSDT",
+   "base": "O",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "OBOL/USDT:USDT",
+   "id": "OBOLUSDT",
+   "base": "OBOL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "OCEAN/USDT:USDT",
+   "id": "OCEANUSDT",
+   "base": "OCEAN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "OG/USDT:USDT",
+   "id": "OGUSDT",
+   "base": "OG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "OGN/USDT:USDT",
+   "id": "OGNUSDT",
+   "base": "OGN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "OKLO/USDT:USDT",
+   "id": "OKLOUSDT",
+   "base": "OKLO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "OL/USDT:USDT",
+   "id": "OLUSDT",
+   "base": "OL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "OM/USDT:USDT",
+   "id": "OMUSDT",
+   "base": "OM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "OMG/USDT:USDT",
+   "id": "OMGUSDT",
+   "base": "OMG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "OMNI/USDT:USDT",
+   "id": "OMNIUSDT",
+   "base": "OMNI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "ON/USDT:USDT",
+   "id": "ONUSDT",
+   "base": "ON",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ONDO/USDT:USDT",
+   "id": "ONDOUSDT",
+   "base": "ONDO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ONDS/USDT:USDT",
+   "id": "ONDSUSDT",
+   "base": "ONDS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ONE/USDT:USDT",
+   "id": "ONEUSDT",
+   "base": "ONE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ONG/USDT:USDT",
+   "id": "ONGUSDT",
+   "base": "ONG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ONT/USDT:USDT",
+   "id": "ONTUSDT",
+   "base": "ONT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "OP/USDT:USDT",
+   "id": "OPUSDT",
+   "base": "OP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "OPEN/USDT:USDT",
+   "id": "OPENUSDT",
+   "base": "OPEN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "OPENAI/USDT:USDT",
+   "id": "OPENAIUSDT",
+   "base": "OPENAI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "OPG/USDT:USDT",
+   "id": "OPGUSDT",
+   "base": "OPG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "OPN/USDT:USDT",
+   "id": "OPNUSDT",
+   "base": "OPN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ORBS/USDT:USDT",
+   "id": "ORBSUSDT",
+   "base": "ORBS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "ORCA/USDT:USDT",
+   "id": "ORCAUSDT",
+   "base": "ORCA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ORCL/USDT:USDT",
+   "id": "ORCLUSDT",
+   "base": "ORCL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ORDER/USDT:USDT",
+   "id": "ORDERUSDT",
+   "base": "ORDER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ORDI/USDT:USDT",
+   "id": "ORDIUSDT",
+   "base": "ORDI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "OURA/USDT:USDT",
+   "id": "OURAUSDT",
+   "base": "OURA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "OXT/USDT:USDT",
+   "id": "OXTUSDT",
+   "base": "OXT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "PANW/USDT:USDT",
+   "id": "PANWUSDT",
+   "base": "PANW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PARTI/USDT:USDT",
+   "id": "PARTIUSDT",
+   "base": "PARTI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PATH/USDT:USDT",
+   "id": "PATHUSDT",
+   "base": "PATH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PAXG/USDT:USDT",
+   "id": "PAXGUSDT",
+   "base": "PAXG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PAYP/USDT:USDT",
+   "id": "PAYPUSDT",
+   "base": "PAYP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PDD/USDT:USDT",
+   "id": "PDDUSDT",
+   "base": "PDD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PENDLE/USDT:USDT",
+   "id": "PENDLEUSDT",
+   "base": "PENDLE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PENG/USDT:USDT",
+   "id": "PENGUSDT",
+   "base": "PENG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PENGU/USDT:USDT",
+   "id": "PENGUUSDT",
+   "base": "PENGU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PEOPLE/USDT:USDT",
+   "id": "PEOPLEUSDT",
+   "base": "PEOPLE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PERP/USDT:USDT",
+   "id": "PERPUSDT",
+   "base": "PERP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "PHA/USDT:USDT",
+   "id": "PHAUSDT",
+   "base": "PHA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PHAROS/USDT:USDT",
+   "id": "PHAROSUSDT",
+   "base": "PHAROS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PHB/USDT:USDT",
+   "id": "PHBUSDT",
+   "base": "PHB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "PIEVERSE/USDT:USDT",
+   "id": "PIEVERSEUSDT",
+   "base": "PIEVERSE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PIPPIN/USDT:USDT",
+   "id": "PIPPINUSDT",
+   "base": "PIPPIN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PIXEL/USDT:USDT",
+   "id": "PIXELUSDT",
+   "base": "PIXEL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PLAY/USDT:USDT",
+   "id": "PLAYUSDT",
+   "base": "PLAY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PLTR/USDT:USDT",
+   "id": "PLTRUSDT",
+   "base": "PLTR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PLUME/USDT:USDT",
+   "id": "PLUMEUSDT",
+   "base": "PLUME",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PNUT/USDT:USDT",
+   "id": "PNUTUSDT",
+   "base": "PNUT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "POL/USDT:USDT",
+   "id": "POLUSDT",
+   "base": "POL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "POLYX/USDT:USDT",
+   "id": "POLYXUSDT",
+   "base": "POLYX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PONKE/USDT:USDT",
+   "id": "PONKEUSDT",
+   "base": "PONKE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "PONS/USDT:USDT",
+   "id": "PONSUSDT",
+   "base": "PONS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "POPCAT/USDT:USDT",
+   "id": "POPCATUSDT",
+   "base": "POPCAT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "POPMART/USDT:USDT",
+   "id": "POPMARTUSDT",
+   "base": "POPMART",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PORT3/USDT:USDT",
+   "id": "PORT3USDT",
+   "base": "PORT3",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "PORTAL/USDT:USDT",
+   "id": "PORTALUSDT",
+   "base": "PORTAL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "POWER/USDT:USDT",
+   "id": "POWERUSDT",
+   "base": "POWER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "POWR/USDT:USDT",
+   "id": "POWRUSDT",
+   "base": "POWR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PRL/USDT:USDT",
+   "id": "PRLUSDT",
+   "base": "PRL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PROM/USDT:USDT",
+   "id": "PROMUSDT",
+   "base": "PROM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PROMPT/USDT:USDT",
+   "id": "PROMPTUSDT",
+   "base": "PROMPT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "PROVE/USDT:USDT",
+   "id": "PROVEUSDT",
+   "base": "PROVE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PTB/USDT:USDT",
+   "id": "PTBUSDT",
+   "base": "PTB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PUFFER/USDT:USDT",
+   "id": "PUFFERUSDT",
+   "base": "PUFFER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "PUMP/USDT:USDT",
+   "id": "PUMPUSDT",
+   "base": "PUMP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PUMPBTC/USDT:USDT",
+   "id": "PUMPBTCUSDT",
+   "base": "PUMPBTC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "PUNDIX/USDT:USDT",
+   "id": "PUNDIXUSDT",
+   "base": "PUNDIX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PYPL/USDT:USDT",
+   "id": "PYPLUSDT",
+   "base": "PYPL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "PYTH/USDT:USDT",
+   "id": "PYTHUSDT",
+   "base": "PYTH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "Q/USDT:USDT",
+   "id": "QUSDT",
+   "base": "Q",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "QCOM/USDT:USDT",
+   "id": "QCOMUSDT",
+   "base": "QCOM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "QNT/USDT:USDT",
+   "id": "QNTUSDT",
+   "base": "QNT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "QNTX/USDT:USDT",
+   "id": "QNTXUSDT",
+   "base": "QNTX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "QQQ/USDT:USDT",
+   "id": "QQQUSDT",
+   "base": "QQQ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "QTUM/USDT:USDT",
+   "id": "QTUMUSDT",
+   "base": "QTUM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "QUICK/USDT:USDT",
+   "id": "QUICKUSDT",
+   "base": "QUICK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "RAD/USDT:USDT",
+   "id": "RADUSDT",
+   "base": "RAD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "RAM/USDT:USDT",
+   "id": "RAMUSDT",
+   "base": "RAM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RARE/USDT:USDT",
+   "id": "RAREUSDT",
+   "base": "RARE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RAVE/USDT:USDT",
+   "id": "RAVEUSDT",
+   "base": "RAVE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RAY/USDT:USDT",
+   "id": "RAYUSDT",
+   "base": "RAY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "RAYSOL/USDT:USDT",
+   "id": "RAYSOLUSDT",
+   "base": "RAYSOL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RDDT/USDT:USDT",
+   "id": "RDDTUSDT",
+   "base": "RDDT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RDNT/USDT:USDT",
+   "id": "RDNTUSDT",
+   "base": "RDNT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "RDW/USDT:USDT",
+   "id": "RDWUSDT",
+   "base": "RDW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RE/USDT:USDT",
+   "id": "REUSDT",
+   "base": "RE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RECALL/USDT:USDT",
+   "id": "RECALLUSDT",
+   "base": "RECALL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RED/USDT:USDT",
+   "id": "REDUSDT",
+   "base": "RED",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "REEF/USDT:USDT",
+   "id": "REEFUSDT",
+   "base": "REEF",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "REI/USDT:USDT",
+   "id": "REIUSDT",
+   "base": "REI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "REN/USDT:USDT",
+   "id": "RENUSDT",
+   "base": "REN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "RENDER/USDT:USDT",
+   "id": "RENDERUSDT",
+   "base": "RENDER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RESOLV/USDT:USDT",
+   "id": "RESOLVUSDT",
+   "base": "RESOLV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "REZ/USDT:USDT",
+   "id": "REZUSDT",
+   "base": "REZ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RIF/USDT:USDT",
+   "id": "RIFUSDT",
+   "base": "RIF",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RIVER/USDT:USDT",
+   "id": "RIVERUSDT",
+   "base": "RIVER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RIVN/USDT:USDT",
+   "id": "RIVNUSDT",
+   "base": "RIVN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RKLB/USDT:USDT",
+   "id": "RKLBUSDT",
+   "base": "RKLB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RLC/USDT:USDT",
+   "id": "RLCUSDT",
+   "base": "RLC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RLS/USDT:USDT",
+   "id": "RLSUSDT",
+   "base": "RLS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "ROBO/USDT:USDT",
+   "id": "ROBOUSDT",
+   "base": "ROBO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RONIN/USDT:USDT",
+   "id": "RONINUSDT",
+   "base": "RONIN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ROSE/USDT:USDT",
+   "id": "ROSEUSDT",
+   "base": "ROSE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RPL/USDT:USDT",
+   "id": "RPLUSDT",
+   "base": "RPL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RSR/USDT:USDT",
+   "id": "RSRUSDT",
+   "base": "RSR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RUM/USDT:USDT",
+   "id": "RUMUSDT",
+   "base": "RUM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RUNE/USDT:USDT",
+   "id": "RUNEUSDT",
+   "base": "RUNE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RVN/USDT:USDT",
+   "id": "RVNUSDT",
+   "base": "RVN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "RVV/USDT:USDT",
+   "id": "RVVUSDT",
+   "base": "RVV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "S/USDT:USDT",
+   "id": "SUSDT",
+   "base": "S",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SAFE/USDT:USDT",
+   "id": "SAFEUSDT",
+   "base": "SAFE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SAGA/USDT:USDT",
+   "id": "SAGAUSDT",
+   "base": "SAGA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SAHARA/USDT:USDT",
+   "id": "SAHARAUSDT",
+   "base": "SAHARA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SAMSUNG/USDT:USDT",
+   "id": "SAMSUNGUSDT",
+   "base": "SAMSUNG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SAMSUNGEM/USDT:USDT",
+   "id": "SAMSUNGEMUSDT",
+   "base": "SAMSUNGEM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SAND/USDT:USDT",
+   "id": "SANDUSDT",
+   "base": "SAND",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SANTOS/USDT:USDT",
+   "id": "SANTOSUSDT",
+   "base": "SANTOS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SAPIEN/USDT:USDT",
+   "id": "SAPIENUSDT",
+   "base": "SAPIEN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SC/USDT:USDT",
+   "id": "SCUSDT",
+   "base": "SC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "SCR/USDT:USDT",
+   "id": "SCRUSDT",
+   "base": "SCR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SCRT/USDT:USDT",
+   "id": "SCRTUSDT",
+   "base": "SCRT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "SECZ/USDT:USDT",
+   "id": "SECZUSDT",
+   "base": "SECZ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SEI/USDT:USDT",
+   "id": "SEIUSDT",
+   "base": "SEI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SENT/USDT:USDT",
+   "id": "SENTUSDT",
+   "base": "SENT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SFP/USDT:USDT",
+   "id": "SFPUSDT",
+   "base": "SFP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SHAZ/USDT:USDT",
+   "id": "SHAZUSDT",
+   "base": "SHAZ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SHELL/USDT:USDT",
+   "id": "SHELLUSDT",
+   "base": "SHELL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SHOP/USDT:USDT",
+   "id": "SHOPUSDT",
+   "base": "SHOP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SIGN/USDT:USDT",
+   "id": "SIGNUSDT",
+   "base": "SIGN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SIREN/USDT:USDT",
+   "id": "SIRENUSDT",
+   "base": "SIREN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SKATE/USDT:USDT",
+   "id": "SKATEUSDT",
+   "base": "SKATE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "SKDD/USDT:USDT",
+   "id": "SKDDUSDT",
+   "base": "SKDD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SKHY/USDT:USDT",
+   "id": "SKHYUSDT",
+   "base": "SKHY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SKHYNIX/USDT:USDT",
+   "id": "SKHYNIXUSDT",
+   "base": "SKHYNIX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SKL/USDT:USDT",
+   "id": "SKLUSDT",
+   "base": "SKL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SKR/USDT:USDT",
+   "id": "SKRUSDT",
+   "base": "SKR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SKUU/USDT:USDT",
+   "id": "SKUUUSDT",
+   "base": "SKUU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SKY/USDT:USDT",
+   "id": "SKYUSDT",
+   "base": "SKY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SKYAI/USDT:USDT",
+   "id": "SKYAIUSDT",
+   "base": "SKYAI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SLERF/USDT:USDT",
+   "id": "SLERFUSDT",
+   "base": "SLERF",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "SLP/USDT:USDT",
+   "id": "SLPUSDT",
+   "base": "SLP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SLX/USDT:USDT",
+   "id": "SLXUSDT",
+   "base": "SLX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SMCI/USDT:USDT",
+   "id": "SMCIUSDT",
+   "base": "SMCI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SMH/USDT:USDT",
+   "id": "SMHUSDT",
+   "base": "SMH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SNDK/USDT:USDT",
+   "id": "SNDKUSDT",
+   "base": "SNDK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SNOW/USDT:USDT",
+   "id": "SNOWUSDT",
+   "base": "SNOW",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SNPS/USDT:USDT",
+   "id": "SNPSUSDT",
+   "base": "SNPS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SNT/USDT:USDT",
+   "id": "SNTUSDT",
+   "base": "SNT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "SNX/USDT:USDT",
+   "id": "SNXUSDT",
+   "base": "SNX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SNXX/USDT:USDT",
+   "id": "SNXXUSDT",
+   "base": "SNXX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SOFI/USDT:USDT",
+   "id": "SOFIUSDT",
+   "base": "SOFI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SOL/USDT:USDT",
+   "id": "SOLUSDT",
+   "base": "SOL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SOLV/USDT:USDT",
+   "id": "SOLVUSDT",
+   "base": "SOLV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SOMI/USDT:USDT",
+   "id": "SOMIUSDT",
+   "base": "SOMI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SONIC/USDT:USDT",
+   "id": "SONICUSDT",
+   "base": "SONIC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SONY/USDT:USDT",
+   "id": "SONYUSDT",
+   "base": "SONY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SOON/USDT:USDT",
+   "id": "SOONUSDT",
+   "base": "SOON",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SOPH/USDT:USDT",
+   "id": "SOPHUSDT",
+   "base": "SOPH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SOXL/USDT:USDT",
+   "id": "SOXLUSDT",
+   "base": "SOXL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SOXS/USDT:USDT",
+   "id": "SOXSUSDT",
+   "base": "SOXS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SPACE/USDT:USDT",
+   "id": "SPACEUSDT",
+   "base": "SPACE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SPCX/USDT:USDT",
+   "id": "SPCXUSDT",
+   "base": "SPCX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SPELL/USDT:USDT",
+   "id": "SPELLUSDT",
+   "base": "SPELL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SPK/USDT:USDT",
+   "id": "SPKUSDT",
+   "base": "SPK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SPORTFUN/USDT:USDT",
+   "id": "SPORTFUNUSDT",
+   "base": "SPORTFUN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SPX/USDT:USDT",
+   "id": "SPXUSDT",
+   "base": "SPX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SPY/USDT:USDT",
+   "id": "SPYUSDT",
+   "base": "SPY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SQD/USDT:USDT",
+   "id": "SQDUSDT",
+   "base": "SQD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SQQQ/USDT:USDT",
+   "id": "SQQQUSDT",
+   "base": "SQQQ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SSV/USDT:USDT",
+   "id": "SSVUSDT",
+   "base": "SSV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "STABLE/USDT:USDT",
+   "id": "STABLEUSDT",
+   "base": "STABLE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "STAR/USDT:USDT",
+   "id": "STARUSDT",
+   "base": "STAR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "STBL/USDT:USDT",
+   "id": "STBLUSDT",
+   "base": "STBL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "STEEM/USDT:USDT",
+   "id": "STEEMUSDT",
+   "base": "STEEM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "STG/USDT:USDT",
+   "id": "STGUSDT",
+   "base": "STG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "STMX/USDT:USDT",
+   "id": "STMXUSDT",
+   "base": "STMX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "STO/USDT:USDT",
+   "id": "STOUSDT",
+   "base": "STO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "STORJ/USDT:USDT",
+   "id": "STORJUSDT",
+   "base": "STORJ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "STPT/USDT:USDT",
+   "id": "STPTUSDT",
+   "base": "STPT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "STRAX/USDT:USDT",
+   "id": "STRAXUSDT",
+   "base": "STRAX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "STRC/USDT:USDT",
+   "id": "STRCUSDT",
+   "base": "STRC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "STRK/USDT:USDT",
+   "id": "STRKUSDT",
+   "base": "STRK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "STX/USDT:USDT",
+   "id": "STXUSDT",
+   "base": "STX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "STXX/USDT:USDT",
+   "id": "STXXUSDT",
+   "base": "STXX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SUI/USDT:USDT",
+   "id": "SUIUSDT",
+   "base": "SUI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SUN/USDT:USDT",
+   "id": "SUNUSDT",
+   "base": "SUN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SUPER/USDT:USDT",
+   "id": "SUPERUSDT",
+   "base": "SUPER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SUSHI/USDT:USDT",
+   "id": "SUSHIUSDT",
+   "base": "SUSHI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SWARMS/USDT:USDT",
+   "id": "SWARMSUSDT",
+   "base": "SWARMS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SWELL/USDT:USDT",
+   "id": "SWELLUSDT",
+   "base": "SWELL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "SXT/USDT:USDT",
+   "id": "SXTUSDT",
+   "base": "SXT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SYN/USDT:USDT",
+   "id": "SYNUSDT",
+   "base": "SYN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SYRUP/USDT:USDT",
+   "id": "SYRUPUSDT",
+   "base": "SYRUP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "SYS/USDT:USDT",
+   "id": "SYSUSDT",
+   "base": "SYS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "T/USDT:USDT",
+   "id": "TUSDT",
+   "base": "T",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TA/USDT:USDT",
+   "id": "TAUSDT",
+   "base": "TA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TAC/USDT:USDT",
+   "id": "TACUSDT",
+   "base": "TAC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TAG/USDT:USDT",
+   "id": "TAGUSDT",
+   "base": "TAG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TAIKO/USDT:USDT",
+   "id": "TAIKOUSDT",
+   "base": "TAIKO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TAKE/USDT:USDT",
+   "id": "TAKEUSDT",
+   "base": "TAKE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TANSSI/USDT:USDT",
+   "id": "TANSSIUSDT",
+   "base": "TANSSI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "TAO/USDT:USDT",
+   "id": "TAOUSDT",
+   "base": "TAO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TBT/USDT:USDT",
+   "id": "TBTUSDT",
+   "base": "TBT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TEAM/USDT:USDT",
+   "id": "TEAMUSDT",
+   "base": "TEAM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TEM/USDT:USDT",
+   "id": "TEMUSDT",
+   "base": "TEM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TENCENT/USDT:USDT",
+   "id": "TENCENTUSDT",
+   "base": "TENCENT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TER/USDT:USDT",
+   "id": "TERUSDT",
+   "base": "TER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "THE/USDT:USDT",
+   "id": "THEUSDT",
+   "base": "THE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "THETA/USDT:USDT",
+   "id": "THETAUSDT",
+   "base": "THETA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TIA/USDT:USDT",
+   "id": "TIAUSDT",
+   "base": "TIA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TLM/USDT:USDT",
+   "id": "TLMUSDT",
+   "base": "TLM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TMF/USDT:USDT",
+   "id": "TMFUSDT",
+   "base": "TMF",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TNSR/USDT:USDT",
+   "id": "TNSRUSDT",
+   "base": "TNSR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TOKEN/USDT:USDT",
+   "id": "TOKENUSDT",
+   "base": "TOKEN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "TON/USDT:USDT",
+   "id": "TONUSDT",
+   "base": "TON",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "TOSHI/USDT:USDT",
+   "id": "TOSHIUSDT",
+   "base": "TOSHI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TOWNS/USDT:USDT",
+   "id": "TOWNSUSDT",
+   "base": "TOWNS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TQQQ/USDT:USDT",
+   "id": "TQQQUSDT",
+   "base": "TQQQ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TRADOOR/USDT:USDT",
+   "id": "TRADOORUSDT",
+   "base": "TRADOOR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TRB/USDT:USDT",
+   "id": "TRBUSDT",
+   "base": "TRB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TREE/USDT:USDT",
+   "id": "TREEUSDT",
+   "base": "TREE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TRIA/USDT:USDT",
+   "id": "TRIAUSDT",
+   "base": "TRIA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TROY/USDT:USDT",
+   "id": "TROYUSDT",
+   "base": "TROY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "TRU/USDT:USDT",
+   "id": "TRUUSDT",
+   "base": "TRU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "TRUMP/USDT:USDT",
+   "id": "TRUMPUSDT",
+   "base": "TRUMP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TRUST/USDT:USDT",
+   "id": "TRUSTUSDT",
+   "base": "TRUST",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TRUTH/USDT:USDT",
+   "id": "TRUTHUSDT",
+   "base": "TRUTH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TRX/USDT:USDT",
+   "id": "TRXUSDT",
+   "base": "TRX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TSLA/USDT:USDT",
+   "id": "TSLAUSDT",
+   "base": "TSLA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TSLL/USDT:USDT",
+   "id": "TSLLUSDT",
+   "base": "TSLL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TSM/USDT:USDT",
+   "id": "TSMUSDT",
+   "base": "TSM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TST/USDT:USDT",
+   "id": "TSTUSDT",
+   "base": "TST",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TTWO/USDT:USDT",
+   "id": "TTWOUSDT",
+   "base": "TTWO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TURBO/USDT:USDT",
+   "id": "TURBOUSDT",
+   "base": "TURBO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TURTLE/USDT:USDT",
+   "id": "TURTLEUSDT",
+   "base": "TURTLE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TUT/USDT:USDT",
+   "id": "TUTUSDT",
+   "base": "TUT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TWST/USDT:USDT",
+   "id": "TWSTUSDT",
+   "base": "TWST",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TWT/USDT:USDT",
+   "id": "TWTUSDT",
+   "base": "TWT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TXN/USDT:USDT",
+   "id": "TXNUSDT",
+   "base": "TXN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "TZA/USDT:USDT",
+   "id": "TZAUSDT",
+   "base": "TZA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "UAI/USDT:USDT",
+   "id": "UAIUSDT",
+   "base": "UAI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "UB/USDT:USDT",
+   "id": "UBUSDT",
+   "base": "UB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "UBER/USDT:USDT",
+   "id": "UBERUSDT",
+   "base": "UBER",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "UMA/USDT:USDT",
+   "id": "UMAUSDT",
+   "base": "UMA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "UNFI/USDT:USDT",
+   "id": "UNFIUSDT",
+   "base": "UNFI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "UNH/USDT:USDT",
+   "id": "UNHUSDT",
+   "base": "UNH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "UNI/USDT:USDT",
+   "id": "UNIUSDT",
+   "base": "UNI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "UNITREE/USDT:USDT",
+   "id": "UNITREEUSDT",
+   "base": "UNITREE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "URNM/USDT:USDT",
+   "id": "URNMUSDT",
+   "base": "URNM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "US/USDT:USDT",
+   "id": "USUSDT",
+   "base": "US",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "USAR/USDT:USDT",
+   "id": "USARUSDT",
+   "base": "USAR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "USDBRL/USDT:USDT",
+   "id": "USDBRLUSDT",
+   "base": "USDBRL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "USDC/USDT:USDT",
+   "id": "USDCUSDT",
+   "base": "USDC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "USDEX/USDT:USDT",
+   "id": "USDEXUSDT",
+   "base": "USDEX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "USELESS/USDT:USDT",
+   "id": "USELESSUSDT",
+   "base": "USELESS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "USTC/USDT:USDT",
+   "id": "USTCUSDT",
+   "base": "USTC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "USUAL/USDT:USDT",
+   "id": "USUALUSDT",
+   "base": "USUAL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "UVXY/USDT:USDT",
+   "id": "UVXYUSDT",
+   "base": "UVXY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "UXLINK/USDT:USDT",
+   "id": "UXLINKUSDT",
+   "base": "UXLINK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "V/USDT:USDT",
+   "id": "VUSDT",
+   "base": "V",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "VANA/USDT:USDT",
+   "id": "VANAUSDT",
+   "base": "VANA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "VANRY/USDT:USDT",
+   "id": "VANRYUSDT",
+   "base": "VANRY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "VELODROME/USDT:USDT",
+   "id": "VELODROMEUSDT",
+   "base": "VELODROME",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "VELVET/USDT:USDT",
+   "id": "VELVETUSDT",
+   "base": "VELVET",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "VET/USDT:USDT",
+   "id": "VETUSDT",
+   "base": "VET",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "VFY/USDT:USDT",
+   "id": "VFYUSDT",
+   "base": "VFY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "VIC/USDT:USDT",
+   "id": "VICUSDT",
+   "base": "VIC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "VIDT/USDT:USDT",
+   "id": "VIDTUSDT",
+   "base": "VIDT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "VINE/USDT:USDT",
+   "id": "VINEUSDT",
+   "base": "VINE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "VIRTUAL/USDT:USDT",
+   "id": "VIRTUALUSDT",
+   "base": "VIRTUAL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "VKTX/USDT:USDT",
+   "id": "VKTXUSDT",
+   "base": "VKTX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "VOXEL/USDT:USDT",
+   "id": "VOXELUSDT",
+   "base": "VOXEL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "VRT/USDT:USDT",
+   "id": "VRTUSDT",
+   "base": "VRT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "VST/USDT:USDT",
+   "id": "VSTUSDT",
+   "base": "VST",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "VTHO/USDT:USDT",
+   "id": "VTHOUSDT",
+   "base": "VTHO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "VVV/USDT:USDT",
+   "id": "VVVUSDT",
+   "base": "VVV",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "W/USDT:USDT",
+   "id": "WUSDT",
+   "base": "W",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "WAL/USDT:USDT",
+   "id": "WALUSDT",
+   "base": "WAL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "WAVES/USDT:USDT",
+   "id": "WAVESUSDT",
+   "base": "WAVES",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "WAXP/USDT:USDT",
+   "id": "WAXPUSDT",
+   "base": "WAXP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "WCT/USDT:USDT",
+   "id": "WCTUSDT",
+   "base": "WCT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "WDC/USDT:USDT",
+   "id": "WDCUSDT",
+   "base": "WDC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "WEN/USDT:USDT",
+   "id": "WENUSDT",
+   "base": "WEN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "WET/USDT:USDT",
+   "id": "WETUSDT",
+   "base": "WET",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "WIF/USDT:USDT",
+   "id": "WIFUSDT",
+   "base": "WIF",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "WLD/USDT:USDT",
+   "id": "WLDUSDT",
+   "base": "WLD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "WLFI/USDT:USDT",
+   "id": "WLFIUSDT",
+   "base": "WLFI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "WMT/USDT:USDT",
+   "id": "WMTUSDT",
+   "base": "WMT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "WOO/USDT:USDT",
+   "id": "WOOUSDT",
+   "base": "WOO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XAG/USDT:USDT",
+   "id": "XAGUSDT",
+   "base": "XAG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XAI/USDT:USDT",
+   "id": "XAIUSDT",
+   "base": "XAI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XAN/USDT:USDT",
+   "id": "XANUSDT",
+   "base": "XAN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XAU/USDT:USDT",
+   "id": "XAUUSDT",
+   "base": "XAU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XAUT/USDT:USDT",
+   "id": "XAUTUSDT",
+   "base": "XAUT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XBI/USDT:USDT",
+   "id": "XBIUSDT",
+   "base": "XBI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XCN/USDT:USDT",
+   "id": "XCNUSDT",
+   "base": "XCN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "XEM/USDT:USDT",
+   "id": "XEMUSDT",
+   "base": "XEM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "XLE/USDT:USDT",
+   "id": "XLEUSDT",
+   "base": "XLE",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XLM/USDT:USDT",
+   "id": "XLMUSDT",
+   "base": "XLM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XMR/USDT:USDT",
+   "id": "XMRUSDT",
+   "base": "XMR",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XNY/USDT:USDT",
+   "id": "XNYUSDT",
+   "base": "XNY",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XOM/USDT:USDT",
+   "id": "XOMUSDT",
+   "base": "XOM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XPD/USDT:USDT",
+   "id": "XPDUSDT",
+   "base": "XPD",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XPIN/USDT:USDT",
+   "id": "XPINUSDT",
+   "base": "XPIN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XPL/USDT:USDT",
+   "id": "XPLUSDT",
+   "base": "XPL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XPT/USDT:USDT",
+   "id": "XPTUSDT",
+   "base": "XPT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XRP/USDT:USDT",
+   "id": "XRPUSDT",
+   "base": "XRP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XTZ/USDT:USDT",
+   "id": "XTZUSDT",
+   "base": "XTZ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XVG/USDT:USDT",
+   "id": "XVGUSDT",
+   "base": "XVG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "XVS/USDT:USDT",
+   "id": "XVSUSDT",
+   "base": "XVS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "YALA/USDT:USDT",
+   "id": "YALAUSDT",
+   "base": "YALA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "YB/USDT:USDT",
+   "id": "YBUSDT",
+   "base": "YB",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "YFI/USDT:USDT",
+   "id": "YFIUSDT",
+   "base": "YFI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "YGG/USDT:USDT",
+   "id": "YGGUSDT",
+   "base": "YGG",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZAMA/USDT:USDT",
+   "id": "ZAMAUSDT",
+   "base": "ZAMA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZBT/USDT:USDT",
+   "id": "ZBTUSDT",
+   "base": "ZBT",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZCSH/USDT:USDT",
+   "id": "ZCSHUSDT",
+   "base": "ZCSH",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZEC/USDT:USDT",
+   "id": "ZECUSDT",
+   "base": "ZEC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZEN/USDT:USDT",
+   "id": "ZENUSDT",
+   "base": "ZEN",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZEREBRO/USDT:USDT",
+   "id": "ZEREBROUSDT",
+   "base": "ZEREBRO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZEST/USDT:USDT",
+   "id": "ZESTUSDT",
+   "base": "ZEST",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZETA/USDT:USDT",
+   "id": "ZETAUSDT",
+   "base": "ZETA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZHIPU/USDT:USDT",
+   "id": "ZHIPUUSDT",
+   "base": "ZHIPU",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZHONGJI/USDT:USDT",
+   "id": "ZHONGJIUSDT",
+   "base": "ZHONGJI",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZIL/USDT:USDT",
+   "id": "ZILUSDT",
+   "base": "ZIL",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZK/USDT:USDT",
+   "id": "ZKUSDT",
+   "base": "ZK",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZKC/USDT:USDT",
+   "id": "ZKCUSDT",
+   "base": "ZKC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZKJ/USDT:USDT",
+   "id": "ZKJUSDT",
+   "base": "ZKJ",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "ZKP/USDT:USDT",
+   "id": "ZKPUSDT",
+   "base": "ZKP",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZM/USDT:USDT",
+   "id": "ZMUSDT",
+   "base": "ZM",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZORA/USDT:USDT",
+   "id": "ZORAUSDT",
+   "base": "ZORA",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZRC/USDT:USDT",
+   "id": "ZRCUSDT",
+   "base": "ZRC",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": false,
+   "expiry": null
+  },
+  {
+   "symbol": "ZRO/USDT:USDT",
+   "id": "ZROUSDT",
+   "base": "ZRO",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZRX/USDT:USDT",
+   "id": "ZRXUSDT",
+   "base": "ZRX",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "ZS/USDT:USDT",
+   "id": "ZSUSDT",
+   "base": "ZS",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "\u54c8\u57fa\u7c73/USDT:USDT",
+   "id": "\u54c8\u57fa\u7c73USDT",
+   "base": "\u54c8\u57fa\u7c73",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "\u5e01\u5b89\u4eba\u751f/USDT:USDT",
+   "id": "\u5e01\u5b89\u4eba\u751fUSDT",
+   "base": "\u5e01\u5b89\u4eba\u751f",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86/USDT:USDT",
+   "id": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
+   "base": "\u6211\u8e0f\u9a6c\u6765\u4e86",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "\u725b\u6765/USDT:USDT",
+   "id": "\u725b\u6765USDT",
+   "base": "\u725b\u6765",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  },
+  {
+   "symbol": "\u9f99\u867e/USDT:USDT",
+   "id": "\u9f99\u867eUSDT",
+   "base": "\u9f99\u867e",
+   "quote": "USDT",
+   "settle": "USDT",
+   "active": true,
+   "expiry": null
+  }
+ ]
+}
