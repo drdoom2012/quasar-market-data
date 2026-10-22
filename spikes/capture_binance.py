@@ -4,6 +4,7 @@ Usage (network access, run by hand):
     uv run --group spike python spikes/capture_binance.py closed     # closed ranges + forming + survey
     uv run --group spike python spikes/capture_binance.py recheck    # >= 1 h after `closed`
     uv run --group spike python spikes/capture_binance.py probe      # ~15 min boundary smoke test
+    uv run --group spike python spikes/capture_binance.py probe-extended  # 10 boundaries, polls to 60 s (~50 min)
 
 Request recording mechanism: `Exchange.fetch` is wrapped on the instance and every outgoing
 (method, url) is appended to a log. CCXT's own `last_request_url` only holds the last request,
@@ -25,6 +26,8 @@ N = 100
 BTC = "BTC/USDT:USDT"
 PROBE_OFFSETS_S = [0.2, 1, 2, 3, 5, 8, 13]
 PROBE_BOUNDARIES = 3
+EXT_PROBE_OFFSETS_S = [*PROBE_OFFSETS_S, 20, 30, 45, 60]
+EXT_PROBE_BOUNDARIES = 10
 RECORDING = "wrapped Exchange.fetch on the instance; every outgoing (method, url) logged"
 
 
@@ -248,8 +251,9 @@ def run_recheck() -> None:
     write_json("btcusdt_5m_recheck.meta.json", meta)
 
 
-def run_probe() -> None:
+def run_probe(boundaries_count: int = PROBE_BOUNDARIES, offsets_s: list[float] | None = None, suffix: str = "") -> None:
     """Smoke test only: observes availability of just-closed candles; never stores a candle as data."""
+    offsets_s = offsets_s or PROBE_OFFSETS_S
     s = Session()
     market_id = s.ex.market(BTC)["id"]
     obs0, _ = s.time_observation()
@@ -258,9 +262,9 @@ def run_probe() -> None:
     boundaries: list[dict[str, Any]] = []
     all_obs: list[dict[str, Any]] = []
     all_requests: list[dict[str, str]] = []
-    for _ in range(PROBE_BOUNDARIES):
+    for _ in range(boundaries_count):
         polls: list[dict[str, Any]] = []
-        for offset_s in PROBE_OFFSETS_S:
+        for offset_s in offsets_s:
             target_wall_ms = boundary + int(offset_s * 1000) - offset_ms
             time.sleep(max(0.0, (target_wall_ms - time.time_ns() / 1e6) / 1000))
             obs, time_req = s.time_observation()
@@ -286,16 +290,20 @@ def run_probe() -> None:
         end_time_ms=boundaries[-1]["boundary_ms"],
         limit=3,
         method="fapiPublicGetKlines",
-        params={"symbol": market_id, "interval": INTERVAL, "limit": 3, "offsets_s": PROBE_OFFSETS_S},
+        params={"symbol": market_id, "interval": INTERVAL, "limit": 3, "offsets_s": offsets_s},
         requests=all_requests,
         time_observations=all_obs,
-        note="smoke test of 3 boundaries; not a reliability confirmation",
+        note=f"smoke test of {boundaries_count} boundaries; not a reliability confirmation",
     )
-    write_json("btcusdt_5m_boundary_probe.json", {"boundaries": boundaries})
-    write_json("btcusdt_5m_boundary_probe.meta.json", meta)
+    write_json(f"btcusdt_5m_boundary_probe{suffix}.json", {"boundaries": boundaries})
+    write_json(f"btcusdt_5m_boundary_probe{suffix}.meta.json", meta)
 
 
-COMMANDS = {"closed": run_closed, "recheck": run_recheck, "probe": run_probe}
+def run_probe_extended() -> None:
+    run_probe(EXT_PROBE_BOUNDARIES, EXT_PROBE_OFFSETS_S, "_extended")
+
+
+COMMANDS = {"closed": run_closed, "recheck": run_recheck, "probe": run_probe, "probe-extended": run_probe_extended}
 
 if __name__ == "__main__":
     if len(sys.argv) != 2 or sys.argv[1] not in COMMANDS:

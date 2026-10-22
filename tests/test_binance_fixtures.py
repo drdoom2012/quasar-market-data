@@ -180,3 +180,22 @@ def test_recheck_fixture_covers_the_same_range_one_hour_later() -> None:
     assert meta["market_id"] == first_meta["market_id"]
     assert meta["seconds_since_first_capture"] >= 3600
     assert all(len(row) == 12 for row in again)
+
+
+def test_extended_boundary_probe_fixture_shape() -> None:
+    probe = load_obj("btcusdt_5m_boundary_probe_extended.json")
+    boundaries = cast(list[dict[str, Any]], probe["boundaries"])
+    assert len(boundaries) == 10
+    starts = [b["boundary_ms"] for b in boundaries]
+    assert all(b - a == FIVE_MIN_MS for a, b in itertools.pairwise(starts))
+    for b in boundaries:
+        assert [p["offset_s"] for p in b["polls"]] == [0.2, 1, 2, 3, 5, 8, 13, 20, 30, 45, 60]
+        for p in b["polls"]:
+            row = p["row"]
+            assert row == "absent" or (len(row) == 12 and row[0] == b["boundary_ms"] - FIVE_MIN_MS)
+
+
+def test_extended_boundary_probe_meta_counts_match_polls() -> None:
+    meta = load_obj("btcusdt_5m_boundary_probe_extended.meta.json")
+    assert len(meta["time_observations"]) == 110
+    assert len(meta["requests"]) == 220
