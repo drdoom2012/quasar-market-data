@@ -1,6 +1,7 @@
 import sqlite3
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -10,6 +11,7 @@ from quasar_market_data.domain.validation import ValidatedCandle, require_valid
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
 from quasar_market_data.storage.schema import SchemaMismatchError
+from tests.collector.faulty_connection import Fault, open_faulty_writer
 from tests.domain.test_candle import OPEN_MS, make_candle, make_key
 from tests.typing_helpers import untyped
 
@@ -221,3 +223,116 @@ def test_write_after_close_raises(db: Path) -> None:
 def _typing_contract(writer: CandleWriter, plain: Candle) -> None:
     """Never called. mypy must reject a plain ``Candle``; an unused ignore fails ``make typecheck``."""
     writer.write([plain], ingested_at_ms=AT)  # type: ignore[list-item]
+
+
+# --- Task 2: failure semantics -------------------------------------------------------------------------------
+
+
+def test_candle_cast_to_validated_but_invalid_is_rejected_whole_batch(
+    writer: CandleWriter, writer_conn: sqlite3.Connection
+) -> None:
+    bad = cast(ValidatedCandle, make_candle(key=make_key(open_time_ms=OPEN_MS + 300_000), high="98", low="99"))
+    with pytest.raises(CandleWriteError, match=r"candles\[1\]"):
+        writer.write([valid(0), bad], ingested_at_ms=AT)
+    assert stored_rows(writer_conn) == []
+    assert not writer_conn.in_transaction
+
+
+def test_failure_midway_rolls_back_the_whole_batch(writer: CandleWriter, writer_conn: sqlite3.Connection) -> None:
+    writer_conn.execute(
+        "CREATE TEMP TRIGGER boom BEFORE INSERT ON main.candles "
+        f"WHEN NEW.open_time_ms = {OPEN_MS + 300_000} BEGIN SELECT RAISE(ABORT, 'boom'); END"
+    )
+    batch = [valid(0), valid(1), valid(2)]
+    with pytest.raises(CandleWriteError) as caught:
+        writer.write(batch, ingested_at_ms=AT)
+    assert isinstance(caught.value.__cause__, sqlite3.Error)
+    assert stored_rows(writer_conn) == []
+    assert not writer_conn.in_transaction
+
+    writer_conn.execute("DROP TRIGGER boom")
+    assert writer.write(batch, ingested_at_ms=AT) == WriteReport(3, 0, ())
+
+
+def test_commit_failure_rolls_back_and_the_batch_can_be_retried(db: Path) -> None:
+    conn = open_faulty_writer(db, AT)
+    try:
+        writer = CandleWriter(conn)
+        conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("injected COMMIT failure")))
+        batch = [valid(0), valid(1)]
+        with pytest.raises(CandleWriteError) as caught:
+            writer.write(batch, ingested_at_ms=AT)
+        assert isinstance(caught.value.__cause__, sqlite3.OperationalError)
+        assert stored_rows(conn) == []
+        assert not conn.in_transaction
+
+        assert writer.write(batch, ingested_at_ms=AT) == WriteReport(2, 0, ())
+    finally:
+        conn.close()
+
+
+def test_failed_rollback_makes_the_writer_unusable(db: Path) -> None:
+    conn = open_faulty_writer(db, AT)
+    try:
+        writer = CandleWriter(conn)
+        conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("injected COMMIT failure")))
+        conn.faults.append(Fault("ROLLBACK", sqlite3.OperationalError("injected ROLLBACK failure")))
+        with pytest.raises(CandleWriteError):
+            writer.write([valid(0)], ingested_at_ms=AT)
+
+        statements_before = len(conn.statements)
+        with pytest.raises(CandleWriteError, match="unusable"):
+            writer.write([valid(1)], ingested_at_ms=AT)
+        assert len(conn.statements) == statements_before  # the database was not touched again
+
+        other = sqlite3.connect(db)
+        try:
+            assert other.execute("SELECT count(*) FROM candles").fetchone() == (0,)
+        finally:
+            other.close()
+        writer.close()  # closing still works
+    finally:
+        conn.close()
+
+
+def test_interrupt_midway_rolls_back_and_propagates_unchanged(db: Path) -> None:
+    conn = open_faulty_writer(db, AT)
+    try:
+        writer = CandleWriter(conn)
+        interrupt = KeyboardInterrupt()
+        conn.faults.append(Fault("INSERT INTO candles", interrupt, nth=2))
+        with pytest.raises(KeyboardInterrupt) as caught:
+            writer.write([valid(0), valid(1), valid(2)], ingested_at_ms=AT)
+        assert caught.value is interrupt
+        assert stored_rows(conn) == []
+        assert not conn.in_transaction
+
+        assert writer.write([valid(0)], ingested_at_ms=AT) == WriteReport(1, 0, ())
+    finally:
+        conn.close()
+
+
+def test_busy_database_raises_and_writes_nothing(db: Path, writer_conn: sqlite3.Connection) -> None:
+    busy = open_writer(db, busy_timeout_ms=0)
+    blocker = sqlite3.connect(db, isolation_level=None)
+    try:
+        writer = CandleWriter(busy)
+        blocker.execute("BEGIN IMMEDIATE")
+        with pytest.raises(CandleWriteError) as caught:
+            writer.write([valid(0), valid(1)], ingested_at_ms=AT)
+        assert isinstance(caught.value.__cause__, sqlite3.OperationalError)
+        assert not busy.in_transaction
+        assert stored_rows(writer_conn) == []
+
+        blocker.execute("ROLLBACK")
+        assert writer.write([valid(0), valid(1)], ingested_at_ms=AT) == WriteReport(2, 0, ())
+    finally:
+        blocker.close()
+        busy.close()
+
+
+def test_writer_is_usable_after_a_failed_batch(writer: CandleWriter, writer_conn: sqlite3.Connection) -> None:
+    bad = cast(ValidatedCandle, make_candle(high="98", low="99"))
+    with pytest.raises(CandleWriteError):
+        writer.write([bad], ingested_at_ms=AT)
+    assert writer.write([valid(0)], ingested_at_ms=AT) == WriteReport(1, 0, ())

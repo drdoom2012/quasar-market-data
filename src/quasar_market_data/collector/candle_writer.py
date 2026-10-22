@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from quasar_market_data.domain.candle import Candle
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
-from quasar_market_data.domain.validation import ValidatedCandle
+from quasar_market_data.domain.validation import ValidatedCandle, validate_candle
 from quasar_market_data.storage.connection import StorageError
 from quasar_market_data.storage.schema import verify_schema
 
@@ -69,25 +69,44 @@ class CandleWriter:
         verify_schema(conn)
         self._conn = conn
         self._closed = False
+        self._unusable = False
 
     def close(self) -> None:
         self._closed = True
         self._conn.close()
 
+    def _roll_back(self) -> None:
+        """Roll back an open transaction; if that fails or the transaction survives, never use the connection again."""
+        if self._conn.in_transaction:
+            try:
+                self._conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                self._unusable = True
+                return
+        if self._conn.in_transaction:
+            self._unusable = True
+
     def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
         if self._closed:
             raise CandleWriteError("writer is closed")
+        if self._unusable:
+            raise CandleWriteError("writer is unusable after a failed rollback; close and reopen")
         ensure_timestamp_ms(ingested_at_ms, "ingested_at_ms")
         for index, candle in enumerate(candles):
             if type(candle) is not Candle:
                 raise TypeError(f"candles[{index}] must be a Candle, got {type(candle).__name__}")
+        for index, candle in enumerate(candles):  # a cast to ValidatedCandle proves nothing at runtime
+            violations = validate_candle(candle)
+            if violations:
+                codes = ", ".join(str(violation.code) for violation in violations)
+                raise CandleWriteError(f"candles[{index}] is not valid ({codes}); nothing was written")
         if not candles:
             return WriteReport(0, 0, ())
 
         inserted = duplicates = 0
         conflicts: list[CandleConflict] = []
-        self._conn.execute("BEGIN IMMEDIATE")
         try:
+            self._conn.execute("BEGIN IMMEDIATE")
             for candle in candles:
                 key = candle.key
                 slot = (key.venue, key.symbol, key.timeframe.label, key.open_time_ms)
@@ -99,11 +118,13 @@ class CandleWriter:
                 if tuple(stored_values) == values:
                     duplicates += 1
                 else:
-                    stored = Candle(key, *stored_values)
-                    conflicts.append(CandleConflict(incoming=candle, stored=stored))
+                    conflicts.append(CandleConflict(incoming=candle, stored=Candle(key, *stored_values)))
             self._conn.execute("COMMIT")
+        except sqlite3.Error as error:
+            self._roll_back()
+            suffix = "; the writer is now unusable" if self._unusable else ""
+            raise CandleWriteError(f"batch failed and nothing was written: {error}{suffix}") from error
         except BaseException:
-            if self._conn.in_transaction:
-                self._conn.execute("ROLLBACK")
+            self._roll_back()
             raise
         return WriteReport(inserted, duplicates, tuple(conflicts))
