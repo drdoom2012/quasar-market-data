@@ -47,6 +47,7 @@ source_modules = ["quasar_market_data.domain"]
 forbidden_modules = [
     "quasar_market_data.collector",
     "quasar_market_data.api",
+    "quasar_market_data.storage",
     "ccxt",
     "fastapi",
     "talib",
@@ -57,3 +58,15 @@ forbidden_modules = [
 name = "collector and api are independent"
 type = "independence"
 modules = ["quasar_market_data.collector", "quasar_market_data.api"]
+
+[[tool.importlinter.contracts]]
+name = "storage is a leaf below collector and api"
+type = "forbidden"
+source_modules = ["quasar_market_data.storage"]
+forbidden_modules = [
+    "quasar_market_data.collector",
+    "quasar_market_data.api",
+    "ccxt",
+    "fastapi",
+    "talib",
+]

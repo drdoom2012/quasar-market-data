@@ -17,6 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "quasar_market_data"
 DOMAIN_CONTRACT = "domain is pure"
 INDEPENDENCE_CONTRACT = "collector and api are independent"
+STORAGE_CONTRACT = "storage is a leaf below collector and api"
+CONTRACT_NAMES = (DOMAIN_CONTRACT, INDEPENDENCE_CONTRACT, STORAGE_CONTRACT)
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,14 @@ CASES = {
     "domain_importing_collector_fails_domain_is_pure": Case(
         "domain/_probe.py", f"import {PACKAGE}.collector\n", DOMAIN_CONTRACT
     ),
+    "domain_importing_storage_fails_domain_is_pure": Case(
+        "domain/_probe.py", f"import {PACKAGE}.storage\n", DOMAIN_CONTRACT
+    ),
+    "storage_importing_collector_fails_storage_leaf": Case(
+        "storage/_probe.py", f"import {PACKAGE}.collector\n", STORAGE_CONTRACT
+    ),
+    "storage_importing_api_fails_storage_leaf": Case("storage/_probe.py", f"import {PACKAGE}.api\n", STORAGE_CONTRACT),
+    "storage_importing_sqlite3_is_allowed": Case("storage/_probe.py", "import sqlite3\n", None),
 }
 
 
@@ -83,14 +93,15 @@ def test_import_contracts_on_copied_package(tmp_path: Path, case: Case) -> None:
 
     if case.broken_contract is None:
         assert result.returncode == 0, output
-        assert "2 kept, 0 broken" in output
+        assert f"{len(CONTRACT_NAMES)} kept, 0 broken" in output
         return
 
     assert result.returncode != 0, output
     assert "1 broken" in output, output
     assert f"{case.broken_contract} BROKEN" in output, output
-    kept = INDEPENDENCE_CONTRACT if case.broken_contract == DOMAIN_CONTRACT else DOMAIN_CONTRACT
-    assert f"{kept} KEPT" in output, output
+    for kept in CONTRACT_NAMES:
+        if kept != case.broken_contract:
+            assert f"{kept} KEPT" in output, output
     assert case.probe_path is not None
     assert Path(case.probe_path).stem in output  # the injected module appears in the reported chain
 
