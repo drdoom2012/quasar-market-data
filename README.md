@@ -16,6 +16,10 @@ Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned in `.python-ver
 
 CI runs `make check` on pull requests and pushes to `main`.
 
+## Local hook
+
+`.claude/settings.json` registers one Claude Code `PreToolUse` hook (matcher `Bash`) that runs `scripts/hooks/pre_commit_check.sh`. When the Bash command contains the text "git commit", it runs `make check` first and blocks the call (exit 2, tail of the output on stderr) if it fails. This is a local convenience only; CI is the authoritative gate. Override the command with `QUASAR_CHECK_CMD` (used by `tests/test_pre_commit_hook.py`).
+
 Console scripts: `quasar-collector` and `quasar-api` (`--version` only for now).
 
 ## Tool scope
