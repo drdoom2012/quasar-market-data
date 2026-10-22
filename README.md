@@ -41,7 +41,7 @@ Console scripts: `quasar-collector` and `quasar-api` (`--version` only for now).
 | import-linter `forbidden` contract | `domain` reaching `collector`, `api`, `ccxt`, `fastapi`, `talib` or `sqlite3`, directly or through other modules in the graph | what happens inside third-party package internals |
 | import-linter `independence` contract | `collector` ↔ `api` imports, direct or via other graph modules | — |
 
-Verified by probes (temporary files, since removed):
+The import-linter contracts are proven by automated negative tests (`tests/test_import_contracts_negative.py`): each case copies the package and `pyproject.toml` into a temp directory, injects a violating module into the copy and asserts that `lint-imports` fails naming the broken contract. The original manual probes (temporary files, since removed):
 
 - **P1** `domain/_probe_direct.py` with `import sqlite3`: both `make imports` (forbidden contract) and the AST test failed.
 - **P2** `domain/_probe_indirect.py` importing a helper outside `domain` that imports `collector.cli`: `make imports` reported the chain `domain._probe_indirect -> _probe_helper -> collector.cli`; the AST test failed on the first import (`from quasar_market_data import _probe_helper`).
