@@ -1,6 +1,6 @@
 # ADR-0001: Binance ingestion fidelity and closed-candle rules
 
-- **Status:** Proposed (awaiting user approval; S3 starts only after approval)
+- **Status:** Accepted (approved by the user on 2026-10-22: Proposals P-1 to P-9 as written, including the amendments to D-C and W-4)
 - **Date:** 2026-10-22
 - **Scope:** Binance USDT-M perpetuals, 5m candles, OHLCV + `turnover`.
 - **Spec:** `docs/superpowers/specs/2026-10-20-market-data-v1-design.md` (§6.1–6.3, D4)
@@ -27,7 +27,7 @@ The service must store exact decimal OHLCV, persist only confirmed closed candle
 
 **Approved during S2 (2026-10-22, by the user):** index 7 maps to `turnover` on the basis of the evidence in E-6 (see limitation there); the extended boundary probe (10 boundaries, polls to 60 s) was requested after the first smoke test.
 
-## Part 2 — Proposals (derived from evidence; need approval)
+## Part 2 — Proposals (derived from evidence; approved by the user on 2026-10-22)
 
 **P-1 Decimal source (a).** Persist the raw endpoint strings as canonical decimal text. Unified values are never used for storage. In the sample, unified output matched raw numerically (E-2), but **absence of differences in a sample is not evidence that float output is generally lossless**; persisting raw strings rests on exactness by construction.
 
