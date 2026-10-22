@@ -14,6 +14,8 @@ Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned in `.python-ver
 | `make imports` | `lint-imports` (module boundaries; configured in a later task) |
 | `make check` | `lint`, `typecheck`, `imports`, `test` |
 
+CI runs `make check` on pull requests and pushes to `main`.
+
 Console scripts: `quasar-collector` and `quasar-api` (`--version` only for now).
 
 ## Tool scope
