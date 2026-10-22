@@ -33,3 +33,25 @@ src = ["src", "tests"]
 [tool.mypy]
 strict = true
 files = ["src", "tests"]
+
+[tool.importlinter]
+root_package = "quasar_market_data"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "domain is pure"
+type = "forbidden"
+source_modules = ["quasar_market_data.domain"]
+forbidden_modules = [
+    "quasar_market_data.collector",
+    "quasar_market_data.api",
+    "ccxt",
+    "fastapi",
+    "talib",
+    "sqlite3",
+]
+
+[[tool.importlinter.contracts]]
+name = "collector and api are independent"
+type = "independence"
+modules = ["quasar_market_data.collector", "quasar_market_data.api"]
