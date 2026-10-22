@@ -70,3 +70,9 @@ forbidden_modules = [
     "fastapi",
     "talib",
 ]
+
+[[tool.importlinter.contracts]]
+name = "only the collector migrates"
+type = "forbidden"
+source_modules = ["quasar_market_data.api"]
+forbidden_modules = ["quasar_market_data.storage.migrate"]

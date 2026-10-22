@@ -18,7 +18,8 @@ PACKAGE = "quasar_market_data"
 DOMAIN_CONTRACT = "domain is pure"
 INDEPENDENCE_CONTRACT = "collector and api are independent"
 STORAGE_CONTRACT = "storage is a leaf below collector and api"
-CONTRACT_NAMES = (DOMAIN_CONTRACT, INDEPENDENCE_CONTRACT, STORAGE_CONTRACT)
+MIGRATE_CONTRACT = "only the collector migrates"
+CONTRACT_NAMES = (DOMAIN_CONTRACT, INDEPENDENCE_CONTRACT, STORAGE_CONTRACT, MIGRATE_CONTRACT)
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,10 @@ CASES = {
         "storage/_probe.py", f"import {PACKAGE}.collector\n", STORAGE_CONTRACT
     ),
     "storage_importing_api_fails_storage_leaf": Case("storage/_probe.py", f"import {PACKAGE}.api\n", STORAGE_CONTRACT),
+    "api_importing_storage_migrate_fails_only_the_collector_migrates": Case(
+        "api/_probe.py", f"import {PACKAGE}.storage.migrate\n", MIGRATE_CONTRACT
+    ),
+    "api_importing_storage_schema_is_allowed": Case("api/_probe.py", f"import {PACKAGE}.storage.schema\n", None),
     "storage_importing_sqlite3_is_allowed": Case("storage/_probe.py", "import sqlite3\n", None),
 }
 
