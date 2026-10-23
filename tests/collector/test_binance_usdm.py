@@ -165,6 +165,24 @@ def test_the_base_url_must_be_exactly_the_usdm_fapi_endpoint(url: object) -> Non
     assert exchange.closed
 
 
+MISSING_URLS: dict[str, object] = {
+    "no_urls": None,
+    "empty_urls": {},
+    "no_fapi_public": {"api": {}},
+    "api_not_a_mapping": {"api": None},
+}
+
+
+@pytest.mark.parametrize("urls", MISSING_URLS.values(), ids=MISSING_URLS.keys())
+def test_a_missing_base_url_is_a_source_error_not_a_crash(urls: object) -> None:
+    exchange = FakeExchange()
+    exchange.urls = urls  # type: ignore[assignment]
+    with pytest.raises(SourceError, match="fapiPublic"):
+        open_source(exchange)
+    assert exchange.called("load_markets") == 0
+    assert exchange.closed
+
+
 def test_the_exact_usdm_endpoint_is_accepted() -> None:
     exchange = FakeExchange()
     open_source(exchange)

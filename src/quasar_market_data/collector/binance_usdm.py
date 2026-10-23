@@ -75,7 +75,11 @@ class BinanceUsdmSource:
     async def open(cls, exchange: Any | None = None) -> "BinanceUsdmSource":
         client = ccxt_async.binanceusdm() if exchange is None else exchange
         try:
-            _require_fapi_base_url(client.urls["api"]["fapiPublic"])
+            try:
+                base_url = client.urls["api"]["fapiPublic"]
+            except (KeyError, TypeError) as error:
+                raise SourceError("the CCXT client has no urls['api']['fapiPublic'] base URL") from error
+            _require_fapi_base_url(base_url)
             await client.load_markets()
         except SourceError:
             await client.close()
