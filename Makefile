@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck imports check
+.PHONY: test lint typecheck imports check live
 
 test:
 	uv run pytest
@@ -13,3 +13,7 @@ imports:
 	uv run lint-imports
 
 check: lint typecheck imports test
+
+# Hits Binance public endpoints; not part of `check`.
+live:
+	uv run pytest -m live tests/live -v
