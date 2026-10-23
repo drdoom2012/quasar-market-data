@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Independent Python market data service for Quasar."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["ccxt>=4.5.89"]
 
 [project.scripts]
 quasar-collector = "quasar_market_data.collector.cli:main"
@@ -12,9 +12,6 @@ quasar-api = "quasar_market_data.api.cli:main"
 
 [dependency-groups]
 dev = ["pytest", "ruff", "mypy", "import-linter"]
-spike = [
-    "ccxt>=4.5.89",
-]
 
 [build-system]
 requires = ["hatchling"]
@@ -35,6 +32,10 @@ src = ["src", "tests"]
 [tool.mypy]
 strict = true
 files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["ccxt", "ccxt.*"]
+ignore_missing_imports = true  # ccxt ships no py.typed
 
 [tool.importlinter]
 root_package = "quasar_market_data"
@@ -76,3 +77,10 @@ name = "only the collector migrates"
 type = "forbidden"
 source_modules = ["quasar_market_data.api"]
 forbidden_modules = ["quasar_market_data.storage.migrate"]
+
+[[tool.importlinter.contracts]]
+name = "ccxt is imported only by the Binance adapter"
+type = "forbidden"
+source_modules = ["quasar_market_data.api", "quasar_market_data.collector"]
+forbidden_modules = ["ccxt"]
+ignore_imports = ["quasar_market_data.collector.binance_usdm -> ccxt"]

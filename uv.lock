@@ -1269,6 +1269,9 @@ wheels = [
 name = "quasar-market-data"
 version = "0.1.0"
 source = { editable = "." }
+dependencies = [
+    { name = "ccxt" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1277,11 +1280,9 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
 ]
-spike = [
-    { name = "ccxt" },
-]
 
 [package.metadata]
+requires-dist = [{ name = "ccxt", specifier = ">=4.5.89" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1290,7 +1291,6 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
 ]
-spike = [{ name = "ccxt", specifier = ">=4.5.89" }]
 
 [[package]]
 name = "requests"

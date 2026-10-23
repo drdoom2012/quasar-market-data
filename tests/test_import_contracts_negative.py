@@ -19,7 +19,8 @@ DOMAIN_CONTRACT = "domain is pure"
 INDEPENDENCE_CONTRACT = "collector and api are independent"
 STORAGE_CONTRACT = "storage is a leaf below collector and api"
 MIGRATE_CONTRACT = "only the collector migrates"
-CONTRACT_NAMES = (DOMAIN_CONTRACT, INDEPENDENCE_CONTRACT, STORAGE_CONTRACT, MIGRATE_CONTRACT)
+CCXT_CONTRACT = "ccxt is imported only by the Binance adapter"
+CONTRACT_NAMES = (DOMAIN_CONTRACT, INDEPENDENCE_CONTRACT, STORAGE_CONTRACT, MIGRATE_CONTRACT, CCXT_CONTRACT)
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,19 @@ CASES = {
     "storage_importing_api_fails_storage_leaf": Case("storage/_probe.py", f"import {PACKAGE}.api\n", STORAGE_CONTRACT),
     "api_importing_storage_migrate_fails_only_the_collector_migrates": Case(
         "api/_probe.py", f"import {PACKAGE}.storage.migrate\n", MIGRATE_CONTRACT
+    ),
+    "api_importing_ccxt_fails_the_adapter_only_contract": Case("api/_probe.py", "import ccxt\n", CCXT_CONTRACT),
+    "api_importing_ccxt_async_support_fails_the_adapter_only_contract": Case(
+        "api/_probe.py", "import ccxt.async_support\n", CCXT_CONTRACT
+    ),
+    "collector_module_importing_ccxt_fails_the_adapter_only_contract": Case(
+        "collector/_probe.py", "import ccxt\n", CCXT_CONTRACT
+    ),
+    "collector_module_importing_ccxt_async_support_fails_the_adapter_only_contract": Case(
+        "collector/_probe.py", "import ccxt.async_support\n", CCXT_CONTRACT
+    ),
+    "collector_importing_the_adapter_module_is_allowed": Case(
+        "collector/_probe.py", f"import {PACKAGE}.collector.binance_usdm\n", None
     ),
     "api_importing_storage_schema_is_allowed": Case("api/_probe.py", f"import {PACKAGE}.storage.schema\n", None),
     "storage_importing_sqlite3_is_allowed": Case("storage/_probe.py", "import sqlite3\n", None),
