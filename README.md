@@ -22,7 +22,7 @@ CI is configured to run `make check` on pull requests and pushes to `main` (not 
 
 `storage` holds the SQLite layer shared by both processes: connection factories (`connection.py`), the schema identity and read-side check the API uses (`schema.py`), and the numbered SQL migrations with the runner that only the Collector imports (`migrate.py`). The schema is specified in `docs/adr/0002-sqlite-schema-v1.md`.
 
-`collector` holds `CandleWriter` and `AsyncCandleWriter`: they persist validated candles idempotently and atomically, and report (not record) a re-delivered candle that differs from the stored one. They do not check that a candle is closed; passing only closed candles is the caller's job (S9). The API cannot import them.
+`collector` holds `CandleWriter` and `AsyncCandleWriter`: they persist validated candles idempotently and atomically, and record a re-delivered candle that differs from the stored one in `candle_conflicts` (the stored candle is never changed). They do not check that a candle is closed; passing only closed candles is the caller's job (S9). The API cannot import them.
 
 Console scripts: `quasar-collector` and `quasar-api` (`--version` only for now).
 
