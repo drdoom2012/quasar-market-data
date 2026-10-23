@@ -1,8 +1,8 @@
 """Idempotent, atomic persistence of validated candles into schema v1 (ADR-0002).
 
 What this writer guarantees: a candle that passes ``validate_candle`` is inserted once; re-delivering the
-same candle is a no-op; a re-delivered candle whose values differ is never written over and is reported
-back (recording it in ``candle_conflicts`` is S8); a batch is one transaction.
+same candle is a no-op; a re-delivered candle whose values differ is never written over, is reported back
+and is recorded in ``candle_conflicts`` (idempotently, in the batch's transaction); a batch is one transaction.
 
 What it does NOT guarantee: that a candle is closed. ``ValidatedCandle`` proves validity only, so a
 validated but still-forming candle is persisted like any other. Passing only eligible candles
@@ -23,6 +23,10 @@ _INSERT = (
     "INSERT INTO candles (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume, turnover,"
     " ingested_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING"
 )
+_RECORD_CONFLICT = (
+    "INSERT INTO candle_conflicts (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume, turnover,"
+    " first_seen_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING"
+)
 _SELECT_STORED = (
     "SELECT open, high, low, close, volume, turnover FROM candles"
     " WHERE venue = ? AND symbol = ? AND timeframe = ? AND open_time_ms = ?"
@@ -35,7 +39,10 @@ class CandleWriteError(StorageError):
 
 @dataclass(frozen=True)
 class CandleConflict:
-    """A re-delivered candle whose values differ from the stored one; nothing was written for it."""
+    """A re-delivered candle whose values differ from the stored one.
+
+    The stored candle is untouched; ``incoming`` is recorded in ``candle_conflicts`` in the batch's transaction.
+    """
 
     incoming: Candle
     stored: Candle
@@ -118,6 +125,7 @@ class CandleWriter:
                 if tuple(stored_values) == values:
                     duplicates += 1
                 else:
+                    self._conn.execute(_RECORD_CONFLICT, (*slot, *values, ingested_at_ms))
                     conflicts.append(CandleConflict(incoming=candle, stored=Candle(key, *stored_values)))
             self._conn.execute("COMMIT")
         except sqlite3.Error as error:

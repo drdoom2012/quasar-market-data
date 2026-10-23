@@ -16,6 +16,10 @@ from tests.domain.test_candle import OPEN_MS, make_candle, make_key
 from tests.typing_helpers import untyped
 
 AT = 1_792_677_000_000
+SELECT_CONFLICTS = (
+    "SELECT venue, symbol, timeframe, open_time_ms, open, high, low, close, volume, turnover, first_seen_at_ms"
+    " FROM candle_conflicts ORDER BY conflict_id"
+)
 SELECT_ROWS = "SELECT open_time_ms, open, high, low, close, volume, turnover, ingested_at_ms FROM candles ORDER BY 1"
 
 
@@ -44,6 +48,27 @@ def writer(writer_conn: sqlite3.Connection) -> CandleWriter:
 
 def stored_rows(conn: sqlite3.Connection) -> list[tuple[object, ...]]:
     return conn.execute(SELECT_ROWS).fetchall()
+
+
+def conflict_rows(conn: sqlite3.Connection) -> list[tuple[object, ...]]:
+    return conn.execute(SELECT_CONFLICTS).fetchall()
+
+
+def conflict_row(candle: Candle, first_seen_at_ms: int) -> tuple[object, ...]:
+    key = candle.key
+    return (
+        key.venue,
+        key.symbol,
+        key.timeframe.label,
+        key.open_time_ms,
+        candle.open,
+        candle.high,
+        candle.low,
+        candle.close,
+        candle.volume,
+        candle.turnover,
+        first_seen_at_ms,
+    )
 
 
 def test_new_candles_are_inserted_with_exact_text(writer: CandleWriter, writer_conn: sqlite3.Connection) -> None:
@@ -115,6 +140,7 @@ def test_conflict_does_not_stop_the_rest_of_the_batch(writer: CandleWriter, writ
     report = writer.write([valid(0), conflicting, valid(2)], ingested_at_ms=AT)
     assert (report.inserted, report.duplicates, len(report.conflicts)) == (2, 0, 1)
     assert [row[0] for row in stored_rows(writer_conn)] == [OPEN_MS, OPEN_MS + 300_000, OPEN_MS + 600_000]
+    assert conflict_rows(writer_conn) == [conflict_row(conflicting, AT)]
 
 
 def test_duplicate_inside_one_batch(writer: CandleWriter) -> None:
@@ -126,11 +152,90 @@ def test_duplicate_inside_one_batch(writer: CandleWriter) -> None:
     assert changed != candle
 
 
-def test_conflicts_record_nothing_yet(writer: CandleWriter, writer_conn: sqlite3.Connection) -> None:
-    # Recording a conflict in candle_conflicts is S8; S7 only reports it.
+@pytest.mark.parametrize(("stored_fields", "incoming_fields"), DIFFERENCES.values(), ids=DIFFERENCES.keys())
+def test_differing_duplicate_is_recorded_not_overwritten(
+    writer: CandleWriter,
+    writer_conn: sqlite3.Connection,
+    stored_fields: dict[str, str | None],
+    incoming_fields: dict[str, str | None],
+) -> None:
+    stored, incoming = valid(0, **stored_fields), valid(0, **incoming_fields)
+    writer.write([stored], ingested_at_ms=AT)
+    before = stored_rows(writer_conn)
+
+    writer.write([incoming], ingested_at_ms=AT + 1)
+
+    assert conflict_rows(writer_conn) == [conflict_row(incoming, AT + 1)]
+    assert stored_rows(writer_conn) == before
+
+
+@pytest.mark.parametrize("turnover", [None, "5"])
+def test_same_conflict_delivered_again_is_recorded_once(db: Path, turnover: str | None) -> None:
+    stored, conflicting = valid(0, turnover=turnover), valid(0, close="100.1", turnover=turnover)
+    first = open_writer(db)
+    migrate(first, applied_at_ms=AT)
+    try:
+        writer = CandleWriter(first)
+        writer.write([stored], ingested_at_ms=AT)
+        reports = [writer.write([conflicting], ingested_at_ms=AT + n) for n in (1, 2)]
+    finally:
+        first.close()
+
+    second = open_writer(db)  # restart: a new connection and a new writer on the same file
+    try:
+        reports.append(CandleWriter(second).write([conflicting], ingested_at_ms=AT + 3))
+        assert conflict_rows(second) == [conflict_row(conflicting, AT + 1)]
+    finally:
+        second.close()
+    assert [report.conflicts for report in reports] == [(CandleConflict(conflicting, stored),)] * 3
+
+
+def test_each_distinct_wrong_value_is_kept(writer: CandleWriter, writer_conn: sqlite3.Connection) -> None:
+    stored, first, second = valid(0), valid(0, close="100.1"), valid(0, close="100.2")
+    writer.write([stored], ingested_at_ms=AT)
+    before = stored_rows(writer_conn)
+    writer.write([first], ingested_at_ms=AT + 1)
+    writer.write([second], ingested_at_ms=AT + 2)
+    assert conflict_rows(writer_conn) == [conflict_row(first, AT + 1), conflict_row(second, AT + 2)]
+    assert stored_rows(writer_conn) == before
+
+
+def test_original_after_a_conflict_is_a_duplicate_and_records_nothing(
+    writer: CandleWriter, writer_conn: sqlite3.Connection
+) -> None:
+    original = valid(0)
+    writer.write([original], ingested_at_ms=AT)
+    writer.write([valid(0, close="100.1")], ingested_at_ms=AT + 1)
+    assert writer.write([original], ingested_at_ms=AT + 2) == WriteReport(0, 1, ())
+    assert len(conflict_rows(writer_conn)) == 1
+
+
+def test_conflict_inside_one_batch_is_recorded(writer: CandleWriter, writer_conn: sqlite3.Connection) -> None:
+    candle, changed = valid(0), valid(0, close="100.1")
+    report = writer.write([candle, changed], ingested_at_ms=AT)
+    assert (report.inserted, report.duplicates, report.conflicts) == (1, 0, (CandleConflict(changed, candle),))
+    assert conflict_rows(writer_conn) == [conflict_row(changed, AT)]
+
+    report = writer.write([candle, changed, changed], ingested_at_ms=AT + 1)
+    assert (report.inserted, report.duplicates, len(report.conflicts)) == (0, 1, 2)
+    assert conflict_rows(writer_conn) == [conflict_row(changed, AT)]
+
+
+def test_writer_never_issues_overwriting_statements(writer: CandleWriter, writer_conn: sqlite3.Connection) -> None:
     writer.write([valid(0)], ingested_at_ms=AT)
-    writer.write([valid(0, close="100.1")], ingested_at_ms=AT)
-    assert writer_conn.execute("SELECT count(*) FROM candle_conflicts").fetchone() == (0,)
+    statements: list[str] = []
+    writer_conn.set_trace_callback(statements.append)
+    writer.write([valid(1), valid(0), valid(0, close="100.1")], ingested_at_ms=AT + 1)
+    writer_conn.set_trace_callback(None)
+
+    upper = [statement.upper() for statement in statements]
+    assert any(statement.startswith("INSERT INTO CANDLE_CONFLICTS") for statement in upper)
+    for statement in upper:
+        assert "OR IGNORE" not in statement
+        assert "OR REPLACE" not in statement
+        assert not statement.startswith(("UPDATE", "DELETE"))
+        if statement.startswith("INSERT"):
+            assert "ON CONFLICT DO NOTHING" in statement
 
 
 def test_writer_does_not_check_eligibility(writer: CandleWriter, writer_conn: sqlite3.Connection) -> None:
