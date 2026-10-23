@@ -9,7 +9,13 @@ from typing import Any
 import pytest
 
 from quasar_market_data.collector.async_candle_writer import AsyncCandleWriter, WriterState
-from quasar_market_data.collector.candle_writer import CandleConflict, CandleWriteError, CandleWriter, WriteReport
+from quasar_market_data.collector.candle_writer import (
+    CandleConflict,
+    CandleWriteError,
+    CandleWriteOutcomeUnknown,
+    CandleWriter,
+    WriteReport,
+)
 from quasar_market_data.domain.validation import ValidatedCandle
 from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import migrate
@@ -141,6 +147,26 @@ def test_conflict_is_recorded_through_the_async_writer(db: Path) -> None:
         assert conn.execute("SELECT close FROM candles").fetchall() == [(stored.close,)]
     finally:
         conn.close()
+
+
+def test_unknown_outcome_reaches_the_async_caller_unchanged(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    unknown = CandleWriteOutcomeUnknown("outcome unknown")
+
+    def raise_unknown(self: CandleWriter, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
+        raise unknown
+
+    monkeypatch.setattr(CandleWriter, "write", raise_unknown)
+
+    async def scenario() -> BaseException:
+        writer = await AsyncCandleWriter.open(db)
+        try:
+            with pytest.raises(CandleWriteOutcomeUnknown) as caught:
+                await writer.write([valid(0)], ingested_at_ms=AT)
+            return caught.value
+        finally:
+            await writer.close()
+
+    assert asyncio.run(scenario()) is unknown
 
 
 def test_concurrent_writes_are_serialized_and_none_is_lost(db: Path) -> None:

@@ -5,7 +5,13 @@ from typing import cast
 
 import pytest
 
-from quasar_market_data.collector.candle_writer import CandleConflict, CandleWriteError, CandleWriter, WriteReport
+from quasar_market_data.collector.candle_writer import (
+    CandleConflict,
+    CandleWriteError,
+    CandleWriteOutcomeUnknown,
+    CandleWriter,
+    WriteReport,
+)
 from quasar_market_data.domain.candle import Candle
 from quasar_market_data.domain.validation import ValidatedCandle, require_valid
 from quasar_market_data.storage.connection import open_reader, open_writer
@@ -352,6 +358,7 @@ def test_failure_midway_rolls_back_the_whole_batch(writer: CandleWriter, writer_
     with pytest.raises(CandleWriteError) as caught:
         writer.write(batch, ingested_at_ms=AT)
     assert isinstance(caught.value.__cause__, sqlite3.Error)
+    assert type(caught.value) is CandleWriteError  # certain: COMMIT was never issued and the rollback is confirmed
     assert stored_rows(writer_conn) == []
     assert not writer_conn.in_transaction
 
@@ -368,6 +375,7 @@ def test_commit_failure_rolls_back_and_the_batch_can_be_retried(db: Path) -> Non
         with pytest.raises(CandleWriteError) as caught:
             writer.write(batch, ingested_at_ms=AT)
         assert isinstance(caught.value.__cause__, sqlite3.OperationalError)
+        assert type(caught.value) is CandleWriteError  # the transaction stayed open and the rollback is confirmed
         assert stored_rows(conn) == []
         assert not conn.in_transaction
 
@@ -418,13 +426,90 @@ def test_commit_failure_after_a_recorded_conflict_leaves_no_record(db: Path) -> 
         conn.close()
 
 
+def test_a_real_commit_failure_is_rolled_back_and_certain(
+    writer: CandleWriter, writer_conn: sqlite3.Connection
+) -> None:
+    # A deferred foreign key makes the real COMMIT fail while the transaction stays open (no injected fault).
+    writer_conn.execute("PRAGMA foreign_keys=ON")
+    writer_conn.execute("CREATE TEMP TABLE parent (id INTEGER PRIMARY KEY)")
+    writer_conn.execute("CREATE TEMP TABLE child (pid INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)")
+    writer_conn.execute("CREATE TEMP TRIGGER fk AFTER INSERT ON main.candles BEGIN INSERT INTO child VALUES (999); END")
+    batch = [valid(0), valid(1)]
+
+    with pytest.raises(CandleWriteError) as caught:
+        writer.write(batch, ingested_at_ms=AT)
+
+    assert type(caught.value) is CandleWriteError  # not the unknown-outcome subclass
+    assert isinstance(caught.value.__cause__, sqlite3.IntegrityError)
+    assert stored_rows(writer_conn) == []
+    assert not writer_conn.in_transaction
+
+    writer_conn.execute("DROP TRIGGER fk")
+    assert writer.write(batch, ingested_at_ms=AT) == WriteReport(2, 0, ())
+
+
+def test_a_commit_that_took_effect_but_reported_an_error_is_an_unknown_outcome(db: Path) -> None:
+    conn = open_faulty_writer(db, AT)
+    try:
+        writer = CandleWriter(conn)
+        conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), after_execution=True))
+        batch = [valid(0), valid(1)]
+
+        with pytest.raises(CandleWriteOutcomeUnknown) as caught:
+            writer.write(batch, ingested_at_ms=AT)
+
+        assert len(stored_rows(conn)) == 2  # the batch IS stored: "nothing was written" would have been false
+        assert "nothing was written" not in str(caught.value)
+        assert "unknown" in str(caught.value)
+        assert writer.write(batch, ingested_at_ms=AT + 1) == WriteReport(0, 2, ())  # still usable, re-sending is safe
+    finally:
+        conn.close()
+
+
+def test_an_unconfirmed_rollback_before_commit_is_not_committed_but_keeps_the_lock_until_close(db: Path) -> None:
+    conn = open_faulty_writer(db, AT)
+    try:
+        writer = CandleWriter(conn)
+        conn.execute(
+            "CREATE TEMP TRIGGER boom BEFORE INSERT ON main.candles "
+            f"WHEN NEW.open_time_ms = {OPEN_MS + 300_000} BEGIN SELECT RAISE(ABORT, 'boom'); END"
+        )
+        conn.faults.append(Fault("ROLLBACK", sqlite3.OperationalError("rollback failed")))
+
+        with pytest.raises(CandleWriteError) as caught:
+            writer.write([valid(0), valid(1), valid(2)], ingested_at_ms=AT)
+
+        assert type(caught.value) is CandleWriteError  # persistence is certain: COMMIT was never issued
+        assert "COMMIT" not in conn.statements
+        assert "not committed" in str(caught.value)
+        assert "unusable" in str(caught.value)
+        assert "rolled back" not in str(caught.value)
+        statements_before = len(conn.statements)
+        with pytest.raises(CandleWriteError, match="unusable"):
+            writer.write([valid(3)], ingested_at_ms=AT)
+        assert len(conn.statements) == statements_before
+
+        other = sqlite3.connect(db, timeout=0, isolation_level=None)
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                other.execute("BEGIN IMMEDIATE")  # the connection state is not clean: it still holds the lock
+            writer.close()  # closing the connection discards the open transaction
+            other.execute("BEGIN IMMEDIATE")
+            assert other.execute("SELECT count(*) FROM candles").fetchone() == (0,)  # and nothing was ever durable
+            other.execute("ROLLBACK")
+        finally:
+            other.close()
+    finally:
+        conn.close()
+
+
 def test_failed_rollback_makes_the_writer_unusable(db: Path) -> None:
     conn = open_faulty_writer(db, AT)
     try:
         writer = CandleWriter(conn)
         conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("injected COMMIT failure")))
         conn.faults.append(Fault("ROLLBACK", sqlite3.OperationalError("injected ROLLBACK failure")))
-        with pytest.raises(CandleWriteError):
+        with pytest.raises(CandleWriteOutcomeUnknown):
             writer.write([valid(0)], ingested_at_ms=AT)
 
         statements_before = len(conn.statements)

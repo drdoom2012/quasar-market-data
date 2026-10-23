@@ -37,6 +37,13 @@ class CandleWriteError(StorageError):
     """A batch could not be written, or the writer cannot be used."""
 
 
+class CandleWriteOutcomeUnknown(CandleWriteError):
+    """``COMMIT`` failed in a way that leaves it unknown whether the (atomic) batch is stored.
+
+    The batch is stored completely or not at all; re-sending the same batch is safe.
+    """
+
+
 @dataclass(frozen=True)
 class CandleConflict:
     """A re-delivered candle whose values differ from the stored one.
@@ -93,6 +100,31 @@ class CandleWriter:
         if self._conn.in_transaction:
             self._unusable = True
 
+    def _failure(self, error: sqlite3.Error, commit_issued: bool) -> CandleWriteError:
+        """Roll back and classify a failed batch: persistence (stored or not) and connection state are separate facts.
+
+        Before ``COMMIT`` was issued the batch cannot have become durable, even if the rollback cannot be
+        confirmed (then only the connection's transaction state is unknown). A ``COMMIT`` that failed with the
+        transaction gone, or whose rollback cannot be confirmed, may have taken effect: the outcome is unknown.
+        """
+        was_open = self._conn.in_transaction
+        self._roll_back()
+        confirmed = not self._unusable
+        if not commit_issued:
+            if confirmed:
+                return CandleWriteError(f"batch rolled back; nothing was written: {error}")
+            return CandleWriteError(
+                "batch not committed; rollback could not be confirmed; this connection is unusable and may hold "
+                f"the write lock until it is closed: {error}"
+            )
+        if was_open and confirmed:
+            return CandleWriteError(f"COMMIT failed and was rolled back; nothing was written: {error}")
+        suffix = "; the writer is now unusable" if self._unusable else ""
+        return CandleWriteOutcomeUnknown(
+            f"batch outcome unknown: COMMIT failed ({error}); the batch is atomic, so it is either completely stored "
+            f"or not stored; re-sending the same batch is safe{suffix}"
+        )
+
     def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
         if self._closed:
             raise CandleWriteError("writer is closed")
@@ -112,6 +144,7 @@ class CandleWriter:
 
         inserted = duplicates = 0
         conflicts: list[CandleConflict] = []
+        commit_issued = False
         try:
             self._conn.execute("BEGIN IMMEDIATE")
             for candle in candles:
@@ -127,11 +160,10 @@ class CandleWriter:
                 else:
                     self._conn.execute(_RECORD_CONFLICT, (*slot, *values, ingested_at_ms))
                     conflicts.append(CandleConflict(incoming=candle, stored=Candle(key, *stored_values)))
+            commit_issued = True
             self._conn.execute("COMMIT")
         except sqlite3.Error as error:
-            self._roll_back()
-            suffix = "; the writer is now unusable" if self._unusable else ""
-            raise CandleWriteError(f"batch failed and nothing was written: {error}{suffix}") from error
+            raise self._failure(error, commit_issued) from error
         except BaseException:
             self._roll_back()
             raise

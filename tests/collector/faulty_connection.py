@@ -10,12 +10,17 @@ from quasar_market_data.storage.migrate import migrate
 
 @dataclass
 class Fault:
-    """Raise ``exception`` when the ``nth`` statement starting with ``prefix`` is executed."""
+    """Raise ``exception`` when the ``nth`` statement starting with ``prefix`` is executed.
+
+    By default the statement is not executed. With ``after_execution`` it runs first and then raises, like a
+    ``COMMIT`` that took effect but reported an error.
+    """
 
     prefix: str
     exception: BaseException
     nth: int = 1
     seen: int = 0
+    after_execution: bool = False
 
     def hit(self, sql: str) -> bool:
         if not sql.startswith(self.prefix):
@@ -34,6 +39,8 @@ class FaultyConnection(sqlite3.Connection):
         self.statements.append(sql)
         for fault in self.faults:
             if fault.hit(sql):
+                if fault.after_execution:
+                    super().execute(sql, *args)
                 raise fault.exception
         return super().execute(sql, *args)
 
