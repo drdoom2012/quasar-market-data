@@ -376,6 +376,48 @@ def test_commit_failure_rolls_back_and_the_batch_can_be_retried(db: Path) -> Non
         conn.close()
 
 
+def test_failure_while_recording_a_conflict_rolls_back_the_whole_batch(
+    writer: CandleWriter, writer_conn: sqlite3.Connection
+) -> None:
+    stored, conflicting = valid(1), valid(1, close="100.1")
+    writer.write([stored], ingested_at_ms=AT)
+    before = stored_rows(writer_conn)
+    writer_conn.execute(
+        "CREATE TEMP TRIGGER boom BEFORE INSERT ON main.candle_conflicts BEGIN SELECT RAISE(ABORT, 'boom'); END"
+    )
+    batch = [valid(0), conflicting, valid(2)]
+    with pytest.raises(CandleWriteError) as caught:
+        writer.write(batch, ingested_at_ms=AT + 1)
+    assert isinstance(caught.value.__cause__, sqlite3.Error)
+    assert stored_rows(writer_conn) == before
+    assert conflict_rows(writer_conn) == []
+    assert not writer_conn.in_transaction
+
+    writer_conn.execute("DROP TRIGGER boom")
+    report = writer.write(batch, ingested_at_ms=AT + 1)
+    assert (report.inserted, report.duplicates, report.conflicts) == (2, 0, (CandleConflict(conflicting, stored),))
+    assert conflict_rows(writer_conn) == [conflict_row(conflicting, AT + 1)]
+
+
+def test_commit_failure_after_a_recorded_conflict_leaves_no_record(db: Path) -> None:
+    conn = open_faulty_writer(db, AT)
+    try:
+        writer = CandleWriter(conn)
+        stored, conflicting = valid(1), valid(1, close="100.1")
+        writer.write([stored], ingested_at_ms=AT)
+        conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("injected COMMIT failure")))
+        batch = [valid(0), conflicting]
+        with pytest.raises(CandleWriteError):
+            writer.write(batch, ingested_at_ms=AT + 1)
+        assert [row[0] for row in stored_rows(conn)] == [OPEN_MS + 300_000]
+        assert conflict_rows(conn) == []
+
+        assert writer.write(batch, ingested_at_ms=AT + 1).inserted == 1
+        assert conflict_rows(conn) == [conflict_row(conflicting, AT + 1)]
+    finally:
+        conn.close()
+
+
 def test_failed_rollback_makes_the_writer_unusable(db: Path) -> None:
     conn = open_faulty_writer(db, AT)
     try:

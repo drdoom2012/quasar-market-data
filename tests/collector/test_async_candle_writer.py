@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from quasar_market_data.collector.async_candle_writer import AsyncCandleWriter, WriterState
-from quasar_market_data.collector.candle_writer import CandleWriteError, CandleWriter, WriteReport
+from quasar_market_data.collector.candle_writer import CandleConflict, CandleWriteError, CandleWriter, WriteReport
 from quasar_market_data.domain.validation import ValidatedCandle
 from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import migrate
@@ -117,6 +117,30 @@ def test_all_writes_run_on_one_dedicated_thread_off_the_event_loop(db: Path, mon
     assert len(idents) == 3
     assert len(set(idents)) == 1
     assert idents[0] != loop_thread
+
+
+def test_conflict_is_recorded_through_the_async_writer(db: Path) -> None:
+    stored, conflicting = valid(0), valid(0, close="100.1")
+
+    async def scenario() -> tuple[WriteReport, WriteReport]:
+        writer = await AsyncCandleWriter.open(db)
+        try:
+            await writer.write([stored], ingested_at_ms=AT)
+            first = await writer.write([conflicting], ingested_at_ms=AT + 1)
+            return first, await writer.write([conflicting], ingested_at_ms=AT + 2)
+        finally:
+            await writer.close()
+
+    first, second = asyncio.run(scenario())
+    assert first.conflicts == second.conflicts == (CandleConflict(conflicting, stored),)
+    conn = sqlite3.connect(db)
+    try:
+        assert conn.execute("SELECT close, first_seen_at_ms FROM candle_conflicts").fetchall() == [
+            (conflicting.close, AT + 1)
+        ]
+        assert conn.execute("SELECT close FROM candles").fetchall() == [(stored.close,)]
+    finally:
+        conn.close()
 
 
 def test_concurrent_writes_are_serialized_and_none_is_lost(db: Path) -> None:
