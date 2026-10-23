@@ -120,7 +120,7 @@ CREATE INDEX candle_conflicts_slot ON candle_conflicts (venue, symbol, timeframe
 ```
 
 - A row is the **rejected** observation. The accepted one stays untouched in `candles` (immutable), so a conflict is always "stored candle vs this row", found through the identity columns. No foreign key: the identity is the link, and the trigger design never deletes either side.
-- Recording is idempotent and restart-safe: `INSERT OR IGNORE` against the unique index. The same wrong value seen again (every recheck, every restart) adds nothing. Index uses `coalesce(turnover, '')` because SQLite treats `NULL`s as distinct in unique indexes; `''` cannot be a valid turnover (E-4).
+- Recording is idempotent and restart-safe: `INSERT … ON CONFLICT DO NOTHING` against the unique index (wording amended 2026-10-23 with the user's approval: this ADR first said `INSERT OR IGNORE`, which also swallows CHECK violations, see `test_insert_or_ignore_would_swallow_an_invalid_conflict_record`; the idempotence behavior is unchanged). The same wrong value seen again (every recheck, every restart) adds nothing. Index uses `coalesce(turnover, '')` because SQLite treats `NULL`s as distinct in unique indexes; `''` cannot be a valid turnover (E-4).
 - The row holds no reason code: the reason is always "values differ from the stored candle". Which fields differ is derivable by comparing the two rows.
 - Same identity with a different value appearing a second time gives a second row; the table is the full history of distinct disagreeing observations.
 
@@ -178,7 +178,7 @@ This ADR approves schema version 1 only. Collector checkpoints (S15), health dat
 ## Consequences
 
 - S6 can be planned: it creates version 1 exactly as written, the runner, and negative tests for P-1 to P-8. The tests that matter most are the ones that must fail when a guard is removed: `INSERT OR REPLACE` with `recursive_triggers` off, a float or exponent form in a value column, a second row for the same identity, a conflict recorded twice.
-- S7 and S8 use only `INSERT … ON CONFLICT DO NOTHING`, a read for comparison, and `INSERT OR IGNORE` for conflicts. A writer connection that forgets `recursive_triggers=ON` silently loses the P-4 guarantee, so the connection factory must set it and a test must prove it.
+- S7 and S8 use only `INSERT … ON CONFLICT DO NOTHING`, a read for comparison, and the same `ON CONFLICT DO NOTHING` form for conflicts (see the P-5 amendment note). A writer connection that forgets `recursive_triggers=ON` silently loses the P-4 guarantee, so the connection factory must set it and a test must prove it.
 - An immutable `candle_conflicts` and `candles` means a conflict has **no resolution path in v1**: the slot stays conflicted and indicators keep refusing it until a later ADR defines an audited operator action (Q3).
 - The natural key trades disk size for simplicity (Q1). The size is an estimate, not a measurement; the S23 soak test should measure it.
 - SQLite 3.53.1 (this machine) was used for the probe; Docker images must provide at least 3.37, and the startup check makes a lower version a hard error.
