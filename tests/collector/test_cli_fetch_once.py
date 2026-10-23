@@ -183,6 +183,25 @@ def test_a_missing_database_directory_exits_one(tmp_path: Path, capsys: pytest.C
     assert opened == []
 
 
+@pytest.mark.parametrize("kind", ["not_a_database", "path_is_a_directory"])
+def test_an_unusable_database_file_exits_one_without_a_traceback(
+    tmp_path: Path, kind: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "market.db"
+    if kind == "not_a_database":
+        target.write_text("this is not a database, just text " * 20)
+    else:
+        target.mkdir()
+    clock = FakeClock()
+    opened: list[FakeSource] = []
+
+    assert run_cli(target, FakeSource(clock, closed_rows()), clock, opened=opened) == 1
+
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and len(err.splitlines()) == 1 and "Traceback" not in err
+    assert opened == []  # nothing was fetched or written
+
+
 def test_a_schema_from_the_future_exits_one(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     conn = open_writer(db)
     migrate(conn, applied_at_ms=AT)

@@ -16,6 +16,7 @@ A resource that fails to close is only a warning when persistence is settled; th
 
 import argparse
 import asyncio
+import sqlite3
 import sys
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
@@ -143,7 +144,7 @@ def _fetch_once(args: argparse.Namespace, open_source: OpenSource, clock: Clock)
             "re-run the same command to reconcile (writes are idempotent)"
         )
         return EXIT_UNKNOWN_OUTCOME
-    except (SourceError, KlineParseError, StorageError) as error:
+    except (SourceError, KlineParseError, StorageError, sqlite3.Error) as error:  # all raised before any write
         _error(f"error: {error}")
         return EXIT_FAILED
 
