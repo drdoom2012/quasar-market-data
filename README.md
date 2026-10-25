@@ -25,7 +25,15 @@ CI is configured to run `make check` on pull requests and pushes to `main` (not 
 
 `collector` holds `CandleWriter` and `AsyncCandleWriter`: they persist validated candles idempotently and atomically, and record a re-delivered candle that differs from the stored one in `candle_conflicts` (the stored candle is never changed). The writer does not check that a candle is closed; `fetch_once` (`fetch_once.py`) is the path that passes it only confirmed closed candles (ADR-0001), reading from a `KlineSource`. `binance_usdm.py` is the only module that imports CCXT (async client, raw endpoints). The API cannot import any of this.
 
-Console scripts: `quasar-collector` and `quasar-api` (`quasar-api` has `--version` only for now).
+Console scripts: `quasar-collector` and `quasar-api` (`serve` runs the read-only HTTP API; see below).
+
+### `quasar-api serve`
+
+```
+quasar-api serve --db market.db [--host 127.0.0.1] [--port 8000]
+```
+
+Serves `GET /v1/candles` as specified in `docs/contracts/api-v1.md`. It binds to localhost by default. The process only reads: it opens the database read-only on every request and never creates, migrates or writes it. `--db` need not exist yet: until the Collector has created and migrated the file every request answers `503 not_ready` (`database_missing`, then `schema_mismatch` for a freshly created or unmigrated file, which carries no `Retry-After`), and the API recovers on its own when the file is fixed. A missing, replaced or unreadable file is noticed on the next request. Stop it with Ctrl-C (SIGINT).
 
 ### `quasar-collector fetch-once`
 
@@ -65,6 +73,7 @@ Fetches the most recent 5m klines of one Binance USDT-M perpetual (public endpoi
 | import-linter `forbidden` contract `storage is a leaf below collector and api` | `storage` reaching `collector`, `api`, `ccxt`, `fastapi` or `talib` | — |
 | import-linter `forbidden` contract `only the collector migrates` | `api` reaching `storage.migrate`, directly or through other modules | — |
 | import-linter `forbidden` contract `ccxt is imported only by the Binance adapter` | a static `import ccxt` (or `ccxt.async_support`) in any `api` or `collector` module except `collector/binance_usdm.py`; the single exemption is the adapter's own edge to `ccxt` (negative tests in `tests/test_import_contracts_negative.py`) | dynamic imports, other HTTP clients, `tests/`, `spikes/` |
+| import-linter `forbidden` contract `api reaches no network client` | a static import of `httpx`, `requests`, `aiohttp`, `websockets`, `socket` or `ssl` in `api` | `urllib.request`, `http.client` and other modules it cannot name (covered by the AST scan in `tests/api/test_read_only.py`), dynamic imports, network access from other packages, the deployment (S21) |
 | import-linter `independence` contract | `collector` ↔ `api` imports, direct or via other graph modules | — |
 
 The import-linter contracts are proven by automated negative tests (`tests/test_import_contracts_negative.py`): each case copies the package and `pyproject.toml` into a temp directory, injects a violating module into the copy and asserts that `lint-imports` fails naming the broken contract. The original manual probes (temporary files, since removed):

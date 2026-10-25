@@ -4,14 +4,24 @@ version = "0.1.0"
 description = "Independent Python market data service for Quasar."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["ccxt>=4.5.89"]
+dependencies = [
+    "ccxt>=4.5.89",
+    "fastapi>=0.162.0",
+    "uvicorn>=0.54.0",
+]
 
 [project.scripts]
 quasar-collector = "quasar_market_data.collector.cli:main"
 quasar-api = "quasar_market_data.api.cli:main"
 
 [dependency-groups]
-dev = ["pytest", "ruff", "mypy", "import-linter"]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+    "import-linter",
+    "httpx>=0.28.1",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -84,3 +94,9 @@ type = "forbidden"
 source_modules = ["quasar_market_data.api", "quasar_market_data.collector"]
 forbidden_modules = ["ccxt"]
 ignore_imports = ["quasar_market_data.collector.binance_usdm -> ccxt"]
+
+[[tool.importlinter.contracts]]
+name = "api reaches no network client"
+type = "forbidden"
+source_modules = ["quasar_market_data.api"]
+forbidden_modules = ["httpx", "requests", "aiohttp", "websockets", "socket", "ssl"]

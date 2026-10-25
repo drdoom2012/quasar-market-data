@@ -1,6 +1,6 @@
 # Quasar Market Data API v1 — contract
 
-- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). Nothing in this document is implemented yet. Sections for the reserved endpoints (section 6) still need their own approval before their slices.
+- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). `GET /v1/candles` (section 5) is implemented by S10. Sections for the reserved endpoints (section 6) still need their own approval before their slices.
 - **Scope of this draft:** the conventions shared by every `/v1` endpoint (sections 1–4, 7) and the full specification of `GET /v1/candles` (section 5), which is what S10 implements. The other endpoints are only reserved (section 6) and get their own sections, approved before their slices.
 - **Inputs:** `docs/architecture.md` §4.2, §8; spec `docs/superpowers/specs/2026-10-20-market-data-v1-design.md` (§6.3, §11.3–11.5, D5); ADR-0001 (P-3, P-6, P-8); ADR-0002 (C-3, C-5, P-2, P-5, P-6, P-7, P-8); `docs/invariants.md` (INV-007, INV-009, INV-013, INV-014, INV-028).
 
@@ -8,7 +8,7 @@
 
 1. Every candle returned is a **confirmed closed** candle stored by the Collector. The still-forming candle is never returned. This holds as long as every ingestion path routes through the closed-candle selection (INV-007: today only `quasar-collector fetch-once` does; the collection loop and backfill, S14 and S16, must).
 2. Prices and volumes are **exact decimal text** exactly as stored; the API never converts them to floating point.
-3. The API **never contacts an exchange and never writes**. This is guaranteed by construction once S10 exists (INV-013 and INV-014 are PLANNED for S10; they are not enforced yet).
+3. The API **never contacts an exchange and never writes**. Read-only access is enforced (INV-014 in `docs/invariants.md`). Exchange isolation is enforced only in a narrowed form (INV-044: no exchange or network-client import in the `api` package, no outbound connection in the API tests); the full guarantee is INV-013, which is planned (S21).
 4. **A response never implies completeness it cannot show.** Every candle response carries a `coverage` block and the series' `oldest`/`newest` stored open times. The absence of a candle is never evidence that nothing traded.
 5. A candle in a *conflicted* slot (section 4) is still returned, **with the value first stored**, flagged `conflicted: true`. The rejected value is not exposed in v1 (ADR-0002 C-3, P-7). **Consumers should treat a `conflicted: true` candle as untrusted**: the exchange is known to revise a candle for a few seconds after it closes (ADR-0001 P-6), so the first stored value may be the wrong one.
 6. When the API cannot read the database it understands, it answers **503**, never an empty result.

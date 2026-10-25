@@ -20,7 +20,15 @@ INDEPENDENCE_CONTRACT = "collector and api are independent"
 STORAGE_CONTRACT = "storage is a leaf below collector and api"
 MIGRATE_CONTRACT = "only the collector migrates"
 CCXT_CONTRACT = "ccxt is imported only by the Binance adapter"
-CONTRACT_NAMES = (DOMAIN_CONTRACT, INDEPENDENCE_CONTRACT, STORAGE_CONTRACT, MIGRATE_CONTRACT, CCXT_CONTRACT)
+NO_NETWORK_CONTRACT = "api reaches no network client"
+CONTRACT_NAMES = (
+    DOMAIN_CONTRACT,
+    INDEPENDENCE_CONTRACT,
+    STORAGE_CONTRACT,
+    MIGRATE_CONTRACT,
+    CCXT_CONTRACT,
+    NO_NETWORK_CONTRACT,
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +69,16 @@ CASES = {
     ),
     "collector_importing_the_adapter_module_is_allowed": Case(
         "collector/_probe.py", f"import {PACKAGE}.collector.binance_usdm\n", None
+    ),
+    "api_importing_httpx_fails_the_no_network_client_contract": Case(
+        "api/_probe.py", "import httpx\n", NO_NETWORK_CONTRACT
+    ),
+    "api_importing_socket_fails_the_no_network_client_contract": Case(
+        "api/_probe.py", "import socket\n", NO_NETWORK_CONTRACT
+    ),
+    "api_importing_fastapi_is_allowed": Case("api/_probe.py", "import fastapi\n", None),
+    "api_importing_storage_connection_is_allowed": Case(
+        "api/_probe.py", f"import {PACKAGE}.storage.connection\n", None
     ),
     "api_importing_storage_schema_is_allowed": Case("api/_probe.py", f"import {PACKAGE}.storage.schema\n", None),
     "storage_importing_sqlite3_is_allowed": Case("storage/_probe.py", "import sqlite3\n", None),
