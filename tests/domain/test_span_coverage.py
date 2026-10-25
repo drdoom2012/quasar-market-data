@@ -2,7 +2,7 @@ import random
 
 import pytest
 
-from quasar_market_data.domain.span_coverage import SpanCoverage, classify_span
+from quasar_market_data.domain.span_coverage import SpanCoverage, classify_span, span_slot_states
 
 TF = 300_000
 S = 1792643400000  # aligned
@@ -146,3 +146,46 @@ def test_invalid_input_raises(case: str) -> None:
 
     with pytest.raises(ValueError):
         classify_span(**args)  # type: ignore[arg-type]
+
+
+def test_span_slot_states_yields_every_slot_in_order() -> None:
+    states = span_slot_states(
+        start=S,
+        end=slot(6),
+        timeframe_ms=TF,
+        candles={slot(0), slot(4)},
+        conflicts={slot(1)},
+        unavailable={slot(2)},
+        newest_open_time_ms=slot(4),
+    )
+
+    assert list(states) == [
+        (slot(0), "present"),
+        (slot(1), "conflicted"),
+        (slot(2), "unavailable"),
+        (slot(3), "missing"),
+        (slot(4), "present"),
+        (slot(5), "beyond_stored"),
+    ]
+
+
+@pytest.mark.parametrize("case", ["start_unaligned", "empty_span", "element_outside"])
+def test_span_slot_states_validates_before_the_first_item(case: str) -> None:
+    args = {
+        "start": S,
+        "end": slot(3),
+        "timeframe_ms": TF,
+        "candles": set[int](),
+        "conflicts": set[int](),
+        "unavailable": set[int](),
+        "newest_open_time_ms": slot(3),
+    }
+    if case == "start_unaligned":
+        args["start"] = S + 1
+    elif case == "empty_span":
+        args["end"] = S
+    else:
+        args["candles"] = {slot(3)}
+
+    with pytest.raises(ValueError):
+        span_slot_states(**args)  # type: ignore[arg-type]

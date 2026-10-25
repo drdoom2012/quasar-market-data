@@ -64,3 +64,14 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
   plan says "once at startup". The result is mapped to `503` and is harmless; the cost is one comparison.
 - **Live Binance demonstration:** run once by hand on 2026-10-25 (collector `fetch-once`, then `quasar-api serve`,
   `curl`); it is not part of `make check`.
+
+## From the S11 review (coverage calculation)
+
+### F-8. S12 must list `due`, bound the lag threshold and state `as_of`
+
+- **Where:** `docs/contracts/api-v1.md` section 6 (`/v1/coverage`, S12); `domain/timed_coverage.py`.
+- **What:** contract section 6 names only `stale` and `not_yet_expected`; the domain also has `due` (expected, within
+  the lag threshold). A huge `lag_threshold_ms` keeps every slot `due`, so the configured value must be bounded.
+  The answer is only meaningful with the `as_of` and the rule it was computed with.
+- **Fix:** S12 lists `due` in its contract section, bounds the configured lag threshold, and states `as_of` and the
+  rule (publication delay, lag threshold) in the response.
