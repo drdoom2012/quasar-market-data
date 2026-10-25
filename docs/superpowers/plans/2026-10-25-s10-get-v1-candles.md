@@ -47,7 +47,7 @@
 | P2-2 unavailable series filter not covered | `test_other_series_never_leak_in` seeds the other series' unavailable rows at slots where the subject has none |
 | P2-3 contract sentence overclaimed | section 0.3 now states INV-014 as enforced, INV-044 as the narrowed exchange isolation, and INV-013 as planned (S21) |
 | P3 scan bypasses, INV-014/INV-040 evidence, mislabelled params case | AST scan: recursive, `sqlite3.connect`, `from asyncio import open_connection`, `importlib.<anything but metadata>`, `builtins.__import__`, `urllib.request`/`http.client` through a bare `import urllib`/`import http`; register evidence extended; the "pair without `=`" case now uses `limit` |
-| Other P3 (echoed `end` above the time range, `schema_mismatch` while the Collector creates the file, `received` of an undecodable query, `Allow` lookup, duplicate uvicorn traceback, absolute-form target) | Not changed; left as follow-ups |
+| Other P3 (echoed `end` above the time range, `schema_mismatch` while the Collector creates the file, `received` of an undecodable query, `Allow` lookup, duplicate uvicorn traceback, absolute-form target) | Not changed; tracked in `docs/follow-ups.md` (F-1 to F-7) |
 
 ## Review findings addressed (independent review of 2026-10-25, first round)
 
