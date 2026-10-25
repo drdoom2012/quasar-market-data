@@ -13,7 +13,7 @@
 5. A candle in a *conflicted* slot (section 4) is still returned, **with the value first stored**, flagged `conflicted: true`. The rejected value is not exposed in v1 (ADR-0002 C-3, P-7). **Consumers should treat a `conflicted: true` candle as untrusted**: the exchange is known to revise a candle for a few seconds after it closes (ADR-0001 P-6), so the first stored value may be the wrong one.
 6. When the API cannot read the database it understands, it answers **503**, never an empty result.
 
-What the API does **not** promise: that a closed candle can never be revised by the exchange (a revision shows up as a conflict), freshness (a series that stopped growing three days ago still answers `gap_free: true` for a window that ends at its newest candle; the age is visible in `series.newest_open_time_ms`, and staleness is evaluated by `/v1/coverage`, section 6), or that the stored history reaches back to any date.
+What the API does **not** promise: that a closed candle can never be revised by the exchange (a revision shows up as a conflict), freshness (a series that stopped growing three days ago still answers `gap_free: true` for a window that ends at its newest candle; the age is visible in `series.newest_open_time_ms`, and staleness is evaluated by `/v1/coverage`, section 6.1), or that the stored history reaches back to any date.
 
 ## 1. Conventions
 
@@ -22,7 +22,7 @@ What the API does **not** promise: that a closed candle can never be revised by 
 | Base path | `/v1`. The version is in the path. A trailing slash is a different path (`404 not_found`); the API never redirects. |
 | Methods | `GET` only. `HEAD`, `OPTIONS` and everything else is `405 method_not_allowed` with an `Allow: GET` header and the standard error body. |
 | Encoding | `application/json; charset=utf-8`, UTF-8. Symbols may contain non-ASCII characters (ADR-0001 P-8). In a query string `/` and `:` are legal unencoded; `%`, `+`, `&`, `#`, spaces and non-ASCII characters must be percent-encoded. |
-| Time | Integer epoch **milliseconds**, UTC (`open_time_ms`, `start`, `end`, `next`, `series.*`, `span.*`). No ISO strings, no time zones. A candle covers `[open_time_ms, open_time_ms + timeframe)`. Valid times are `946684800000 <= t <= 4102444800000` (the range the schema accepts); anything else is `400`. |
+| Time | Integer epoch **milliseconds**, UTC (`open_time_ms`, `start`, `end`, `next`, `series.*`, `span.*`, `as_of_ms`, `rule.*_ms`, `runs[*].start`, `runs[*].end`). No ISO strings, no time zones. A candle covers `[open_time_ms, open_time_ms + timeframe)`. Valid times are `946684800000 <= t <= 4102444800000` (the range the schema accepts); anything else is `400`. |
 | Decimals | JSON **strings** in the canonical stored form: digits and at most one `.`, no sign, no exponent, no leading zero (except `0.x`), no trailing fractional zero (`"82709"`, not `"82709.0"`). Consumers must parse them as decimals, never as floats. `turnover` is `null` when the venue did not provide it; it is never computed. |
 | Integers | Counts and times are JSON integers. Integer query parameters must match `^[0-9]{1,16}$` (ASCII digits only, no sign, no `_`, no spaces, no decimal point); anything else is `400`. |
 | Strings | `venue` and `timeframe` are matched exactly. `symbol` is 1–64 characters, no whitespace or control characters, valid UTF-8 after percent-decoding, matched case-sensitively and without Unicode normalization (ADR-0001 P-8). A syntactically invalid symbol is `400`; a valid but unknown one is `404`. |
@@ -77,7 +77,7 @@ Pagination is by **time**, not by offset:
 
 ## 4. Data semantics
 
-A **slot** is one timeframe interval of one series, aligned to the epoch (`open_time_ms % timeframe == 0`). For every slot in a span the following facts are looked up in stored rows only; the contract uses **no clock**:
+A **slot** is one timeframe interval of one series, aligned to the epoch (`open_time_ms % timeframe == 0`). For every slot in a span the following facts are looked up in stored rows only; sections 4 and 5 use **no clock** (section 6.1 adds the clock-dependent split of the last state):
 
 - `C`: a stored candle exists;
 - `U`: the Collector recorded that the exchange confirmed it has no data for the slot (`unavailable_candles`, ADR-0002 P-6; the Collector does not write these before S16, so `unavailable_slots` is 0 until then);
@@ -91,7 +91,7 @@ Each slot of a span gets **exactly one** state, the first that matches (ADR-0002
 | 2 | `present` | `C` | Exactly one stored candle, no recorded disagreement. |
 | 3 | `unavailable` | `U` | The exchange confirmed it has no data. The candle does not exist and will not be fabricated. |
 | 4 | `missing` | none of the above, and the slot is before the end of the series' **newest** stored candle | Unknown reason: not backfilled yet, or the history does not reach back that far (slots before the oldest stored candle are `missing`). |
-| 5 | `beyond_stored` | none of the above, and the slot is at or after the end of the newest stored candle | Not evaluated: it may be not yet published, or stale. Needs the clock and the publication delay (`/v1/coverage`). |
+| 5 | `beyond_stored` | none of the above, and the slot is at or after the end of the newest stored candle | Not evaluated: it may be not yet published, or stale. Needs the clock and the publication delay; `/v1/coverage` (section 6.1) splits it into `not_yet_expected`, `due` and `stale`. |
 
 Hence, for every span: `slots = present + conflicted + unavailable + missing + beyond_stored`.
 
@@ -202,7 +202,7 @@ GET /v1/candles?venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m&start=17926
 
 - `gap_free` is about **the span only**. It says nothing about the age of the data: with a defaulted `end` the span stops at the newest stored candle, so a series that died long ago still reports `gap_free: true` there. Use `series.newest_open_time_ms` for age and `/v1/coverage` for staleness.
 - Returned candles with `conflicted: true` are exactly those conflicted slots that have a stored candle. A conflicted slot without a stored candle is counted but has nothing to flag.
-- `gap_free: false` is never an error; it is the normal answer for a series that is being backfilled or that has a gap. The response lists no individual gaps; `/v1/coverage` will.
+- `gap_free: false` is never an error; it is the normal answer for a series that is being backfilled or that has a gap. The response lists no individual gaps; `/v1/coverage` (section 6.1) does.
 - An empty `candles` list with `gap_free: false` is an honest answer ("nothing stored in this span"); it is never evidence that the market was closed.
 
 ### 5.4 Errors
@@ -225,10 +225,94 @@ Each is specified in its own section of this document and approved before its sl
 
 | Endpoint | Slice | Intent |
 |---|---|---|
-| `GET /v1/coverage` | S12 | Per-slot states for a window (section 4 plus the clock-dependent states: stale and not-yet-expected, spec §11.4), with the `as_of` time and ingestion-lag threshold stated in the response. This is where individual gaps are listed. |
+| `GET /v1/coverage` | S12 | Specified in section 6.1 below (draft, awaiting approval). |
 | `GET /v1/instruments` | S20 | The configured universe and, per instrument, the newest stored candle. |
 | `GET /v1/indicators` | S18 | Indicators computed on demand from stored closed candles; refuses to compute across a gap, a conflicted or unavailable slot, or with insufficient warm-up, and says why (architecture §8). |
 | Health | S17 | Liveness separate from readiness (architecture §8). Path and body are decided in S17; the `503 not_ready` reasons of section 2 are the readiness vocabulary. |
+
+## 6.1 `GET /v1/coverage`
+
+- **Status:** DRAFT for S12, awaiting the user's approval. It is implemented only after approval. Decisions S1–S5 are in section 9.
+- **What it answers:** for one series and a window of at most 10 000 slots, how many slots are in each state at the server's current time, and which runs of consecutive slots are not `present`. It is where individual gaps are listed. It reads stored rows and the server clock only.
+
+### 6.1.1 Request
+
+| Parameter | Required | Meaning |
+|---|---|---|
+| `venue` | yes | `binance-usdm` in v1. |
+| `symbol` | yes | As in section 5.1. |
+| `timeframe` | yes | `5m` in v1. |
+| `start` | yes | Inclusive window start, epoch ms, aligned. |
+| `end` | yes | **Exclusive** window end, epoch ms, aligned, `> start`, at most 10 000 slots after `start` (`400` with `details.maximum` otherwise), within the valid time range (as in section 5.1; the slot at the maximum cannot be requested, follow-up F-1, although the domain accepts `end` up to the maximum plus one timeframe). |
+
+There is no other parameter: `as_of`, `limit` and anything else are `400 invalid_parameter` (section 1, Parameters). The clock is the server's (decision S1).
+
+### 6.1.2 States
+
+Each slot of the window gets exactly one state, from the section 4 table, except that the fifth row `beyond_stored` is split by the clock. With `expected_at = slot end + publication_delay_ms`:
+
+| State | Condition |
+|---|---|
+| `present`, `conflicted`, `unavailable`, `missing` | As in section 4. They never depend on the clock. A stored candle is `present` even when `as_of_ms` is earlier than its own eligibility time. |
+| `not_yet_expected` | `beyond_stored` and `as_of_ms < expected_at`. |
+| `due` | `beyond_stored` and `expected_at <= as_of_ms <= expected_at + lag_threshold_ms`: expected, tolerated as ingestion lag, not a fault yet. |
+| `stale` | `beyond_stored` and `as_of_ms > expected_at + lag_threshold_ms`. |
+
+Hence `slots = present + conflicted + unavailable + missing + not_yet_expected + due + stale`.
+
+### 6.1.3 Response `200`
+
+```json
+{
+  "venue": "binance-usdm",
+  "symbol": "BTC/USDT:USDT",
+  "timeframe": "5m",
+  "start": 1792672500000,
+  "end": 1792674300000,
+  "as_of_ms": 1792674030000,
+  "rule": { "publication_delay_ms": 15000, "lag_threshold_ms": 60000 },
+  "series": {
+    "oldest_open_time_ms": 1792643400000,
+    "newest_open_time_ms": 1792673100000
+  },
+  "stored_ahead_of_as_of": false,
+  "coverage": {
+    "slots": 6,
+    "present_slots": 3,
+    "conflicted_slots": 0,
+    "unavailable_slots": 0,
+    "missing_slots": 0,
+    "not_yet_expected_slots": 1,
+    "due_slots": 1,
+    "stale_slots": 1,
+    "fully_present": false
+  },
+  "runs": [
+    { "state": "stale", "start": 1792673400000, "end": 1792673700000, "slots": 1 },
+    { "state": "due", "start": 1792673700000, "end": 1792674000000, "slots": 1 },
+    { "state": "not_yet_expected", "start": 1792674000000, "end": 1792674300000, "slots": 1 }
+  ]
+}
+```
+
+- The example is **illustrative and computed by hand**: the database of section 5.2 (100 consecutive candles up to `1792673100000`), a window of six slots of which the last three are after the newest candle, a delay of 15 000 ms and a lag threshold of 60 000 ms. `expected_at` of the three slots is `1792673715000`, `1792674015000` and `1792674315000`; `as_of_ms` `1792674030000` is past the first one's `expected_at + 60000`, inside the second's tolerance and before the third's `expected_at`.
+- `start` and `end` echo the request. `as_of_ms` is the server clock read once for this request. `rule` is the configuration the answer was computed with. `series` is as in section 5.2.
+- `coverage` has nine fields: eight integers (`slots` and seven `*_slots`) and the boolean `fully_present`. `slots` equals the sum of the seven `*_slots`. `fully_present` is true only when every slot is `present`, so a window containing a `due` slot is not fully present; unlike `gap_free` it takes the clock into account.
+- `runs` is ascending and lists the **maximal runs of consecutive slots in one non-present state** (`end` exclusive, `slots` = length). `present` slots are never listed. A run changes at every change of state, so a window can have up to 10 000 runs (about 0.7 MB); runs are not paginated (decision S5).
+- `stored_ahead_of_as_of` is true exactly when `series.newest_open_time_ms + timeframe + publication_delay_ms > as_of_ms`: the newest stored candle would not yet be eligible at this `as_of_ms` and this delay. It changes no count and diagnoses nothing; the cause may be a server clock behind the Collector's, or a publication delay configured larger than the one the Collector used. When it is true, every slot after the newest candle is `not_yet_expected`.
+
+### 6.1.4 What a consumer can rely on, and what it cannot
+
+- `due` and `stale` are judgments against the stated `rule` and the server's clock, not facts about the market. A consumer must read `as_of_ms` and `rule` with the counts.
+- The API does not know the publication delay the Collector used. The delay is server configuration; a mismatch shows only as `stored_ahead_of_as_of` in one direction.
+- `fully_present: true` means every slot has exactly one stored candle and no recorded disagreement, at that `as_of_ms`. It is not a statement about the future.
+- Like every `/v1` response, the answer reflects one read transaction (section 5.6), and `Cache-Control: no-store` applies.
+
+### 6.1.5 Errors and configuration
+
+`400 invalid_parameter`, `404 unknown_series`, `503 not_ready`, `500 internal_error`, in the order of section 2. A server clock outside the valid time range (section 1) is `500`, never a count.
+
+The rule is configured when the API starts: `quasar-api serve --publication-delay-ms` (default 15 000, ADR-0001 P-3; `0` to `300 000`) and `--lag-threshold-ms` (default 60 000; `0` to `900 000`). A value outside the bounds, or not a non-negative integer, is refused at start-up (exit status 2) and the process does not bind. The bounds exist because an unbounded threshold would keep every slot `due` and never `stale`.
 
 ## 7. Out of scope for v1
 
@@ -249,6 +333,8 @@ Authentication, rate limiting, CORS, write endpoints, streaming, candle revision
 | Read-only, no exchange access | architecture §4.2, INV-013, INV-014 |
 | `503` on schema mismatch, checked per request | ADR-0002 P-8, C-6, INV-028 |
 | Coverage derived on read, not stored | ADR-0002 C-4, spec §11.4 |
+| `/v1/coverage` states `not_yet_expected`, `due` and `stale` from `as_of` and the rule; `due` is a third clock state | S11 plan decisions 1–3 (approved 2026-10-25), INV-045 |
+| The response states `as_of_ms` and the rule; the configured lag threshold is bounded | follow-up F-8 |
 
 ## 9. Decisions (answered by the user on 2026-10-23: all as recommended)
 
@@ -276,3 +362,13 @@ Decisions from the independent review (the user followed all recommendations):
 | R5 | What is `database_unreadable`; when is the database checked? | Corruption, I/O errors, busy timeout and an unopenable WAL are all `503 database_unreadable`; readiness is checked on every request; `400` precedes `503`, which precedes `404`. |
 | R6 | Is `limit` 1000 a contract maximum or configuration? | A fixed contract maximum and default of 1000 in v1, not configurable. This deviates from the wording of spec D5 ("configuration") because lowering it later would be breaking. |
 | R7 | Return conflicted candles by default? | Yes, always, flagged `conflicted: true`, with the consumer rule "treat as untrusted" (section 0, point 5). No opt-in parameter. |
+
+S12 decisions (draft, pending the user's answer; none is a decision until answered):
+
+| # | Question | Proposal | Alternative that is not proposed, and its cost |
+|---|---|---|---|
+| S1 | Where does `as_of` come from? | The server clock, stated in the response; no `as_of` parameter. | An optional `as_of` for replaying history: reproducible answers, but a caller can ask about a "now" that is not now. It can be added later without breaking anything. |
+| S2 | Are `start` and `end` both required? | Yes; the section 5.1 rules, no defaulting. | A defaulted `end`: copies the two-branch rule of section 5.1 for little gain. |
+| S3 | How is the rule configured and bounded? | Server start-up options with the defaults and bounds of section 6.1.5. The bounds (300 000 ms and 900 000 ms) are the builder's numbers. | No bound: a huge lag keeps every slot `due` forever (follow-up F-8). |
+| S4 | Is `stored_ahead_of_as_of` exposed? | Yes, unchanged from S11. | Hide it: a clock or delay mismatch becomes invisible. |
+| S5 | Are `runs` paginated? | No; at most 10 000 runs, bounded by the window cap. | A second cursor kind for a window with a different fault in every slot. |
