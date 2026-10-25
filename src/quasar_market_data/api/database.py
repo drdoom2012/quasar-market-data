@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Final, Literal
 
 from quasar_market_data.api.candle_reader import CandlesPage, UnknownSeries, read_candles_page
+from quasar_market_data.api.coverage_reader import CoverageReport, read_coverage_report
 from quasar_market_data.api.errors import ApiError, NotReadyReason, not_ready, unknown_series
-from quasar_market_data.api.params import CandlesRequest
+from quasar_market_data.api.params import CandlesRequest, CoverageRequest
+from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.storage.connection import StorageError, open_reader
 from quasar_market_data.storage.schema import SchemaMismatchError
 
@@ -34,6 +36,32 @@ _ENVIRONMENT_CODES: Final = frozenset({3, 5, 6, 7, 9, 10, 11, 13, 14, 15})
 def read_candles(
     db_path: Path, request: CandlesRequest, *, open_connection: ConnectionFactory = open_reader
 ) -> CandlesPage:
+    # the closure looks `read_candles_page` up at call time: tests monkeypatch it on this module
+    return _with_reader(db_path, open_connection, lambda conn: read_candles_page(conn, request), request)
+
+
+def read_coverage(
+    db_path: Path,
+    request: CoverageRequest,
+    *,
+    as_of_ms: int,
+    rule: ExpectationRule,
+    open_connection: ConnectionFactory = open_reader,
+) -> CoverageReport:
+    return _with_reader(
+        db_path,
+        open_connection,
+        lambda conn: read_coverage_report(conn, request, as_of_ms=as_of_ms, rule=rule),
+        request,
+    )
+
+
+def _with_reader[T](
+    db_path: Path,
+    open_connection: ConnectionFactory,
+    read: Callable[[sqlite3.Connection], T],
+    request: CandlesRequest | CoverageRequest,
+) -> T:
     try:
         conn = open_connection(db_path)
     except StorageError as error:
@@ -42,7 +70,7 @@ def read_candles(
         raise _not_ready(_classify_open_failure(db_path), error) from None
 
     try:
-        return read_candles_page(conn, request)
+        return read(conn)
     except UnknownSeries:
         raise unknown_series(request.venue, request.symbol, request.timeframe.label) from None
     except SchemaMismatchError as error:

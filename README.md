@@ -31,9 +31,10 @@ Console scripts: `quasar-collector` and `quasar-api` (`serve` runs the read-only
 
 ```
 quasar-api serve --db market.db [--host 127.0.0.1] [--port 8000]
+                 [--publication-delay-ms N] [--lag-threshold-ms N]
 ```
 
-Serves `GET /v1/candles` as specified in `docs/contracts/api-v1.md`. It binds to localhost by default. The process only reads: it opens the database read-only on every request and never creates, migrates or writes it. `--db` need not exist yet: until the Collector has created and migrated the file every request answers `503 not_ready` (`database_missing`, then `schema_mismatch` for a freshly created or unmigrated file, which carries no `Retry-After`), and the API recovers on its own when the file is fixed. A missing, replaced or unreadable file is noticed on the next request. Stop it with Ctrl-C (SIGINT).
+Serves `GET /v1/candles` and `GET /v1/coverage` as specified in `docs/contracts/api-v1.md`. It binds to localhost by default. `--publication-delay-ms` and `--lag-threshold-ms` set the expectation rule that `GET /v1/coverage` classifies slots with (defaults 15000 and 60000 ms; at most 300000 and 900000); an out-of-bound or non-integer value is a usage error (exit 2) and the server does not start. The process only reads: it opens the database read-only on every request and never creates, migrates or writes it. `--db` need not exist yet: until the Collector has created and migrated the file every request answers `503 not_ready` (`database_missing`, then `schema_mismatch` for a freshly created or unmigrated file, which carries no `Retry-After`), and the API recovers on its own when the file is fixed. A missing, replaced or unreadable file is noticed on the next request. Stop it with Ctrl-C (SIGINT).
 
 ### `quasar-collector fetch-once`
 

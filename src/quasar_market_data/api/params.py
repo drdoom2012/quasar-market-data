@@ -1,4 +1,4 @@
-"""Raw query string -> ``CandlesRequest`` (contract sections 1 and 5.1), strict and free of I/O."""
+"""Raw query string -> ``CandlesRequest`` / ``CoverageRequest`` (contract sections 1, 5.1 and 6.1.1), strict and free of I/O."""
 
 import re
 from dataclasses import dataclass
@@ -22,6 +22,8 @@ INTEGER_PATTERN: Final = re.compile(r"[0-9]{1,16}")
 
 _NAMES: Final = ("venue", "symbol", "timeframe", "start", "end", "limit")
 _REQUIRED: Final = ("venue", "symbol", "timeframe", "start")
+_COVERAGE_NAMES: Final = ("venue", "symbol", "timeframe", "start", "end")
+_COVERAGE_REQUIRED: Final = ("venue", "symbol", "timeframe", "start", "end")
 _MALFORMED_ESCAPE: Final = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
@@ -35,12 +37,40 @@ class CandlesRequest:
     limit: int
 
 
-def parse_candles_request(raw_query: bytes) -> CandlesRequest:
-    pairs = _decode(raw_query)
+@dataclass(frozen=True)
+class CoverageRequest:
+    venue: str
+    symbol: str
+    timeframe: Timeframe
+    start: int
+    end: int
 
+
+def parse_candles_request(raw_query: bytes) -> CandlesRequest:
+    values = _parse(raw_query, _NAMES, _REQUIRED)
+    venue, symbol, start = _series_and_start(values)
+    end = _end(values)
+    limit = _limit(values["limit"]) if "limit" in values else DEFAULT_LIMIT
+    if end is not None:
+        _check_window(start, end)
+
+    return CandlesRequest(venue, symbol, SERVED_TIMEFRAME, start, end, limit)
+
+
+def parse_coverage_request(raw_query: bytes) -> CoverageRequest:
+    values = _parse(raw_query, _COVERAGE_NAMES, _COVERAGE_REQUIRED)
+    venue, symbol, start = _series_and_start(values)
+    end = _timestamp("end", values["end"])
+    _check_window(start, end)
+
+    return CoverageRequest(venue, symbol, SERVED_TIMEFRAME, start, end)
+
+
+def _parse(raw_query: bytes, names: tuple[str, ...], required: tuple[str, ...]) -> dict[str, str]:
+    """Decode the query and apply the shared rules: unknown, repeated, empty, then missing."""
     values: dict[str, str] = {}
-    for name, value in pairs:
-        if name not in _NAMES:
+    for name, value in _decode(raw_query):
+        if name not in names:
             raise invalid_parameter("unknown parameter", parameter=cut_received(name), received=value)
         if name in values:
             raise invalid_parameter(f"{name} must not be repeated", parameter=name, received=value)
@@ -48,10 +78,14 @@ def parse_candles_request(raw_query: bytes) -> CandlesRequest:
             raise invalid_parameter(f"{name} must not be empty", parameter=name, received="")
         values[name] = value
 
-    for name in _REQUIRED:
+    for name in required:
         if name not in values:
             raise invalid_parameter(f"{name} is required", parameter=name)
+    return values
 
+
+def _series_and_start(values: dict[str, str]) -> tuple[str, str, int]:
+    """Validate venue, symbol, timeframe and start, in that order; the timeframe is not returned (always served)."""
     venue = values["venue"]
     if venue != SERVED_VENUE:
         raise invalid_parameter(f"venue must be {SERVED_VENUE}", parameter="venue", received=venue)
@@ -70,22 +104,23 @@ def parse_candles_request(raw_query: bytes) -> CandlesRequest:
             f"timeframe must be {SERVED_TIMEFRAME.label}", parameter="timeframe", received=values["timeframe"]
         )
 
-    start = _timestamp("start", values["start"])
-    end = _timestamp("end", values["end"]) if "end" in values else None
-    limit = _limit(values["limit"]) if "limit" in values else DEFAULT_LIMIT
+    return venue, symbol, _timestamp("start", values["start"])
 
-    if end is not None:
-        if end <= start:
-            raise invalid_parameter("end must be greater than start", parameter="end", received=str(end))
-        if (end - start) // SERVED_TIMEFRAME.milliseconds > MAX_WINDOW_SLOTS:
-            raise invalid_parameter(
-                f"the window must not exceed {MAX_WINDOW_SLOTS} slots",
-                parameter="end",
-                received=str(end),
-                maximum=MAX_WINDOW_SLOTS,
-            )
 
-    return CandlesRequest(venue, symbol, SERVED_TIMEFRAME, start, end, limit)
+def _end(values: dict[str, str]) -> int | None:
+    return _timestamp("end", values["end"]) if "end" in values else None
+
+
+def _check_window(start: int, end: int) -> None:
+    if end <= start:
+        raise invalid_parameter("end must be greater than start", parameter="end", received=str(end))
+    if (end - start) // SERVED_TIMEFRAME.milliseconds > MAX_WINDOW_SLOTS:
+        raise invalid_parameter(
+            f"the window must not exceed {MAX_WINDOW_SLOTS} slots",
+            parameter="end",
+            received=str(end),
+            maximum=MAX_WINDOW_SLOTS,
+        )
 
 
 def _decode(raw_query: bytes) -> list[tuple[str, str]]:

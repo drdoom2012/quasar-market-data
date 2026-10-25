@@ -1,7 +1,14 @@
+from collections.abc import Callable
+
 import pytest
 
 from quasar_market_data.api.errors import ApiError
-from quasar_market_data.api.params import CandlesRequest, parse_candles_request
+from quasar_market_data.api.params import (
+    CandlesRequest,
+    CoverageRequest,
+    parse_candles_request,
+    parse_coverage_request,
+)
 from quasar_market_data.domain.timeframe import Timeframe
 
 TF = 300_000
@@ -195,3 +202,114 @@ def test_first_error_follows_the_documented_order() -> None:
     assert error_of(replace(venue="x").encode() + b"&limit=0").details["parameter"] == "venue"
     # values are checked in order: a bad end beats a bad limit
     assert error_of(f"{BASE}&end=1&limit=0".encode()).details["parameter"] == "end"
+
+
+def test_a_bad_limit_wins_over_an_empty_window() -> None:
+    error = error_of(f"{BASE}&limit=0&end={START - TF}".encode())
+
+    assert error.details["parameter"] == "limit"
+
+
+END = START + 12 * TF
+COVERAGE = f"{BASE}&end={END}"
+
+
+def parse_coverage(query: str) -> CoverageRequest:
+    return parse_coverage_request(query.encode("ascii"))
+
+
+def coverage_error_of(query: str) -> ApiError:
+    with pytest.raises(ApiError) as caught:
+        parse_coverage_request(query.encode("ascii"))
+    assert caught.value.status == 400
+    assert caught.value.code == "invalid_parameter"
+    return caught.value
+
+
+def test_coverage_request_parses_the_required_fields() -> None:
+    assert parse_coverage(COVERAGE) == CoverageRequest("binance-usdm", "BTC/USDT:USDT", Timeframe("5m"), START, END)
+
+
+def test_coverage_requires_end() -> None:
+    error = coverage_error_of(BASE)
+
+    assert error.details == {"parameter": "end"}
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"extra": "limt=10"},
+        {"extra": "Limit=5"},
+        {"extra": "venue=binance-usdm"},
+        {"extra": "end=" + str(END)},
+        {"extra": "symbol="},
+        {"venue": ""},
+        {"end": ""},
+        {"start": str(START + 1)},
+        {"end": str(END + 1)},
+        {"end": str(START)},
+        {"end": str(START - TF)},
+        {"venue": "x"},
+        {"symbol": "A" * 65},
+        {"symbol": "BTC%20USDT"},
+        {"start": "1_000"},
+        {"start": "946684799999"},
+    ],
+)
+def test_coverage_rejects_what_candles_rejects(changes: dict[str, str]) -> None:
+    extra = changes.get("extra")
+    overrides = {k: v for k, v in changes.items() if k != "extra"}
+    query = replace(**{"end": str(END), **overrides})
+    if extra is not None:
+        query = f"{query}&{extra}"
+
+    coverage = coverage_error_of(query)
+    candles = error_of(query.encode("ascii"))
+
+    assert coverage.message == candles.message
+    assert coverage.details == candles.details
+
+
+def test_coverage_cuts_received_to_64_characters() -> None:
+    query = replace(end=str(END), venue="v" * 100)
+    error = coverage_error_of(query)
+
+    assert error.details["received"] == "v" * 64
+    assert error.details == error_of(query.encode("ascii")).details
+
+
+@pytest.mark.parametrize("parameter", ["limit", "as_of"])
+def test_coverage_rejects_limit_and_as_of(parameter: str) -> None:
+    error = coverage_error_of(f"{COVERAGE}&{parameter}=1")
+
+    assert error.status == 400
+    assert error.details["parameter"] == parameter
+
+
+def test_coverage_window_may_be_exactly_10000_slots_and_not_more() -> None:
+    assert parse_coverage(replace(end=str(START + 10_000 * TF))).end == START + 10_000 * TF
+
+    error = coverage_error_of(replace(end=str(START + 10_001 * TF)))
+
+    assert error.details["parameter"] == "end"
+    assert error.details["maximum"] == 10_000
+
+
+@pytest.mark.parametrize("parse_fn", [parse_candles_request, parse_coverage_request])
+def test_both_parsers_validate_the_timeframe(parse_fn: Callable[[bytes], CandlesRequest | CoverageRequest]) -> None:
+    end = f"&end={END}"
+
+    def run(query: str) -> ApiError:
+        with pytest.raises(ApiError) as caught:
+            parse_fn((query + end).encode("ascii"))
+        assert caught.value.status == 400
+        return caught.value
+
+    assert parse_fn((BASE + end).encode("ascii")).timeframe == Timeframe("5m")
+    for value in ("1m", ""):
+        error = run(replace(timeframe=value))
+        assert error.details["parameter"] == "timeframe"
+        assert error.details["received"] == value
+    missing = run(replace(timeframe=None))
+    assert missing.details == {"parameter": "timeframe"}

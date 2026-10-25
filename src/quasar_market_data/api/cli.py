@@ -5,13 +5,23 @@ answers ``503 not_ready`` until the Collector has created and migrated it. The f
 """
 
 import argparse
+import re
 import sys
+from collections.abc import Callable
 from importlib.metadata import version
 from pathlib import Path
 
 import uvicorn
 
 from quasar_market_data.api.app import create_app
+from quasar_market_data.api.rule import (
+    DEFAULT_RULE,
+    MAX_LAG_THRESHOLD_MS,
+    MAX_PUBLICATION_DELAY_MS,
+    check_lag_threshold,
+    check_publication_delay,
+    checked_rule,
+)
 from quasar_market_data.storage.connection import StorageError, ensure_sqlite_version
 
 PROG = "quasar-api"
@@ -27,6 +37,20 @@ def _port(text: str) -> int:
     return value
 
 
+def _bounded_ms(check: Callable[[int], int]) -> Callable[[str], int]:
+    def parse(text: str) -> int:
+        if (
+            re.fullmatch(r"[0-9]+", text, re.ASCII) is None
+        ):  # no sign, whitespace, underscore or fraction (leading zeros are accepted)
+            raise argparse.ArgumentTypeError(f"must be a non-negative integer, got {text!r}")
+        try:
+            return check(int(text))
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(str(error)) from None
+
+    return parse
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=PROG)
     parser.add_argument("--version", action="version", version=f"{PROG} {version('quasar-market-data')}")
@@ -35,6 +59,20 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--db", required=True, type=Path, help="SQLite database file written by the Collector")
     serve.add_argument("--host", default=DEFAULT_HOST, help=f"address to bind (default {DEFAULT_HOST})")
     serve.add_argument("--port", type=_port, default=DEFAULT_PORT, help=f"port to bind (default {DEFAULT_PORT})")
+    serve.add_argument(
+        "--publication-delay-ms",
+        type=_bounded_ms(check_publication_delay),
+        default=DEFAULT_RULE.publication_delay_ms,
+        help=f"publication delay of the coverage rule (default {DEFAULT_RULE.publication_delay_ms}, "
+        f"at most {MAX_PUBLICATION_DELAY_MS})",
+    )
+    serve.add_argument(
+        "--lag-threshold-ms",
+        type=_bounded_ms(check_lag_threshold),
+        default=DEFAULT_RULE.lag_threshold_ms,
+        help=f"ingestion-lag threshold of the coverage rule (default {DEFAULT_RULE.lag_threshold_ms}, "
+        f"at most {MAX_LAG_THRESHOLD_MS})",
+    )
     return parser
 
 
@@ -49,5 +87,10 @@ def main(argv: list[str] | None = None) -> int:
     except StorageError as error:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_FAILED
-    uvicorn.run(create_app(args.db), host=args.host, port=args.port, log_level="info")
+    uvicorn.run(
+        create_app(args.db, rule=checked_rule(args.publication_delay_ms, args.lag_threshold_ms)),
+        host=args.host,
+        port=args.port,
+        log_level="info",
+    )
     return 0

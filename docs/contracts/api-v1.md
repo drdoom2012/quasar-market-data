@@ -1,6 +1,6 @@
 # Quasar Market Data API v1 — contract
 
-- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). `GET /v1/candles` (section 5) is implemented by S10. Sections for the reserved endpoints (section 6) still need their own approval before their slices.
+- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). `GET /v1/candles` (section 5) is implemented by S10. `GET /v1/coverage` (section 6.1) was APPROVED by the user on 2026-10-25 (decisions S1–S5 as proposed, including the bounds 300 000 ms and 900 000 ms) and is implemented by S12. Sections for the other reserved endpoints (section 6) still need their own approval before their slices.
 - **Scope of this draft:** the conventions shared by every `/v1` endpoint (sections 1–4, 7) and the full specification of `GET /v1/candles` (section 5), which is what S10 implements. The other endpoints are only reserved (section 6) and get their own sections, approved before their slices.
 - **Inputs:** `docs/architecture.md` §4.2, §8; spec `docs/superpowers/specs/2026-10-20-market-data-v1-design.md` (§6.3, §11.3–11.5, D5); ADR-0001 (P-3, P-6, P-8); ADR-0002 (C-3, C-5, P-2, P-5, P-6, P-7, P-8); `docs/invariants.md` (INV-007, INV-009, INV-013, INV-014, INV-028).
 
@@ -225,14 +225,14 @@ Each is specified in its own section of this document and approved before its sl
 
 | Endpoint | Slice | Intent |
 |---|---|---|
-| `GET /v1/coverage` | S12 | Specified in section 6.1 below (draft, awaiting approval). |
+| `GET /v1/coverage` | S12 | Specified in section 6.1 below. |
 | `GET /v1/instruments` | S20 | The configured universe and, per instrument, the newest stored candle. |
 | `GET /v1/indicators` | S18 | Indicators computed on demand from stored closed candles; refuses to compute across a gap, a conflicted or unavailable slot, or with insufficient warm-up, and says why (architecture §8). |
 | Health | S17 | Liveness separate from readiness (architecture §8). Path and body are decided in S17; the `503 not_ready` reasons of section 2 are the readiness vocabulary. |
 
 ## 6.1 `GET /v1/coverage`
 
-- **Status:** DRAFT for S12, awaiting the user's approval. It is implemented only after approval. Decisions S1–S5 are in section 9.
+- **Status:** APPROVED by the user on 2026-10-25, decisions S1–S5 as proposed. Implemented by S12. Decisions are in section 9.
 - **What it answers:** for one series and a window of at most 10 000 slots, how many slots are in each state at the server's current time, and which runs of consecutive slots are not `present`. It is where individual gaps are listed. It reads stored rows and the server clock only.
 
 ### 6.1.1 Request
@@ -310,7 +310,7 @@ Hence `slots = present + conflicted + unavailable + missing + not_yet_expected +
 
 ### 6.1.5 Errors and configuration
 
-`400 invalid_parameter`, `404 unknown_series`, `503 not_ready`, `500 internal_error`, in the order of section 2. A server clock outside the valid time range (section 1) is `500`, never a count.
+`400 invalid_parameter`, `404 unknown_series`, `503 not_ready`, `500 internal_error`, in the order of section 2. A server clock outside the valid time range (section 1) is `500`, never a count; the clock is checked after parameter validation and before the database is opened, so a bad clock together with an unreadable database answers `500`, not `503`.
 
 The rule is configured when the API starts: `quasar-api serve --publication-delay-ms` (default 15 000, ADR-0001 P-3; `0` to `300 000`) and `--lag-threshold-ms` (default 60 000; `0` to `900 000`). A value outside the bounds, or not a non-negative integer, is refused at start-up (exit status 2) and the process does not bind. The bounds exist because an unbounded threshold would keep every slot `due` and never `stale`.
 
@@ -363,7 +363,7 @@ Decisions from the independent review (the user followed all recommendations):
 | R6 | Is `limit` 1000 a contract maximum or configuration? | A fixed contract maximum and default of 1000 in v1, not configurable. This deviates from the wording of spec D5 ("configuration") because lowering it later would be breaking. |
 | R7 | Return conflicted candles by default? | Yes, always, flagged `conflicted: true`, with the consumer rule "treat as untrusted" (section 0, point 5). No opt-in parameter. |
 
-S12 decisions (draft, pending the user's answer; none is a decision until answered):
+S12 decisions (answered by the user on 2026-10-25: all as proposed):
 
 | # | Question | Proposal | Alternative that is not proposed, and its cost |
 |---|---|---|---|

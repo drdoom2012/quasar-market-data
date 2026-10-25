@@ -148,6 +148,7 @@ def _exercise(client: TestClient) -> None:
     assert client.get(f"/v1/candles?{Q.replace('BTC/USDT:USDT', 'X/Y')}").status_code == 404  # unknown series
     assert client.get(f"/v1/candles?{Q.replace(str(S), str(S + 100 * TF))}").status_code == 200  # beyond stored
     assert client.get(f"/v1/candles?{Q}&end={S + 8 * TF}").status_code == 200  # a gap window
+    assert client.get(f"/v1/coverage?{Q}&end={S + 8 * TF}").status_code == 200  # a coverage window
 
 
 def test_every_statement_the_api_issues_is_read_only(tmp_path: Path) -> None:
