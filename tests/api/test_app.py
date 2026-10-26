@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import quote
 
 import pytest
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.testclient import TestClient
 
 from quasar_market_data.api import app as app_module
@@ -330,3 +331,32 @@ def test_response_is_compact_utf8_json(db: Path) -> None:
 
     assert json.loads(response.content) == response.json()
     assert b": " not in response.content
+
+
+def test_the_allow_header_of_another_route_is_echoed_whatever_its_case(db: Path) -> None:
+    app = create_app(db)
+
+    @app.get("/two-methods")
+    async def two_methods() -> None:
+        raise StarletteHTTPException(405, headers={"Allow": "GET, POST"})
+
+    response = TestClient(app, raise_server_exceptions=False).get("/two-methods")
+
+    error = assert_error(response, 405, "method_not_allowed")
+    assert response.headers["allow"] == "GET, POST"
+    assert error["details"] == {"allow": "GET, POST"}
+
+
+def test_the_slot_at_the_maximum_time_can_be_asked_for(tmp_path: Path) -> None:
+    maximum = 4102444800000
+    client = client_for(make_database(tmp_path / "market.db", candles=[slot(0)]))
+
+    response = client.get(f"/v1/candles?venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m&start={maximum}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["start"], body["end"], body["candles"]) == (maximum, maximum + 300_000, [])
+    follow_up = client.get(
+        f"/v1/candles?venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m&start={maximum}&end={body['end']}"
+    )
+    assert follow_up.status_code == 200

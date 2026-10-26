@@ -8,7 +8,7 @@ path is ``404 not_found`` and a trailing slash is a different path. SQLite runs 
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from uuid import uuid4
 
@@ -73,7 +73,7 @@ def create_app(
         if exc.status_code == 404:
             error = not_found()
         elif exc.status_code == 405:
-            error = method_not_allowed((exc.headers or {}).get("allow", "GET"))
+            error = method_not_allowed(_header(exc.headers, "allow", "GET"))
         else:
             error = internal_error()
         return _json(error.status, error.body(), error.headers)
@@ -86,6 +86,14 @@ def create_app(
         return _json(error.status, error.body(), error.headers)
 
     return app
+
+
+def _header(headers: Mapping[str, str] | None, name: str, default: str) -> str:
+    """Starlette keeps the case the raising code used (``Allow``), so look the name up case-insensitively."""
+    for key, value in (headers or {}).items():
+        if key.lower() == name:
+            return value
+    return default
 
 
 def _json(status: int, body: dict[str, object], headers: dict[str, str] | None = None) -> Response:

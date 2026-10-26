@@ -51,6 +51,14 @@ def test_all_parameters_and_boundaries_are_accepted() -> None:
     assert parse(replace(start="4102444800000")).start == 4102444800000
 
 
+def test_end_may_be_one_timeframe_past_the_maximum_time() -> None:
+    maximum = 4102444800000
+    assert parse(replace(start=str(maximum)) + f"&end={maximum + TF}").end == maximum + TF
+    error = error_of(f"{replace(start=str(maximum))}&end={maximum + 2 * TF}".encode("ascii"))
+    assert error.details["parameter"] == "end"
+    assert error.message == f"end must be within [946684800000, {maximum + TF}]"
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -313,3 +321,17 @@ def test_both_parsers_validate_the_timeframe(parse_fn: Callable[[bytes], Candles
         assert error.details["received"] == value
     missing = run(replace(timeframe=None))
     assert missing.details == {"parameter": "timeframe"}
+
+
+@pytest.mark.parametrize(
+    ("bad", "shown"),
+    [(b"%zz", "%zz"), (b"\xc3", "\ufffd"), (b"x=%E6%B5", "%E6%B5"), (b"x=%FF", "%FF")],
+    ids=["malformed-escape", "raw-non-ascii", "truncated-utf-8", "invalid-utf-8"],
+)
+def test_received_of_an_undecodable_query_shows_the_bad_part_not_the_valid_prefix(bad: bytes, shown: str) -> None:
+    prefix = b"a=" + b"v" * 200 + b"&"
+
+    received = str(error_of(prefix + bad + b"&b=1").details["received"])
+
+    assert len(received) <= 64
+    assert shown in received

@@ -18,7 +18,7 @@ from quasar_market_data.api.errors import ApiError, NotReadyReason, not_ready, u
 from quasar_market_data.api.params import CandlesRequest, CoverageRequest
 from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.storage.connection import StorageError, open_reader
-from quasar_market_data.storage.schema import SchemaMismatchError
+from quasar_market_data.storage.schema import EmptyDatabaseError, SchemaMismatchError
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,8 @@ def _with_reader[T](
         return read(conn)
     except UnknownSeries:
         raise unknown_series(request.venue, request.symbol, request.timeframe.label) from None
+    except EmptyDatabaseError as error:  # before its parent: a file the Collector has not initialised yet is a retry
+        raise _not_ready("database_unreadable", error) from None
     except SchemaMismatchError as error:
         raise _not_ready("schema_mismatch", error) from None
     except StorageError as error:

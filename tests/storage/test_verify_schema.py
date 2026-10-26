@@ -6,7 +6,7 @@ import pytest
 
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
-from quasar_market_data.storage.schema import SchemaMismatchError, verify_schema
+from quasar_market_data.storage.schema import EmptyDatabaseError, SchemaMismatchError, verify_schema
 
 AT = 1_792_677_000_000
 INSERT_CANDLE = "INSERT INTO candles VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', 1792676700000, '1', '2', '1', '2', '3', NULL, 1)"
@@ -52,6 +52,16 @@ def test_unmigrated_database_is_a_mismatch(db: Path) -> None:
     reader = open_reader(db)
     try:
         with pytest.raises(SchemaMismatchError):
+            verify_schema(reader)
+    finally:
+        reader.close()
+
+
+def test_a_file_with_no_objects_and_no_application_id_is_reported_as_empty(db: Path) -> None:
+    db.touch()  # a zero-byte file, as the Collector creates it before initialising
+    reader = open_reader(db)
+    try:
+        with pytest.raises(EmptyDatabaseError):
             verify_schema(reader)
     finally:
         reader.close()

@@ -134,6 +134,16 @@ def test_schema_problems_are_schema_mismatch_without_retry_after(tmp_path: Path)
         assert error.headers == {}
 
 
+def test_an_empty_file_is_a_retry_not_a_schema_mismatch(tmp_path: Path) -> None:
+    empty = tmp_path / "empty.db"
+    empty.touch()  # the Collector has created the file but not initialised it yet
+
+    error = not_ready(empty)
+
+    assert error.details == {"reason": "database_unreadable"}
+    assert error.headers == {"Retry-After": "5"}
+
+
 @pytest.mark.parametrize(
     "stat_error",
     [PermissionError(errno.EACCES, POISON), OSError(errno.EIO, "io"), OSError(errno.ELOOP, "loop")],

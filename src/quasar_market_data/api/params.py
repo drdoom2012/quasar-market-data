@@ -3,9 +3,9 @@
 import re
 from dataclasses import dataclass
 from typing import Final
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, unquote
 
-from quasar_market_data.api.errors import ApiError, cut_received, invalid_parameter
+from quasar_market_data.api.errors import RECEIVED_MAX_CHARS, ApiError, cut_received, invalid_parameter
 from quasar_market_data.domain.candle import MAX_SYMBOL_LENGTH
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.timestamps import MAX_TIMESTAMP_MS, MIN_TIMESTAMP_MS
@@ -60,7 +60,7 @@ def parse_candles_request(raw_query: bytes) -> CandlesRequest:
 def parse_coverage_request(raw_query: bytes) -> CoverageRequest:
     values = _parse(raw_query, _COVERAGE_NAMES, _COVERAGE_REQUIRED)
     venue, symbol, start = _series_and_start(values)
-    end = _timestamp("end", values["end"])
+    end = _end_timestamp(values["end"])
     _check_window(start, end)
 
     return CoverageRequest(venue, symbol, SERVED_TIMEFRAME, start, end)
@@ -108,7 +108,7 @@ def _series_and_start(values: dict[str, str]) -> tuple[str, str, int]:
 
 
 def _end(values: dict[str, str]) -> int | None:
-    return _timestamp("end", values["end"]) if "end" in values else None
+    return _end_timestamp(values["end"]) if "end" in values else None
 
 
 def _check_window(start: int, end: int) -> None:
@@ -127,18 +127,38 @@ def _decode(raw_query: bytes) -> list[tuple[str, str]]:
     """Decode the query string; every failure is a 400 without ``parameter`` (the name may be the broken part)."""
     try:
         text = raw_query.decode("ascii")
-    except UnicodeDecodeError:
-        raise _undecodable(raw_query, "the query string must be ASCII; percent-encode other characters") from None
-    if _MALFORMED_ESCAPE.search(text):
-        raise _undecodable(raw_query, "the query string contains a malformed percent-escape")
+    except UnicodeDecodeError as error:
+        raise _undecodable(
+            raw_query, error.start, "the query string must be ASCII; percent-encode other characters"
+        ) from None
+    escape = _MALFORMED_ESCAPE.search(text)
+    if escape is not None:
+        raise _undecodable(raw_query, escape.start(), "the query string contains a malformed percent-escape")
     try:
         return parse_qsl(text, keep_blank_values=True, strict_parsing=False, errors="strict")
     except UnicodeDecodeError:
-        raise _undecodable(raw_query, "the query string is not valid UTF-8 after percent-decoding") from None
+        raise _undecodable(
+            raw_query, _invalid_utf8_position(text), "the query string is not valid UTF-8 after percent-decoding"
+        ) from None
 
 
-def _undecodable(raw_query: bytes, message: str) -> ApiError:
-    return invalid_parameter(message, received=raw_query.decode("ascii", errors="replace"))
+def _invalid_utf8_position(text: str) -> int:
+    """Where the first ``&``-separated piece that does not percent-decode to UTF-8 begins."""
+    position = 0
+    for piece in text.split("&"):
+        try:
+            unquote(piece, errors="strict")
+        except UnicodeDecodeError:
+            return position
+        position += len(piece) + 1
+    return 0  # unreachable in practice: parse_qsl decoded the same pieces
+
+
+def _undecodable(raw_query: bytes, position: int, message: str) -> ApiError:
+    """``received`` is the stretch of the query around the first offending byte, not its (usually valid) start."""
+    text = raw_query.decode("ascii", errors="replace")
+    start = max(0, min(position, len(text)) - RECEIVED_MAX_CHARS // 2)
+    return invalid_parameter(message, received=text[start : start + RECEIVED_MAX_CHARS])
 
 
 def _integer(name: str, text: str) -> int:
@@ -147,12 +167,15 @@ def _integer(name: str, text: str) -> int:
     return int(text)
 
 
-def _timestamp(name: str, text: str) -> int:
+def _end_timestamp(text: str) -> int:
+    """``end`` is exclusive, so it may be one timeframe past the last valid open time (the slot at the maximum)."""
+    return _timestamp("end", text, maximum=MAX_TIMESTAMP_MS + SERVED_TIMEFRAME.milliseconds)
+
+
+def _timestamp(name: str, text: str, *, maximum: int = MAX_TIMESTAMP_MS) -> int:
     value = _integer(name, text)
-    if not MIN_TIMESTAMP_MS <= value <= MAX_TIMESTAMP_MS:
-        raise invalid_parameter(
-            f"{name} must be within [{MIN_TIMESTAMP_MS}, {MAX_TIMESTAMP_MS}]", parameter=name, received=text
-        )
+    if not MIN_TIMESTAMP_MS <= value <= maximum:
+        raise invalid_parameter(f"{name} must be within [{MIN_TIMESTAMP_MS}, {maximum}]", parameter=name, received=text)
     if value % SERVED_TIMEFRAME.milliseconds != 0:
         raise invalid_parameter(f"{name} must be aligned to the timeframe", parameter=name, received=text)
     return value

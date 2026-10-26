@@ -21,8 +21,9 @@ What the API does **not** promise: that a closed candle can never be revised by 
 |---|---|
 | Base path | `/v1`. The version is in the path. A trailing slash is a different path (`404 not_found`); the API never redirects. |
 | Methods | `GET` only. `HEAD`, `OPTIONS` and everything else is `405 method_not_allowed` with an `Allow: GET` header and the standard error body. |
+| Request target | Origin form only (`/v1/candles?...`). The absolute form (`GET http://host/v1/candles?...`) is not supported and answers `404 not_found`; clients and proxies are expected to send the origin form. |
 | Encoding | `application/json; charset=utf-8`, UTF-8. Symbols may contain non-ASCII characters (ADR-0001 P-8). In a query string `/` and `:` are legal unencoded; `%`, `+`, `&`, `#`, spaces and non-ASCII characters must be percent-encoded. |
-| Time | Integer epoch **milliseconds**, UTC (`open_time_ms`, `start`, `end`, `next`, `series.*`, `span.*`, `as_of_ms`, `rule.*_ms`, `runs[*].start`, `runs[*].end`). No ISO strings, no time zones. A candle covers `[open_time_ms, open_time_ms + timeframe)`. Valid times are `946684800000 <= t <= 4102444800000` (the range the schema accepts); anything else is `400`. |
+| Time | Integer epoch **milliseconds**, UTC (`open_time_ms`, `start`, `end`, `next`, `series.*`, `span.*`, `as_of_ms`, `rule.*_ms`, `runs[*].start`, `runs[*].end`). No ISO strings, no time zones. A candle covers `[open_time_ms, open_time_ms + timeframe)`. Valid times are `946684800000 <= t <= 4102444800000` (the range the schema accepts); anything else is `400`. The one exception is the exclusive `end`, which may be up to one timeframe past that maximum (`4102445100000` for `5m`), so the slot at the maximum can be requested and an echoed `end` is always valid as the next `start` or `end`. |
 | Decimals | JSON **strings** in the canonical stored form: digits and at most one `.`, no sign, no exponent, no leading zero (except `0.x`), no trailing fractional zero (`"82709"`, not `"82709.0"`). Consumers must parse them as decimals, never as floats. `turnover` is `null` when the venue did not provide it; it is never computed. |
 | Integers | Counts and times are JSON integers. Integer query parameters must match `^[0-9]{1,16}$` (ASCII digits only, no sign, no `_`, no spaces, no decimal point); anything else is `400`. |
 | Strings | `venue` and `timeframe` are matched exactly. `symbol` is 1–64 characters, no whitespace or control characters, valid UTF-8 after percent-decoding, matched case-sensitively and without Unicode normalization (ADR-0001 P-8). A syntactically invalid symbol is `400`; a valid but unknown one is `404`. |
@@ -56,13 +57,13 @@ Out of this contract: errors the HTTP server itself produces before the applicat
 | 404 | `not_found` | Unknown path | none |
 | 405 | `method_not_allowed` | Not `GET` | `allow` |
 | 500 | `internal_error` | A bug | none (a correlation id is logged, not returned) |
-| 503 | `not_ready` | The database file is missing, is not this project's, has a schema version other than the one this API was built for, or cannot be read. The API stays up and answers every `/v1` request this way until the condition clears (INV-028) | `reason`: `database_missing`, `schema_mismatch` or `database_unreadable` |
+| 503 | `not_ready` | The database file is missing, is empty (the Collector has not initialised it yet), is not this project's, has a schema version other than the one this API was built for, or cannot be read. The API stays up and answers every `/v1` request this way until the condition clears (INV-028) | `reason`: `database_missing`, `schema_mismatch` or `database_unreadable` |
 
 Rules:
 
 - **Order of checks:** parameter validation (`400`) comes first because it needs no database; then database readiness (`503`); then the series lookup (`404`). A request that is both malformed and hits a broken database answers `400`.
 - **Readiness is checked on every request** (the file exists, the project's `application_id`, the schema version), not only at startup, so a deleted or replaced file is noticed.
-- `database_unreadable` also covers corruption, I/O errors, a busy timeout and a WAL database that cannot be opened read-only. `500` is reserved for bugs.
+- `database_unreadable` also covers a file that exists but holds nothing yet (no application id, no tables), which is a normal moment while the Collector starts, corruption, I/O errors, a busy timeout and a WAL database that cannot be opened read-only. `500` is reserved for bugs.
 - `503` carries `Retry-After: 5` for `database_missing` and `database_unreadable`, and **no** `Retry-After` for `schema_mismatch` (it needs a deployment, not a retry). Clients must treat `503` as "no data", never as "empty data".
 
 ## 3. Pagination
@@ -105,7 +106,7 @@ Hence, for every span: `slots = present + conflicted + unavailable + missing + b
 | `symbol` | yes | CCXT unified symbol, exactly as stored, e.g. `BTC/USDT:USDT`. |
 | `timeframe` | yes | `5m` in v1. |
 | `start` | yes | Inclusive window start, epoch ms, aligned to the timeframe. |
-| `end` | no | **Exclusive** window end, epoch ms, aligned to the timeframe. If given it must be `> start`. Default: see below. |
+| `end` | no | **Exclusive** window end, epoch ms, aligned to the timeframe, at most one timeframe past the maximum valid time (section 1, Time). If given it must be `> start`. Default: see below. |
 | `limit` | no | Maximum candles in this response, `1`–`1000`, default `1000`. |
 
 **Effective window.** The window never exceeds **10 000 slots** (`end - start <= 10000 × timeframe`; for `5m` about 34.7 days, which covers the planned 30-day backfill depth, spec D5). An explicit `end` beyond that is `400` with `details.maximum`. When `end` is omitted:
@@ -243,7 +244,7 @@ Each is specified in its own section of this document and approved before its sl
 | `symbol` | yes | As in section 5.1. |
 | `timeframe` | yes | `5m` in v1. |
 | `start` | yes | Inclusive window start, epoch ms, aligned. |
-| `end` | yes | **Exclusive** window end, epoch ms, aligned, `> start`, at most 10 000 slots after `start` (`400` with `details.maximum` otherwise), within the valid time range (as in section 5.1; the slot at the maximum cannot be requested, follow-up F-1, although the domain accepts `end` up to the maximum plus one timeframe). |
+| `end` | yes | **Exclusive** window end, epoch ms, aligned, `> start`, at most 10 000 slots after `start` (`400` with `details.maximum` otherwise), within the valid time range, where `end` may be one timeframe past the maximum (as in section 5.1), so the slot at the maximum can be requested. |
 
 There is no other parameter: `as_of`, `limit` and anything else are `400 invalid_parameter` (section 1, Parameters). The clock is the server's (decision S1).
 

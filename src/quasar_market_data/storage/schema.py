@@ -17,6 +17,10 @@ class SchemaMismatchError(StorageError):
     """The database is not at the schema version this code was built for."""
 
 
+class EmptyDatabaseError(SchemaMismatchError):
+    """The file exists but holds nothing yet (no application id, no objects): the Collector has not initialised it."""
+
+
 def verify_schema(conn: sqlite3.Connection) -> None:
     """Raise ``SchemaMismatchError`` unless the database is ours and at exactly ``SCHEMA_VERSION``.
 
@@ -25,6 +29,8 @@ def verify_schema(conn: sqlite3.Connection) -> None:
     """
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     if application_id != APPLICATION_ID:
+        if application_id == 0 and conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone() is None:
+            raise EmptyDatabaseError("the database file is empty")
         raise SchemaMismatchError(f"application_id {application_id} is not this project's ({APPLICATION_ID})")
     has_table = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
