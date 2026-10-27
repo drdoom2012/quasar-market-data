@@ -18,7 +18,10 @@ PRECISION_MARGIN_MS = 50
 
 
 class ScriptedSource:
-    def __init__(self, t: ManualTime, *, skew_ms: int = 1_000) -> None:
+    def __init__(self, t: ManualTime, *, skew_ms: int = 1_000, honour_limit: bool = False) -> None:
+        self.honour_limit = honour_limit  # True: return ``limit`` rows ending at the forming slot
+        self.forming_ahead_slots = 0  # honour_limit only: the server's forming slot is this many slots ahead
+        self.limits: list[tuple[str, int]] = []  # symbol and limit of every klines call
         self.t = t
         self.skew_ms = skew_ms
         self.klines_calls: list[str] = []
@@ -47,8 +50,19 @@ class ScriptedSource:
             out.append(row)
         return out
 
+    def limited_rows(self, limit: int, tf_ms: int) -> list[list[Any]]:
+        forming = (self.t.wall_ms() + self.skew_ms) // tf_ms * tf_ms + self.forming_ahead_slots * tf_ms
+        template = closed_rows()[0]
+        out: list[list[Any]] = []
+        for open_ms in range(forming - (limit - 1) * tf_ms, forming + tf_ms, tf_ms):
+            row = list(template)
+            row[0], row[6] = open_ms, open_ms + tf_ms - 1
+            out.append(row)
+        return out
+
     async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> Sequence[object]:
         self.klines_calls.append(symbol)
+        self.limits.append((symbol, limit))
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
@@ -68,6 +82,8 @@ class ScriptedSource:
                     raise error_or_none
             if symbol in self.errors:
                 raise self.errors[symbol]
+            if self.honour_limit:
+                return self.limited_rows(limit, timeframe.milliseconds)
             window = self.windows.get(symbol)
             return self.rows(window.pop(0) if window else 3, timeframe.milliseconds)
         finally:

@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -16,6 +17,7 @@ from quasar_market_data.collector.collection_loop import (
     run_collection_loop,
 )
 from quasar_market_data.collector.kline_source import SourceError
+from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
 from quasar_market_data.domain.schedule import next_wake_ms
 from quasar_market_data.domain.timeframe import Timeframe
 from tests.collector.fetch_fakes import ControlledSink
@@ -48,6 +50,8 @@ class Harness:
         self.sink = sink or ControlledSink()
         self.stop = asyncio.Event()
         self.rounds: list[RoundReport] = []
+        self.events: list[str] = []
+        self.run_kwargs: dict[str, Any] = {}
         self.task: asyncio.Task[LoopExit]
 
     def start(self) -> None:
@@ -59,9 +63,14 @@ class Harness:
                 self.t,
                 self.t.sleep,
                 self.stop,
-                self.rounds.append,
+                self.on_round,
+                **self.run_kwargs,
             )
         )
+
+    def on_round(self, report: RoundReport) -> None:
+        self.rounds.append(report)
+        self.events.append("on_round")
 
     async def until_rounds(self, n: int) -> None:
         for _ in range(1_000):
@@ -561,3 +570,341 @@ def test_loop_config_defaults_and_fetch_config() -> None:
     cfg = config(("A", "B"))
     assert cfg.max_concurrency == 4 and cfg.shutdown_grace_ms == 10_000 and cfg.retry == RetryPolicy()
     assert cfg.fetch_config("B").symbol == "B" and cfg.fetch_config("B").limit == 100
+
+
+F0 = 1_792_677_000_000  # the forming slot at ManualTime's start
+
+
+async def honouring(h: Harness, *, wall_offset_ms: int = 0) -> None:
+    h.source.honour_limit = True
+    if wall_offset_ms:
+        await h.t.advance(wall_offset_ms)
+
+
+def test_first_round_limit_is_computed_from_the_clock_at_each_attempt() -> None:
+    async def scenario() -> None:
+        h = Harness()
+        await honouring(h, wall_offset_ms=TF_MS - 36_000 - 500)  # 500 ms before the next boundary
+        h.source.script["A"] = [SourceError("down")]
+        h.run_kwargs["first_round_wanted_from"] = {"A": F0 - 990 * TF_MS}
+        h.start()
+        await h.t.until_waiting(1)
+        await h.t.advance(1000)  # the retry wait crosses one boundary
+        await h.until_rounds(1)
+        assert h.source.limits == [("A", 993), ("A", 994)]
+        await h.advance_to_next_boundary()
+        await h.until_rounds(2)
+        assert h.source.limits[-1] == ("A", 100)
+        h.stop.set()
+        await h.task
+
+    run(scenario)
+
+
+def test_a_late_round_start_changes_the_limit_and_it_is_capped() -> None:
+    async def scenario(oldest_slots_back: int, expected: int) -> None:
+        h = Harness()
+        await honouring(h, wall_offset_ms=3 * TF_MS)
+        h.run_kwargs["first_round_wanted_from"] = {"A": F0 - oldest_slots_back * TF_MS}
+        h.start()
+        await h.until_rounds(1)
+        assert h.source.limits == [("A", expected)]
+        h.stop.set()
+        await h.task
+
+    run(lambda: scenario(990, 996))
+    run(lambda: scenario(997, 1000))
+
+
+def test_unmapped_symbols_and_later_rounds_use_the_configured_limit() -> None:
+    async def scenario() -> None:
+        h = Harness(("A", "B"), max_concurrency=1)
+        await honouring(h)
+        h.run_kwargs["first_round_wanted_from"] = {"A": F0 - 500 * TF_MS}
+        h.start()
+        await h.until_rounds(1)
+        assert h.source.limits == [("A", 503), ("B", 100)]
+        await h.advance_to_next_boundary()
+        await h.until_rounds(2)
+        assert h.source.limits[2:] == [("A", 100), ("B", 100)]
+        h.stop.set()
+        await h.task
+
+    run(scenario)
+
+
+@pytest.mark.parametrize(
+    ("wanted", "error"),
+    [
+        ({"Z": F0 - TF_MS}, ValueError),
+        ({"A": F0 - TF_MS + 1}, ValueError),
+        ({"A": True}, TypeError),
+        ({"A": "5"}, TypeError),
+        ({"A": -TF_MS}, ValueError),
+    ],
+)
+def test_first_round_wanted_from_is_validated(wanted: dict[str, Any], error: type[Exception]) -> None:
+    async def scenario() -> None:
+        h = Harness()
+        h.run_kwargs["first_round_wanted_from"] = wanted
+        h.start()
+        with pytest.raises(error):
+            await h.task
+        assert h.source.klines_calls == []
+        await assert_no_leftover_tasks()
+
+    run(scenario)
+
+
+def test_after_first_round_runs_once_after_on_round_with_the_first_report() -> None:
+    async def scenario() -> None:
+        h = Harness()
+        seen: list[RoundReport] = []
+
+        async def hook(report: RoundReport) -> None:
+            h.events.append("hook")
+            seen.append(report)
+
+        h.run_kwargs["after_first_round"] = hook
+        h.start()
+        await h.until_rounds(1)
+        await h.t.settle()
+        await h.advance_to_next_boundary()
+        await h.until_rounds(2)
+        assert h.events == ["on_round", "hook", "on_round"]
+        assert seen == [h.rounds[0]]
+        h.stop.set()
+        await h.task
+
+    run(scenario)
+
+
+def test_after_first_round_is_skipped_when_stop_is_set_in_round_one() -> None:
+    async def scenario() -> None:
+        h = Harness()
+        called: list[int] = []
+
+        async def hook(report: RoundReport) -> None:
+            called.append(1)
+
+        h.run_kwargs["after_first_round"] = hook
+        original = h.on_round
+
+        def stopping(report: RoundReport) -> None:
+            original(report)
+            h.stop.set()
+
+        h.on_round = stopping  # type: ignore[method-assign]
+        h.start()
+        await h.task
+        assert called == []
+
+    run(scenario)
+
+
+def test_after_first_round_is_skipped_after_a_fatal_error_in_round_one() -> None:
+    async def scenario() -> None:
+        h = Harness()
+        called: list[int] = []
+
+        async def hook(report: RoundReport) -> None:
+            called.append(1)
+
+        h.run_kwargs["after_first_round"] = hook
+        h.source.errors["A"] = RuntimeError("boom")
+        h.start()
+        with pytest.raises(FatalLoopError):
+            await h.task
+        assert called == []
+
+    run(scenario)
+
+
+def test_after_first_round_exception_is_a_fatal_loop_error_and_keeps_the_uncertain_symbols() -> None:
+    async def scenario() -> None:
+        h = Harness(sink=ControlledSink(raises=[CandleWriteOutcomeUnknown("unknown")]))
+        boom = RuntimeError("hook")
+
+        async def hook(report: RoundReport) -> None:
+            raise boom
+
+        h.run_kwargs["after_first_round"] = hook
+        h.start()
+        await h.t.until_waiting(1)
+        await h.t.advance(1000)  # attempt 2 collects; the first write's outcome stays unknown
+        with pytest.raises(FatalLoopError) as caught:
+            await h.task
+        assert caught.value.uncertain_symbols == ("A",) and caught.value.__cause__ is boom
+        assert h.stop.is_set()
+        await assert_no_leftover_tasks()
+
+    run(scenario)
+
+
+def test_observe_forming_slot_gets_the_newest_returned_row_and_the_wall_time_in_round_one_only() -> None:
+    async def scenario() -> None:
+        h = Harness()
+        await honouring(h)
+        h.source.forming_ahead_slots = 3
+        seen: list[tuple[str, int, int]] = []
+        h.run_kwargs["observe_forming_slot"] = lambda s, o, w: seen.append((s, o, w))
+        h.start()
+        await h.until_rounds(1)
+        assert seen == [("A", F0 + 3 * TF_MS, F0 + 36_000)]
+        await h.advance_to_next_boundary()
+        await h.until_rounds(2)
+        assert len(seen) == 1
+        h.stop.set()
+        await h.task
+
+    run(scenario)
+
+
+def test_observe_forming_slot_is_silent_without_rows_or_after_a_failed_fetch() -> None:
+    async def scenario() -> None:
+        h = Harness()
+        await honouring(h)
+        seen: list[tuple[str, int, int]] = []
+        h.run_kwargs["observe_forming_slot"] = lambda s, o, w: seen.append((s, o, w))
+        h.source.script["A"] = [SourceError("down")]
+        h.start()
+        await h.t.until_waiting(1)
+        assert seen == []
+        await h.t.advance(1000)
+        await h.until_rounds(1)
+        assert len(seen) == 1  # only the successful attempt
+
+        h2 = Harness()
+        h2.source.honour_limit = True
+        h2.source.limited_rows = lambda limit, tf_ms: []  # type: ignore[method-assign]
+        seen2: list[tuple[str, int, int]] = []
+        h2.run_kwargs["observe_forming_slot"] = lambda s, o, w: seen2.append((s, o, w))
+        h2.start()
+        await h2.t.until_waiting(1)
+        assert seen2 == []
+        for task in (h.task, h2.task):
+            task.cancel()
+        await asyncio.gather(h.task, h2.task, return_exceptions=True)
+
+    run(scenario)
+
+
+def test_observe_exceptions_are_not_swallowed() -> None:
+    async def scenario() -> None:
+        h = Harness()
+        boom = RuntimeError("observer")
+
+        def observer(symbol: str, open_ms: int, wall_ms: int) -> None:
+            raise boom
+
+        h.run_kwargs["observe_forming_slot"] = observer
+        h.start()
+        with pytest.raises(FatalLoopError) as caught:
+            await h.task
+        assert caught.value.__cause__ is boom and caught.value.uncertain_symbols == ()
+        assert h.stop.is_set()
+        await assert_no_leftover_tasks()
+
+    run(scenario)
+
+
+def test_cancelling_the_hook_cancels_the_loop_and_leaves_no_task() -> None:
+    async def scenario() -> None:
+        h = Harness()
+        parked = asyncio.Event()
+
+        async def hook(report: RoundReport) -> None:
+            await parked.wait()
+
+        h.run_kwargs["after_first_round"] = hook
+        h.start()
+        await h.until_rounds(1)
+        await h.t.settle()
+        h.task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await h.task
+        await assert_no_leftover_tasks()
+
+    run(scenario)
+
+
+def test_600_symbol_first_round_keeps_the_spacing_and_the_concurrency_bound() -> None:
+    async def scenario() -> None:
+        symbols = tuple(f"S{i}" for i in range(600))
+        h = Harness(symbols, max_concurrency=4)
+        h.source.honour_limit = True
+        starts: list[int] = []
+
+        class Recording:
+            def __init__(self, inner: ScriptedSource) -> None:
+                self.inner = inner
+
+            async def fetch_server_time_ms(self) -> int:
+                starts.append(h.t.monotonic_ns())
+                return await self.inner.fetch_server_time_ms()
+
+            async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> Any:
+                starts.append(h.t.monotonic_ns())
+                return await self.inner.fetch_klines(symbol, timeframe, limit)
+
+            async def close(self) -> None:
+                await self.inner.close()
+
+        limited = RateLimitedSource(Recording(h.source), RateLimiter(100, h.t, h.t.sleep))
+        in_flight = 0
+        peak = 0
+
+        class Counting:
+            """Placed before the limiter: counts the calls of attempts that are in flight, waiting included."""
+
+            async def fetch_server_time_ms(self) -> int:
+                nonlocal in_flight, peak
+                in_flight += 1
+                peak = max(peak, in_flight)
+                try:
+                    return await limited.fetch_server_time_ms()
+                finally:
+                    in_flight -= 1
+
+            async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> Any:
+                nonlocal in_flight, peak
+                in_flight += 1
+                peak = max(peak, in_flight)
+                try:
+                    return await limited.fetch_klines(symbol, timeframe, limit)
+                finally:
+                    in_flight -= 1
+
+            async def close(self) -> None:
+                await limited.close()
+
+        h.run_kwargs["first_round_wanted_from"] = {f"S{i}": F0 - 990 * TF_MS for i in range(5)}
+        start_ns = h.t.monotonic_ns()
+        h.task = asyncio.create_task(
+            run_collection_loop(
+                Counting(),
+                h.sink,
+                config(symbols, max_concurrency=4),
+                h.t,
+                h.t.sleep,
+                h.stop,
+                h.on_round,
+                **h.run_kwargs,
+            )
+        )
+        for _ in range(1_500):
+            if h.rounds:
+                break
+            await h.t.advance(100)
+        assert h.rounds, "round one did not finish"
+        gaps = [b - a for a, b in itertools.pairwise(starts)]
+        assert gaps and min(gaps) >= 100 * NS_PER_MS
+        assert peak == 4  # the semaphore, not the limiter, bounds the attempts in flight
+        assert sum(1 for _, limit in h.source.limits if limit > 100) == 5
+        assert h.t.monotonic_ns() - start_ns >= (2 * 600 - 1) * 100 * NS_PER_MS
+        h.stop.set()
+        await h.t.advance(0)
+        h.task.cancel()
+        await asyncio.gather(h.task, return_exceptions=True)
+
+    run(scenario)

@@ -90,6 +90,11 @@ def candle_count(db: Path) -> int:
         conn.close()
 
 
+def round_lines(out: str) -> list[str]:
+    """The S14 round report, without the S15 reconcile lines around it."""
+    return [line for line in out.splitlines() if not line.startswith(("reconcile", "  hole ", "  still_missing "))]
+
+
 def raise_on_nth(n: int, sig: signal.Signals = signal.SIGTERM) -> Callable[[], None]:
     calls = [0]
 
@@ -124,7 +129,10 @@ def test_a_signal_stops_gracefully_and_exits_0(
     opened: list[FakeSource] = []
     assert run_cli(db, source, clock, stop_on_sleep(clock, 2, sig), opened=opened) == 0
     captured = capsys.readouterr()
-    lines = captured.out.splitlines()
+    all_lines = captured.out.splitlines()
+    assert all_lines[0].startswith(f"reconcile symbol={SYMBOL} window=no_baseline ")  # the pre-start read comes first
+    assert all_lines[1].startswith("reconcile summary symbols=1 ")
+    lines = round_lines(captured.out)
     assert lines[0] == f"round target={FIRST_TARGET} collected=1 conflicted=0 gave_up=0 stopped=0 write_uncertain=0"
     assert lines[1].startswith("round target=1792677000000 collected=0 conflicted=0 gave_up=0 stopped=1")
     assert "Traceback" not in captured.err
@@ -210,7 +218,7 @@ def test_unknown_write_then_clean_rounds_still_exits_4(
             signal.raise_signal(signal.SIGTERM)
 
     assert run_cli(db, source, clock, AdvancingSleep(clock, on_sleep=on_sleep)) == 4
-    lines = capsys.readouterr().out.splitlines()
+    lines = round_lines(capsys.readouterr().out)
     assert "collected=1" in lines[0] and "write_uncertain=1" in lines[0]
     assert "collected=1" in lines[1] and "write_uncertain=1" in lines[1]  # clean round, flag persists
 
@@ -263,15 +271,17 @@ def test_a_missing_database_directory_exits_1_and_opens_nothing(tmp_path: Path) 
         ["--max-concurrency", "0"],
         ["--min-request-interval-ms", "-1"],
         ["--limit", "0"],
+        ["--limit", "4"],  # the default delay of 15 s needs 5 rows (S15 Decision 9)
+        ["--publication-delay-ms", "30000000"],
     ],
-    ids=["duplicate_symbol", "zero_concurrency", "negative_interval", "zero_limit"],
+    ids=["duplicate_symbol", "zero_concurrency", "negative_interval", "zero_limit", "limit_below", "delay_too_long"],
 )
 def test_usage_errors_exit_2_and_open_nothing(db: Path, extra: list[str]) -> None:
     clock = FakeClock()
     opened: list[FakeSource] = []
     with pytest.raises(SystemExit) as raised:
         run_cli(db, FakeSource(clock, forming_rows()), clock, AdvancingSleep(clock), *extra, opened=opened)
-    assert raised.value.code == 2 and opened == []
+    assert raised.value.code == 2 and opened == [] and not db.exists()
 
 
 def test_run_without_a_symbol_is_a_usage_error(db: Path) -> None:

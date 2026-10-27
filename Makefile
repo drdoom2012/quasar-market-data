@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck imports check live
+.PHONY: test lint typecheck imports check live bench
 
 test:
 	uv run pytest
@@ -17,3 +17,9 @@ check: lint typecheck imports test
 # Hits Binance public endpoints; not part of `check`.
 live:
 	uv run pytest -m live tests/live -v
+
+# Reconcile read benchmark on a generated database in a fresh temp dir; not part of `check`.
+# PROFILE: smoke | medium | target | scaling. medium and target are slow and large; run them by hand.
+PROFILE ?= smoke
+bench:
+	uv run python -m tests.collector.bench_reconcile --profile $(PROFILE)

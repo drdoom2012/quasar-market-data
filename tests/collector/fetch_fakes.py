@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import Callable, Sequence
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,20 @@ def forming_rows() -> list[list[Any]]:
 def closed_rows() -> list[list[Any]]:
     rows: list[list[Any]] = json.loads((FIXTURES / "btcusdt_5m_closed_raw.json").read_text())
     return rows
+
+
+@cache
+def _template_row() -> tuple[Any, ...]:
+    return tuple(closed_rows()[0])
+
+
+def kline_row(open_ms: int, tf_ms: int, **values: str) -> list[Any]:
+    """The first closed fixture row moved to ``open_ms``; ``values`` replaces ``close`` (index 4) and friends."""
+    row = list(_template_row())
+    row[0], row[6] = open_ms, open_ms + tf_ms - 1
+    for name, value in values.items():
+        row[{"open": 1, "high": 2, "low": 3, "close": 4, "volume": 5}[name]] = value
+    return row
 
 
 class FakeClock:
@@ -56,7 +71,12 @@ class FakeSource:
         time_error: Exception | None = None,
         klines_error: BaseException | None = None,
         on_klines: Callable[[], None] | None = None,
+        *,
+        honour_limit: bool = False,
+        server_ahead_ms: int = 0,
     ) -> None:
+        self.honour_limit = honour_limit  # True: ``limit`` rows ending at the server's forming slot; ``rows`` unused
+        self.server_ahead_ms = server_ahead_ms  # honour_limit only: the server clock is the local one plus this
         self.clock = clock
         self.rows = rows
         self.server_time_ms = server_time_ms
@@ -73,7 +93,14 @@ class FakeSource:
         self.clock.advance(self.rtt_ms)
         if self.time_error is not None:
             raise self.time_error
+        if self.honour_limit:
+            return self.clock.wall_ms() + self.server_ahead_ms
         return self.server_time_ms
+
+    def limited_rows(self, limit: int, tf_ms: int) -> list[list[Any]]:
+        """``limit`` rows ending at the server's forming slot, all with the closed fixture's first row values."""
+        forming = (self.clock.wall_ms() + self.server_ahead_ms) // tf_ms * tf_ms
+        return [kline_row(open_ms, tf_ms) for open_ms in range(forming - (limit - 1) * tf_ms, forming + tf_ms, tf_ms)]
 
     async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> Sequence[object]:
         self.kline_calls.append((symbol, timeframe, limit))
@@ -81,6 +108,8 @@ class FakeSource:
             self.on_klines()
         if self.klines_error is not None:
             raise self.klines_error
+        if self.honour_limit:
+            return self.limited_rows(limit, timeframe.milliseconds)
         return self.rows
 
     async def close(self) -> None:

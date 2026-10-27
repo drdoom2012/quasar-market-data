@@ -13,7 +13,10 @@ what happened. Exit codes keep apart what is known about persistence:
 A resource that fails to close is only a warning when persistence is settled; the exit status ``4`` and
 ``130`` are never changed by what ``close`` does.
 
-``run`` collects continuously until SIGINT or SIGTERM (S14). Its exit codes:
+``run`` collects continuously until SIGINT or SIGTERM (S14). Before any network call it reads the stored window and
+history of every symbol (S15 restart reconcile; a failing read exits ``1``), sizes round one's requests to reach the
+oldest absent slot of the window, and after round one reads the database again to report what is still absent
+(``reconcile-after``; a failing read only withholds that report). Its exit codes:
 
 * ``0`` stopped on request and every write is accounted for;
 * ``4`` a write's outcome was unknown or cancelled at some point in the run (the batch may or may not be stored;
@@ -29,13 +32,13 @@ import signal
 import sqlite3
 import sys
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
 from importlib.metadata import version
 from pathlib import Path
 
 from quasar_market_data.collector.async_candle_writer import AsyncCandleWriter
-from quasar_market_data.collector.binance_klines import KlineParseError
+from quasar_market_data.collector.binance_klines import VENUE_BINANCE_USDM, KlineParseError
 from quasar_market_data.collector.binance_usdm import BinanceUsdmSource
 from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown
 from quasar_market_data.collector.clock import Clock, Sleep, SystemClock, system_sleep
@@ -55,7 +58,16 @@ from quasar_market_data.collector.fetch_once import (
 )
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
+from quasar_market_data.collector.reconcile_reader import ReconcileError, ReconcileInputs, expected_target, reconcile
 from quasar_market_data.domain.closed_candles import DEFAULT_PUBLICATION_DELAY_MS
+from quasar_market_data.domain.reconcile import (
+    REACH_MARGIN_SLOTS,
+    HistoryStatus,
+    SeriesReconcile,
+    WindowStatus,
+    clock_lead_slots,
+    steady_state_limit_needed,
+)
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import StorageError, open_writer
 from quasar_market_data.storage.migrate import migrate
@@ -187,11 +199,144 @@ def _print_round(report: RoundReport) -> None:
         )
 
 
+def _flag(value: bool) -> str:
+    return "true" if value else "false"
+
+
+def _ms(value: int | None) -> str:
+    return "-" if value is None else str(value)
+
+
+def _state_fields(r: SeriesReconcile) -> str:
+    return (
+        f"window={r.window.value} all_present={_flag(r.all_present)}"
+        f" clock_behind_stored={_flag(r.clock_behind_stored)} history={r.history.value} missing={r.missing}"
+        f" due={r.due} stale={r.stale} conflicted={r.conflicted} unavailable={r.unavailable}"
+    )
+
+
+def _summary_fields(results: Mapping[str, SeriesReconcile]) -> str:
+    values = results.values()
+    return (
+        f"symbols={len(results)} window_gaps={sum(r.window is WindowStatus.WINDOW_GAPS for r in values)}"
+        f" not_all_present={sum(not r.all_present for r in values)} due_slots={sum(r.due for r in values)}"
+        f" history_holes={sum(r.history_unaccounted_holes for r in values)}"
+        f" needs_s16_slots={sum(r.needs_s16_slots for r in values)}"
+    )
+
+
+def _print_reconcile(results: Mapping[str, SeriesReconcile], limit: int) -> None:
+    """The pre-start read: a line per symbol unless its classified window has every slot present and its history
+    no hole, then the summary. Never says "complete": see S15 Decisions 3 and 6."""
+    for symbol, r in results.items():
+        if r.window is WindowStatus.WINDOW_NO_GAPS and r.all_present and r.history is not HistoryStatus.HOLES:
+            continue
+        print(
+            f"reconcile symbol={symbol} {_state_fields(r)} wanted_from={_ms(r.oldest_wanted_ms)}"
+            f" unreachable_tail={r.unreachable_tail_slots} history_holes={r.history_unaccounted_holes}"
+            f" holes_older_than_window={r.history_holes_older_than_window} needs_s16={r.needs_s16_slots}"
+            f" unknown_before={_ms(r.unknown_before_ms)} catch_up_limit={r.catch_up_limit_at_read}",
+            flush=True,
+        )
+        for start, end in r.largest_hole_runs:
+            print(f"  hole {start}..{end} (raw)", flush=True)
+    catch_up = sum(r.catch_up_limit_at_read > limit for r in results.values())
+    print(f"reconcile summary {_summary_fields(results)} catch_up={catch_up}", flush=True)
+
+
+def _print_reconcile_after(
+    after: Mapping[str, SeriesReconcile], before: Mapping[str, SeriesReconcile], lead_max: int | None
+) -> None:
+    """The post-check: what the database holds after round one, next to what was absent at the pre-check.
+
+    ``absent_before`` is only a comparison value; no field claims a slot was recovered (S15 Decision 5)."""
+    for symbol, r in after.items():
+        prior = before.get(symbol)
+        absent_before = "-" if prior is None else str(prior.missing + prior.due + prior.stale)
+        print(
+            f"reconcile-after symbol={symbol} {_state_fields(r)} absent_before={absent_before}"
+            f" history_holes={r.history_unaccounted_holes} holes_older_than_window={r.history_holes_older_than_window}"
+            f" needs_s16={r.needs_s16_slots} unknown_before={_ms(r.unknown_before_ms)}",
+            flush=True,
+        )
+        for run in r.absent_runs:
+            print(f"  still_missing {symbol} {run.start_ms}..{run.end_ms} {run.state.value}", flush=True)
+    print(f"reconcile-after summary {_summary_fields(after)} clock_lead_slots_max={_ms(lead_max)}", flush=True)
+
+
+def _warn_clock_lead(lead_max: int | None) -> None:
+    if lead_max is not None and lead_max > REACH_MARGIN_SLOTS:
+        _error(
+            f"warning: the server's forming slot was {lead_max} slots ahead of the local clock"
+            f" (assumption A1 allows {REACH_MARGIN_SLOTS}); first-round requests may have missed up to"
+            f" {lead_max - REACH_MARGIN_SLOTS} of the oldest wanted slots"
+        )
+
+
 async def _run_loop(
     config: LoopConfig, db: Path, min_interval_ms: int, open_source: OpenSource, clock: Clock, sleep: Sleep
 ) -> int:
+    """Handlers first, so that a stop during the pre-start read is honoured; restored on every way out."""
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
+    previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    for sig in previous:
+        loop.add_signal_handler(sig, stop.set)
+    try:
+        return await _reconcile_and_collect(config, db, min_interval_ms, open_source, clock, sleep, stop)
+    finally:
+        for sig, handler in previous.items():
+            loop.remove_signal_handler(sig)
+            signal.signal(sig, handler)
+
+
+async def _reconcile_and_collect(
+    config: LoopConfig,
+    db: Path,
+    min_interval_ms: int,
+    open_source: OpenSource,
+    clock: Clock,
+    sleep: Sleep,
+    stop: asyncio.Event,
+) -> int:
+    inputs = ReconcileInputs(
+        symbols=config.symbols,
+        venue=VENUE_BINANCE_USDM,
+        timeframe=config.timeframe,
+        publication_delay_ms=config.publication_delay_ms,
+        default_limit=config.limit,
+        max_limit=MAX_LIMIT,
+    )
+    as_of = clock.wall_ms()
+    try:
+        target = expected_target(inputs, as_of)
+    except Exception as error:
+        raise ReconcileError(f"restart reconcile failed: {error}") from error
+    # Before any network call and before the writer opens (S15 Decision 9); a failure is a ReconcileError (exit 1).
+    before = await reconcile(db, inputs, as_of_ms=as_of, target_open_ms=target)
+    _print_reconcile(before, config.limit)
+    if stop.is_set():  # stopped during the read: nothing was fetched or written
+        return 0
+
+    tf = config.timeframe.milliseconds
+    lead_max: int | None = None
+
+    def observe_forming_slot(symbol: str, forming_open_ms: int, wall_ms: int) -> None:
+        nonlocal lead_max
+        lead = clock_lead_slots(forming_open_ms, wall_ms, tf)
+        lead_max = lead if lead_max is None else max(lead_max, lead)
+
+    async def after_first_round(report: RoundReport) -> None:
+        # The loop does not bound this hook by ``stop``: its only I/O is one read on a read-only connection (bounded
+        # by the busy timeout and the series' size). A stop during it is seen by the loop as soon as it returns.
+        try:
+            after = await reconcile(db, inputs, as_of_ms=report.started_wall_ms, target_open_ms=report.target_open_ms)
+        except Exception as error:  # noqa: BLE001 - the claim is withheld; collection itself is healthy
+            _error(f"reconcile-after status=unverified error={error}")
+        else:
+            _print_reconcile_after(after, before, lead_max)
+        _warn_clock_lead(lead_max)
+
     writer_close_error: Exception | None = None
 
     async def close_writer(writer: AsyncCandleWriter) -> None:
@@ -207,18 +352,24 @@ async def _run_loop(
         writer = await AsyncCandleWriter.open(db)
         stack.push_async_callback(close_writer, writer)
         limited = RateLimitedSource(source, RateLimiter(min_interval_ms, clock, sleep))
-        previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
-        for sig in previous:
-            loop.add_signal_handler(sig, stop.set)
         outcome: LoopExit | FatalLoopError
         try:
-            outcome = await run_collection_loop(limited, writer, config, clock, sleep, stop, _print_round)
+            outcome = await run_collection_loop(
+                limited,
+                writer,
+                config,
+                clock,
+                sleep,
+                stop,
+                _print_round,
+                first_round_wanted_from={
+                    s: r.oldest_wanted_ms for s, r in before.items() if r.oldest_wanted_ms is not None
+                },
+                after_first_round=after_first_round,
+                observe_forming_slot=observe_forming_slot,
+            )
         except FatalLoopError as error:
             outcome = error
-        finally:
-            for sig, handler in previous.items():
-                loop.remove_signal_handler(sig)
-                signal.signal(sig, handler)
         code = run_exit_code(outcome)
         if isinstance(outcome, FatalLoopError):
             _error(f"error: {outcome}")
@@ -302,6 +453,12 @@ def main(
     if args.command == "run":
         if len(set(args.symbol)) != len(args.symbol):
             parser.error("--symbol must not be repeated with the same value")
+        needed = steady_state_limit_needed(args.publication_delay_ms, Timeframe("5m").milliseconds)
+        if needed > args.limit:
+            parser.error(
+                f"--publication-delay-ms {args.publication_delay_ms} needs --limit >= {needed}:"
+                " with fewer rows no round can reach the newest expected candle"
+            )
         return _run_command(args, open_source, clock or SystemClock(), sleep)
     try:
         return _fetch_once(args, open_source, clock or SystemClock())

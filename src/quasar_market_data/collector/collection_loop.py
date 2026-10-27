@@ -5,20 +5,22 @@ round must obtain, how often to retry, and how to stop. See ``docs/superpowers/p
 """
 
 import asyncio
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
 from quasar_market_data.collector.binance_klines import KlineParseError
 from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown, WriteReport
 from quasar_market_data.collector.clock import Clock, Sleep
-from quasar_market_data.collector.fetch_once import CandleSink, FetchOnceConfig, fetch_once
+from quasar_market_data.collector.fetch_once import MAX_LIMIT, CandleSink, FetchOnceConfig, fetch_once
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.domain.closed_candles import DEFAULT_PUBLICATION_DELAY_MS
+from quasar_market_data.domain.reconcile import attempt_limit
 from quasar_market_data.domain.schedule import newest_expected_open_ms, next_wake_ms
 from quasar_market_data.domain.server_time import DEFAULT_TIME_TRUST, TimeTrustConfig
 from quasar_market_data.domain.timeframe import Timeframe
+from quasar_market_data.domain.timestamps import ensure_timestamp_ms
 from quasar_market_data.domain.validation import ValidatedCandle
 
 
@@ -111,6 +113,8 @@ async def collect_symbol(
     clock: Clock,
     sleep: Sleep,
     stop: asyncio.Event,
+    limit_for_attempt: Callable[[], int] | None = None,
+    observe_forming: Callable[[int, int], None] | None = None,
 ) -> SymbolResult:
     attempts = 0
     inserted = 0
@@ -126,12 +130,17 @@ async def collect_symbol(
             return result(SymbolOutcome.STOPPED)
         attempts += 1
         try:
-            report = await fetch_once(source, sink, config, clock)
+            attempt_config = config if limit_for_attempt is None else replace(config, limit=limit_for_attempt())
+            report = await fetch_once(source, sink, attempt_config, clock)
         except (SourceError, KlineParseError, CandleWriteOutcomeUnknown) as error:
             problem = str(error) or type(error).__name__
             if target_open_ms is None:
                 return result(SymbolOutcome.GAVE_UP)
         else:
+            if observe_forming is not None:
+                returned = [c.key.open_time_ms for c in (*report.selection.eligible, *report.selection.pending)]
+                if returned:
+                    observe_forming(max(returned), clock.wall_ms())
             if report.write is not None:
                 inserted += report.write.inserted
                 last_write = report.write
@@ -224,11 +233,26 @@ async def run_collection_loop(
     sleep: Sleep,
     stop: asyncio.Event,
     on_round: Callable[[RoundReport], None],
+    *,
+    first_round_wanted_from: Mapping[str, int] | None = None,
+    after_first_round: Callable[[RoundReport], Awaitable[None]] | None = None,
+    observe_forming_slot: Callable[[str, int, int], None] | None = None,
 ) -> LoopExit:
     """Collect on every boundary until ``stop`` is set; see the S14 plan, Decisions 4 to 9.
 
-    ``stop`` is also set by the loop itself on a fatal error.
+    ``stop`` is also set by the loop itself on a fatal error. In round one only, a symbol in
+    ``first_round_wanted_from`` requests ``attempt_limit`` rows (computed from the clock at every attempt),
+    ``observe_forming_slot`` sees the newest returned row after every successful fetch, and ``after_first_round``
+    is awaited after ``on_round`` (S15 Decisions 7, 8 and 12).
     """
+    tf_ms = config.timeframe.milliseconds
+    wanted = dict(first_round_wanted_from or {})
+    for symbol, oldest in wanted.items():
+        if symbol not in config.symbols:
+            raise ValueError(f"first_round_wanted_from names an unknown symbol: {symbol!r}")
+        ensure_timestamp_ms(oldest, f"first_round_wanted_from[{symbol!r}]")
+        if oldest % tf_ms:
+            raise ValueError(f"first_round_wanted_from[{symbol!r}] {oldest} is not aligned to the timeframe")
     watches = {symbol: _WriteWatch(sink) for symbol in config.symbols}  # one per symbol for the whole run
     semaphore = asyncio.Semaphore(config.max_concurrency)
     fatal: list[Exception] = []
@@ -236,21 +260,53 @@ async def run_collection_loop(
     def uncertain() -> tuple[str, ...]:
         return tuple(symbol for symbol in config.symbols if watches[symbol].uncertain)
 
-    async def run_symbol(symbol: str, target: int | None) -> SymbolResult:
+    async def run_symbol(symbol: str, target: int | None, first: bool) -> SymbolResult:
         async with semaphore:
             if stop.is_set():
                 return SymbolResult(symbol, SymbolOutcome.STOPPED, 0, 0, None, (), None)
+            limit_for_attempt: Callable[[], int] | None = None
+            observe: Callable[[int, int], None] | None = None
+            if first and symbol in wanted:
+                oldest = wanted[symbol]
+
+                def limit_for_attempt() -> int:
+                    return attempt_limit(
+                        now_ms=clock.wall_ms(),
+                        oldest_wanted_ms=oldest,
+                        timeframe_ms=tf_ms,
+                        default_limit=config.limit,
+                        max_limit=MAX_LIMIT,
+                    )
+
+            if first and observe_forming_slot is not None:
+                hook = observe_forming_slot
+
+                def observe(open_ms: int, wall_ms: int) -> None:
+                    hook(symbol, open_ms, wall_ms)
+
             try:
                 return await collect_symbol(
-                    source, watches[symbol], config.fetch_config(symbol), target, config.retry, clock, sleep, stop
+                    source,
+                    watches[symbol],
+                    config.fetch_config(symbol),
+                    target,
+                    config.retry,
+                    clock,
+                    sleep,
+                    stop,
+                    limit_for_attempt,
+                    observe,
                 )
             except Exception as error:  # noqa: BLE001 - only fatal classes reach here; CancelledError is not an Exception
                 fatal.append(error)
                 stop.set()  # before the semaphore is released: queued symbols then see it and never start
                 return SymbolResult(symbol, SymbolOutcome.FATAL, None, None, None, None, repr(error))
 
-    async def run_round(target: int | None) -> tuple[SymbolResult, ...]:
-        tasks = [asyncio.create_task(run_symbol(symbol, target), name=f"collect-{symbol}") for symbol in config.symbols]
+    async def run_round(target: int | None, first: bool) -> tuple[SymbolResult, ...]:
+        tasks = [
+            asyncio.create_task(run_symbol(symbol, target, first), name=f"collect-{symbol}")
+            for symbol in config.symbols
+        ]
         pending: set[asyncio.Future[Any]] = set(tasks)
         stop_wait: asyncio.Future[Any] | None = asyncio.ensure_future(stop.wait())
         grace: asyncio.Future[Any] | None = None
@@ -291,13 +347,22 @@ async def run_collection_loop(
         return tuple(results)
 
     tf, delay = config.timeframe, config.publication_delay_ms
+    first_round = True
     while not stop.is_set():
         started = clock.wall_ms()
         target = newest_expected_open_ms(started, tf, delay)
-        results = await run_round(target)
+        results = await run_round(target, first_round)
         if fatal:
             raise FatalLoopError(fatal[0], uncertain()) from fatal[0]
-        on_round(RoundReport(target, started, results, uncertain()))
+        report = RoundReport(target, started, results, uncertain())
+        on_round(report)
+        if first_round and after_first_round is not None and not stop.is_set():
+            try:
+                await after_first_round(report)
+            except Exception as error:
+                stop.set()
+                raise FatalLoopError(error, uncertain()) from error
+        first_round = False
         if stop.is_set():
             break
         now = clock.wall_ms()

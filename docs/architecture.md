@@ -131,6 +131,7 @@ Coverage is evaluated **per venue + instrument + timeframe + requested interval*
 The initial primary OHLCV timeframe is **5m**. The target scale is roughly **300–600 instruments**, with workload varying by venue count.
 
 1. At startup, load configuration and persisted collection checkpoints.
+   In v1 the persisted checkpoints are the stored facts (candles, conflicts, unavailable intervals); no separate checkpoint table exists.
 2. Reconcile expected closed periods with persisted periods.
 3. Prioritize recent closed candles; queue recoverable historical gaps separately.
 4. Apply bounded per-exchange concurrency and rate limiting.
