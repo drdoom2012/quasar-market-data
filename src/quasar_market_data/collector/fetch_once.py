@@ -13,13 +13,13 @@ Failures propagate: ``SourceError``, ``KlineParseError`` and any writer error, i
 ``CandleWriteOutcomeUnknown``, reach the caller unchanged.
 """
 
-import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Protocol
 
-from quasar_market_data.collector.async_candle_writer import AsyncCandleWriter
 from quasar_market_data.collector.binance_klines import parse_klines
 from quasar_market_data.collector.candle_writer import WriteReport
+from quasar_market_data.collector.clock import Clock
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.domain.closed_candles import (
     DEFAULT_PUBLICATION_DELAY_MS,
@@ -33,22 +33,15 @@ from quasar_market_data.domain.server_time import (
     server_lower_bound,
 )
 from quasar_market_data.domain.timeframe import Timeframe
+from quasar_market_data.domain.validation import ValidatedCandle
 
 MAX_LIMIT: Final = 1000
 
 
-class Clock(Protocol):
-    def monotonic_ns(self) -> int: ...
+class CandleSink(Protocol):
+    """Where ``fetch_once`` sends the confirmed closed candles; ``AsyncCandleWriter`` satisfies it."""
 
-    def wall_ms(self) -> int: ...
-
-
-class SystemClock:
-    def monotonic_ns(self) -> int:
-        return time.monotonic_ns()
-
-    def wall_ms(self) -> int:
-        return time.time_ns() // 1_000_000
+    async def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport: ...
 
 
 @dataclass(frozen=True)
@@ -79,9 +72,7 @@ class FetchOnceReport:
     write: WriteReport | None
 
 
-async def fetch_once(
-    source: KlineSource, writer: AsyncCandleWriter, config: FetchOnceConfig, clock: Clock
-) -> FetchOnceReport:
+async def fetch_once(source: KlineSource, writer: CandleSink, config: FetchOnceConfig, clock: Clock) -> FetchOnceReport:
     sent_ns = clock.monotonic_ns()
     try:
         server_time_ms = await source.fetch_server_time_ms()

@@ -22,3 +22,22 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
   start-up (`quasar-api serve`). Kept on purpose: `open_reader` is shared and the check is one comparison. Not a defect.
 - **Live Binance demonstration:** run once by hand on 2026-10-25 (collector `fetch-once`, then `quasar-api serve`,
   `curl`); it is not part of `make check`.
+
+## From the S14 plan (`quasar-collector run`)
+
+### F-8. Limits of the collection loop that were left open on purpose
+
+- **Where:** `src/quasar_market_data/collector/collection_loop.py`, `cli.py`, `rate_limiter.py`.
+- **No server-time regression check across calls.** `fetch_once` starts every call without the previous accepted
+  observation, so ADR-0001 P-4 (server time never regresses) is not checked across the loop's calls. Needs state shared
+  between calls.
+- **No long cool-off after Binance 418/429.** Those errors are ordinary retryable `SourceError`s with the short bounded
+  backoff.
+- **No hard deadline on a round or on `AsyncCandleWriter.close()`.** The bounds are the attempt count, the CCXT request
+  timeout (10 s default, not re-enforced here), the limiter queue and SQLite's `busy_timeout` per lock wait.
+- **Two requests per symbol and attempt** (server time, klines). A shared observation per round would halve it; measure
+  in S23 first.
+- **Request spacing is a placeholder** (100 ms) and is spacing of adapter calls, not of network requests; Binance
+  weights were not read.
+- **The uncertainty flag lives only in the process.** A restart starts clean; clearing it properly needs batch identity
+  and read-back, which belongs to S15/S16.

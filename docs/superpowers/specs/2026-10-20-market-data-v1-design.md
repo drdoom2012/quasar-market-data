@@ -136,7 +136,8 @@ These were settled without a user decision; each can be overridden.
 6. **Live access.** Whether Binance public endpoints are reachable from the build environment is checked at the start of S2. If not, the user is told before S9 is planned.
 7. **Symbols.** Canonical symbol format is `BTC/USDT:USDT`, venue-independent, so a second venue does not change the schema. Initial ~10 instruments (builder's choice, configurable): BTC, ETH, SOL, BNB, XRP, DOGE, ADA, AVAX, LINK, LTC against USDT.
 8. **Timeframes.** The domain alignment code is generic over standard timeframes, but v1 collects and tests 5m only. The `--version` source of truth is `pyproject.toml`. No separate early spike for the migration runner or the thread-based writer; both are validated in their own slices (S6, S7).
-9. **Scheduler planner and `Clock` (S13).** S13 is a pure planner in the domain that takes `now_ms`; the `Clock` protocol stays in the collector (`collector/fetch_once.py`) and S14 passes `clock.wall_ms()`. The planner only says when to look; a pending candle needs its own bounded retry in S14.
+9. **Scheduler planner and `Clock` (S13).** S13 is a pure planner in the domain that takes `now_ms`; the `Clock` protocol stays in the collector (S14 moved it to `collector/clock.py`) and S14 passes `clock.wall_ms()`. The planner only says when to look; a pending candle needs its own bounded retry in S14.
+10. **Collection loop (S14).** The loop reuses `fetch_once` per symbol and attempt, so the closed-candle selection stays the single gate. Its decisions are in `docs/superpowers/plans/2026-10-26-s14-collection-loop.md`: a round targets one slot and `COLLECTED` needs a returned write report without a conflict at that slot; retries are bounded (6 attempts, 1 to 8 s); a write that was ever unknown or cancelled keeps its symbol marked for the whole run and gives exit 4; shutdown gives running attempts a grace and does not bound `writer.close()`.
 
 ## 12. Left to the builder
 

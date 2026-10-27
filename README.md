@@ -23,7 +23,7 @@ CI is configured to run `make check` on pull requests and pushes to `main` (not 
 
 `storage` holds the SQLite layer shared by both processes: connection factories (`connection.py`), the schema identity and read-side check the API uses (`schema.py`), and the numbered SQL migrations with the runner that only the Collector imports (`migrate.py`). The schema is specified in `docs/adr/0002-sqlite-schema-v1.md`.
 
-`collector` holds `CandleWriter` and `AsyncCandleWriter`: they persist validated candles idempotently and atomically, and record a re-delivered candle that differs from the stored one in `candle_conflicts` (the stored candle is never changed). The writer does not check that a candle is closed; `fetch_once` (`fetch_once.py`) is the path that passes it only confirmed closed candles (ADR-0001), reading from a `KlineSource`. `binance_usdm.py` is the only module that imports CCXT (async client, raw endpoints). The API cannot import any of this.
+`collector` holds `CandleWriter` and `AsyncCandleWriter`: they persist validated candles idempotently and atomically, and record a re-delivered candle that differs from the stored one in `candle_conflicts` (the stored candle is never changed). The writer does not check that a candle is closed; `fetch_once` (`fetch_once.py`) is the path that passes it only confirmed closed candles (ADR-0001), reading from a `KlineSource`. `binance_usdm.py` is the only module that imports CCXT (async client, raw endpoints). The collection loop (`collection_loop.py`) calls `fetch_once` per symbol on the boundaries planned by `domain/schedule.py`; `rate_limiter.py` spaces adapter calls and `clock.py` holds the injected clocks. The API cannot import any of this.
 
 Console scripts: `quasar-collector` and `quasar-api` (`serve` runs the read-only HTTP API; see below).
 
@@ -51,6 +51,26 @@ Fetches the most recent 5m klines of one Binance USDT-M perpetual (public endpoi
 | `1` | failed; nothing was written, with certainty (source error, malformed batch, untrusted server time, schema or directory problem) |
 | `4` | the write's outcome is unknown (the batch is stored completely or not at all); re-run the same command to reconcile |
 | `130` | interrupted; whether the last batch was stored is unknown; re-run to reconcile |
+| `2` | usage error |
+
+### `quasar-collector run`
+
+```
+quasar-collector run --db market.db --symbol BTC/USDT:USDT [--symbol ETH/USDT:USDT ...] [--limit 100] \
+  [--publication-delay-ms 15000] [--max-concurrency 4] [--min-request-interval-ms 100]
+```
+
+Collects continuously until SIGINT or SIGTERM: on every UTC 5m boundary plus the publication delay it calls `fetch-once` logic for each symbol (so only confirmed closed candles are stored), at most `--max-concurrency` symbols at once. A target slot that is not yet confirmable is retried up to 6 times (1, 2, 4, 8, 8 s); after that the symbol is reported `gave_up` and the next boundary round goes on. It prints one `round ...` line per round (`collected`, `conflicted`, `gave_up`, `stopped`, `write_uncertain`) and one indented line per symbol that is not plainly collected (a `None` count after a shutdown timeout is printed as `unknown`). It collects only the newest `--limit` rows of each round and does not backfill (S16).
+
+`--min-request-interval-ms` spaces the *calls to the exchange adapter*; the CCXT client throttles on its own, and Binance's weight limits are not checked, so confirm the setting before running many symbols.
+
+Stopping: no new attempt starts, and attempts already running get a 10 s grace to finish. A symbol whose write ever came back with an unknown outcome, or was cancelled while writing, keeps the `write_uncertain` mark **for the rest of the run** (a later successful write is a different batch and proves nothing about it). Closing the writer has no time limit, so the process can stay alive longer than the grace while a blocked write settles.
+
+| Exit | Meaning |
+|---|---|
+| `0` | stopped on request; every write is accounted for |
+| `4` | a write's outcome was unknown or cancelled at some point (the batch may or may not be stored; start the command again, writes are idempotent), even if later rounds were clean; takes priority over `1` |
+| `1` | a fatal error with nothing in doubt, a failure before the loop started (directory, schema, source), or a failing writer close after an otherwise clean stop |
 | `2` | usage error |
 
 ## Tool scope

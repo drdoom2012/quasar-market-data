@@ -6,7 +6,7 @@
 
 ## 0. What a consumer can rely on
 
-1. Every candle returned is a **confirmed closed** candle stored by the Collector. The still-forming candle is never returned. This holds as long as every ingestion path routes through the closed-candle selection (INV-007: today only `quasar-collector fetch-once` does; the collection loop and backfill, S14 and S16, must).
+1. Every candle returned is a **confirmed closed** candle stored by the Collector. The still-forming candle is never returned. This holds as long as every ingestion path routes through the closed-candle selection (INV-007: today `quasar-collector fetch-once` and `quasar-collector run` do; backfill, S16, must).
 2. Prices and volumes are **exact decimal text** exactly as stored; the API never converts them to floating point.
 3. The API **never contacts an exchange and never writes**. Read-only access is enforced (INV-014 in `docs/invariants.md`). Exchange isolation is enforced only in a narrowed form (INV-044: no exchange or network-client import in the `api` package, no outbound connection in the API tests); the full guarantee is INV-013, which is planned (S21).
 4. **A response never implies completeness it cannot show.** Every candle response carries a `coverage` block and the series' `oldest`/`newest` stored open times. The absence of a candle is never evidence that nothing traded.
