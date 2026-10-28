@@ -3,10 +3,15 @@
 Same discipline as ``api.coverage_reader`` (whose window selects are repeated here, not imported: the Collector and the
 API stay independent): a read-only connection, ``BEGIN`` so that every symbol sees one snapshot, bound statements
 consumed one at a time. Only open times are read, never values. Nothing here writes, fetches or reads the clock.
+
+A read can be stopped by a ``ReadGuard``: the worker installs a SQLite progress handler that aborts the running
+statement once the guard is set, and checks the guard between statements, so no SQLite call ever crosses threads.
+``on_snapshot`` is called once the read transaction holds its snapshot, before any series is read.
 """
 
 import asyncio
 import sqlite3
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +70,33 @@ class ReconcileError(StorageError):
     """The restart reconcile could not read or classify the stored facts."""
 
 
+class ReadInterrupted(ReconcileError):
+    """The read was stopped by its ``ReadGuard``; nothing was concluded."""
+
+
+_SQLITE_INTERRUPT: Final = 9
+_GUARD_TICK_OPS: Final = 1000  # SQLite VM instructions between two looks at the guard inside one statement
+
+
+class ReadGuard:
+    """Asks a running read to stop. Thread-safe; setting it after the read has ended is harmless."""
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+
+    def interrupt(self) -> None:
+        self._event.set()
+
+    @property
+    def interrupted(self) -> bool:
+        return self._event.is_set()
+
+
+def _check(guard: ReadGuard | None) -> None:
+    if guard is not None and guard.interrupted:
+        raise ReadInterrupted("the read was interrupted")
+
+
 @dataclass(frozen=True)
 class ReconcileInputs:
     symbols: tuple[str, ...]
@@ -81,7 +113,14 @@ def expected_target(inputs: ReconcileInputs, as_of_ms: int) -> int | None:
 
 
 def reconcile_blocking(
-    db: Path, inputs: ReconcileInputs, *, as_of_ms: int, target_open_ms: int | None, history: bool = True
+    db: Path,
+    inputs: ReconcileInputs,
+    *,
+    as_of_ms: int,
+    target_open_ms: int | None,
+    history: bool = True,
+    on_snapshot: Callable[[], None] | None = None,
+    guard: ReadGuard | None = None,
 ) -> dict[str, SeriesReconcile]:
     """Read every series in one snapshot. ``history=False`` reads the bounds and the window only (the pre-start read):
     no series-wide statement runs, and the history fields of a stored series are ``None``."""
@@ -104,15 +143,30 @@ def reconcile_blocking(
         return {symbol: classify(None, None) for symbol in inputs.symbols}
 
     window = reconcile_window(as_of_ms, target_open_ms, tf, inputs.max_limit)
+    _check(guard)
     conn = open_reader(db)
     try:
+        if guard is not None:
+            conn.set_progress_handler(lambda: guard.interrupted, _GUARD_TICK_OPS)
         conn.execute("BEGIN")
         try:
             verify_schema(conn)
+            if on_snapshot is not None:
+                on_snapshot()  # verify_schema ran real SELECTs: the snapshot is fixed from here on
             return {
-                symbol: _read_series(conn, inputs, symbol, window, tf, classify, history) for symbol in inputs.symbols
+                symbol: _read_series(conn, inputs, symbol, window, tf, classify, history, guard)
+                for symbol in inputs.symbols
             }
+        except sqlite3.OperationalError as error:
+            if (
+                guard is not None
+                and guard.interrupted
+                and getattr(error, "sqlite_errorcode", None) == _SQLITE_INTERRUPT
+            ):
+                raise ReadInterrupted("the read was interrupted") from error
+            raise
         finally:
+            conn.set_progress_handler(None, 0)  # the rollback must not be interrupted
             try:
                 conn.execute("ROLLBACK")
             except sqlite3.Error:
@@ -129,7 +183,9 @@ def _read_series(
     tf: int,
     classify: Callable[[SeriesFacts | None, HistoryFacts | None], SeriesReconcile],
     history: bool,
+    guard: ReadGuard | None,
 ) -> SeriesReconcile:
+    _check(guard)
     series = {"venue": inputs.venue, "symbol": symbol, "timeframe": inputs.timeframe.label}
     oldest, newest = conn.execute(BOUNDS_SQL, series).fetchone()
     if oldest is None:
@@ -154,12 +210,15 @@ def _read_series(
         return classify(facts, None)
 
     ws = oldest if window is None else window[0]
+    _check(guard)
     hole_rows = conn.execute(HOLES_SQL, {**series, "tf": tf, "ws": ws}).fetchall()
     raw, raw_old, runs = hole_rows[0][:3]
     largest = tuple((row[3], row[4]) for row in hole_rows if row[3] is not None)
+    _check(guard)
     in_holes, in_holes_old = conn.execute(
         UNAVAILABLE_IN_HOLES_SQL, {**series, "ws": ws, "oldest": oldest, "newest": newest}
     ).fetchone()
+    _check(guard)
     conflicted = conn.execute(CONFLICTED_SQL, series).fetchone()[0]
     holes = HistoryFacts(
         raw_hole_slots=raw,
@@ -174,11 +233,36 @@ def _read_series(
 
 
 async def reconcile(
-    db: Path, inputs: ReconcileInputs, *, as_of_ms: int, target_open_ms: int | None, history: bool = True
+    db: Path,
+    inputs: ReconcileInputs,
+    *,
+    as_of_ms: int,
+    target_open_ms: int | None,
+    history: bool = True,
+    snapshot: asyncio.Event | None = None,
+    guard: ReadGuard | None = None,
 ) -> dict[str, SeriesReconcile]:
+    """``snapshot`` is set once the read holds its snapshot (from the worker thread, through the event loop)."""
+    on_snapshot = None
+    if snapshot is not None:
+        loop = asyncio.get_running_loop()
+        event = snapshot
+
+        def on_snapshot() -> None:
+            loop.call_soon_threadsafe(event.set)
+
     try:
         return await asyncio.to_thread(
-            reconcile_blocking, db, inputs, as_of_ms=as_of_ms, target_open_ms=target_open_ms, history=history
+            reconcile_blocking,
+            db,
+            inputs,
+            as_of_ms=as_of_ms,
+            target_open_ms=target_open_ms,
+            history=history,
+            on_snapshot=on_snapshot,
+            guard=guard,
         )
+    except ReadInterrupted:
+        raise
     except Exception as error:
         raise ReconcileError(f"restart reconcile failed: {error}") from error

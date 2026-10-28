@@ -64,7 +64,13 @@ from quasar_market_data.collector.fetch_once import (
 )
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
-from quasar_market_data.collector.reconcile_reader import ReconcileError, ReconcileInputs, expected_target, reconcile
+from quasar_market_data.collector.reconcile_reader import (
+    ReadGuard,
+    ReconcileError,
+    ReconcileInputs,
+    expected_target,
+    reconcile,
+)
 from quasar_market_data.domain.closed_candles import DEFAULT_PUBLICATION_DELAY_MS
 from quasar_market_data.domain.reconcile import (
     REACH_MARGIN_SLOTS,
@@ -86,6 +92,7 @@ EXIT_INTERRUPTED = 130
 DEFAULT_CONCURRENCY = 4
 DEFAULT_REQUEST_INTERVAL_MS = 100
 DEFAULT_BACKFILL_DAYS = 30
+POST_CHECK_GRACE_MS = 2_000  # how long shutdown waits for a running post-check before interrupting it
 
 type OpenSource = Callable[[], Awaitable[KlineSource]]
 
@@ -366,6 +373,26 @@ async def _run_loop(
             signal.signal(sig, handler)
 
 
+async def _finish_post_check(task: "asyncio.Task[None] | None", guard: ReadGuard) -> None:
+    """Give a running post-check ``POST_CHECK_GRACE_MS``, then interrupt it and wait for it to end.
+
+    The grace is real monotonic time (``asyncio.wait``), not the injected ``sleep``: the read is a real thread whose
+    duration a fake clock does not model. A cancellation still interrupts the read before it propagates, so no thread
+    keeps reading behind the process; an error in the task is only a warning and never changes the exit code.
+    """
+    if task is None:
+        return
+    try:
+        await asyncio.wait({task}, timeout=POST_CHECK_GRACE_MS / 1000)
+    finally:
+        if not task.done():
+            guard.interrupt()
+    try:
+        await task
+    except Exception as error:  # noqa: BLE001 - only the report failed; the exit code stays the loop's
+        _error(f"warning: the post-check ended with an error: {error!r}")
+
+
 async def _reconcile_and_collect(
     config: LoopConfig,
     db: Path,
@@ -396,17 +423,39 @@ async def _reconcile_and_collect(
         return 0
 
     monitor = ClockLeadMonitor(config.timeframe.milliseconds, _warn_clock_lead)
+    guard = ReadGuard()
+    post_check: asyncio.Task[None] | None = None
 
-    async def after_first_round(report: RoundReport) -> None:
-        # The loop does not bound this hook by ``stop``: its only I/O is one read on a read-only connection (bounded
-        # by the busy timeout and the series' size). A stop during it is seen by the loop as soon as it returns.
+    async def report_post_check(report: RoundReport, lead_max: int | None, snapshot: asyncio.Event) -> None:
         try:
-            after = await reconcile(db, inputs, as_of_ms=report.started_wall_ms, target_open_ms=report.target_open_ms)
+            after = await reconcile(
+                db,
+                inputs,
+                as_of_ms=report.started_wall_ms,
+                target_open_ms=report.target_open_ms,
+                snapshot=snapshot,
+                guard=guard,
+            )
         except Exception as error:  # noqa: BLE001 - the claim is withheld; collection itself is healthy
             _error(f"reconcile-after status=unverified error={error}")
         else:
-            _print_reconcile_after(after, before, monitor.max_lead)
+            _print_reconcile_after(after, before, lead_max)
+
+    async def after_first_round(report: RoundReport) -> None:
+        """Start the post-check and return once its read holds a snapshot (or has ended): it then sees exactly what
+        round one left, never a later write, while the series-wide read itself runs beside round two and the backfill
+        (2026-10-28 amendment of S15 D4)."""
+        nonlocal post_check
+        lead_max = monitor.max_lead  # round one's figure; later rounds keep updating the monitor
         monitor.first_round_done()
+        snapshot = asyncio.Event()
+        post_check = asyncio.create_task(report_post_check(report, lead_max, snapshot), name="post-check")
+        snapshot_taken = asyncio.ensure_future(snapshot.wait())
+        try:
+            await asyncio.wait({post_check, snapshot_taken}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            snapshot_taken.cancel()
+            await asyncio.gather(snapshot_taken, return_exceptions=True)
 
     writer_close_error: Exception | None = None
 
@@ -447,6 +496,8 @@ async def _reconcile_and_collect(
             )
         except FatalLoopError as error:
             outcome = error
+        finally:
+            await _finish_post_check(post_check, guard)
         code = run_exit_code(outcome)
         if isinstance(outcome, FatalLoopError):
             _error(f"error: {outcome}")

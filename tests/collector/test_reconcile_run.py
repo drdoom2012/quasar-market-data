@@ -8,6 +8,8 @@ starts at ``WS = F0 - 997·tf``. Every claim is checked against the database, ne
 import shutil
 import signal
 import sqlite3
+import threading
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from quasar_market_data.collector import cli
+from quasar_market_data.collector import cli, reconcile_reader
 from quasar_market_data.collector.async_candle_writer import AsyncCandleWriter
 from quasar_market_data.collector.binance_klines import parse_klines
 from quasar_market_data.collector.candle_writer import CandleWriter, WriteReport
@@ -25,7 +27,7 @@ from quasar_market_data.collector.reconcile_reader import reconcile as REAL_RECO
 from quasar_market_data.domain.reconcile import HistoryStatus, SeriesReconcile, WindowStatus
 from quasar_market_data.domain.timed_coverage import GapRun, SlotState
 from quasar_market_data.domain.validation import require_valid
-from quasar_market_data.storage.connection import open_writer
+from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.collector.fetch_fakes import (
     FIVE_MINUTES,
@@ -35,6 +37,7 @@ from tests.collector.fetch_fakes import (
     FakeSource,
     kline_row,
 )
+from tests.collector.statement_proxy import StatementProxy
 
 TF = FIVE_MINUTES.milliseconds
 F0 = 1_792_677_000_000  # the slot of FakeClock's start (F0 + 36 s)
@@ -822,3 +825,92 @@ def test_the_pre_start_read_prints_an_unread_history_as_a_dash(db: Path, capsys:
     summary = run.line("reconcile summary ")
     assert (summary["history_holes"], summary["needs_s16_slots"]) == ("-", "-")
     assert run.lines("  hole ") == []  # the largest holes are reported by the post-check
+
+
+class RoundTwoGate(FakeSource):
+    """Sets ``reached`` when round two's klines request starts (the first request is round one's)."""
+
+    def __init__(self, *args: Any, on_round_two: Callable[["RoundTwoGate"], None] | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.reached = threading.Event()
+        self.requests = 0
+        self.on_round_two = on_round_two
+
+    async def fetch_klines(self, *args: Any, **kwargs: Any) -> Any:
+        self.requests += 1
+        if self.requests == 2:
+            if self.on_round_two is not None:
+                self.on_round_two(self)
+            self.reached.set()
+        return await super().fetch_klines(*args, **kwargs)
+
+
+def hold_the_post_check_until(monkeypatch: pytest.MonkeyPatch, released: threading.Event) -> list[bool]:
+    """The post-check's hole statement (only the post-check reads history) waits for ``released``, at most 5 s.
+
+    Returns one entry per wait: ``True`` when ``released`` ended it, ``False`` when it timed out."""
+    waits: list[bool] = []
+
+    def before(sql: str, params: Any) -> None:
+        if sql == reconcile_reader.HOLES_SQL:
+            waits.append(released.wait(5))
+
+    def opener(path: Path) -> StatementProxy:
+        return StatementProxy(open_reader(path), before)
+
+    monkeypatch.setattr("quasar_market_data.collector.reconcile_reader.open_reader", opener)
+    return waits
+
+
+def test_round_two_does_not_wait_for_the_post_check(
+    db: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seed(db, slots(T - 70 * TF, T - 60 * TF))
+    clock = FakeClock()
+    source = RoundTwoGate(clock, [], honour_limit=True)
+    waits = hold_the_post_check_until(monkeypatch, source.reached)  # it can only finish once round two has started
+    started = time.monotonic()
+    run = invoke(db, capsys, "--limit", "10", clock=clock, source=source, sleep=stop_at_sleep(clock, 2))
+    assert waits == [True]  # round two started while the post-check was still reading (a blocking one never lets it)
+    assert time.monotonic() - started < 4
+    assert run.code == 0 and len(run.lines("round target=")) == 2
+    assert run.after["missing"] == "0"  # and it still reports what round one left
+
+
+def test_a_stop_during_the_post_check_exits_promptly_with_the_claim_withheld(
+    db: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seed(db, slots(T - 70 * TF, T - 60 * TF))
+    monkeypatch.setattr(cli, "POST_CHECK_GRACE_MS", 50)
+    interrupted = threading.Event()
+    real_interrupt = reconcile_reader.ReadGuard.interrupt
+
+    def interrupt(self: reconcile_reader.ReadGuard) -> None:
+        real_interrupt(self)
+        interrupted.set()
+
+    monkeypatch.setattr(reconcile_reader.ReadGuard, "interrupt", interrupt)
+    hold_the_post_check_until(monkeypatch, interrupted)  # still reading when the loop has stopped
+    started = time.monotonic()
+    run = invoke(db, capsys, "--limit", "10")
+    assert time.monotonic() - started < 3
+    assert run.code == 0 and interrupted.is_set()
+    assert run.lines("reconcile-after") == []
+    assert any(line.startswith("reconcile-after status=unverified") for line in run.err.splitlines())
+
+
+def test_the_post_check_prints_hole_lines_and_the_round_one_lead(
+    db: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seed(db, [*slots(T - 3000 * TF, T - 2500 * TF), *slots(T - 2400 * TF, T - 60 * TF)])  # one old hole
+
+    def lead_more(source: RoundTwoGate) -> None:
+        source.server_ahead_ms = 5 * TF  # a larger lead in round two must not reach the round-one post-check
+
+    clock = FakeClock()
+    source = RoundTwoGate(clock, [], honour_limit=True, server_ahead_ms=2 * TF, on_round_two=lead_more)
+    hold_the_post_check_until(monkeypatch, source.reached)
+    run = invoke(db, capsys, clock=clock, source=source, sleep=stop_at_sleep(clock, 2))
+    assert run.code == 0
+    assert f"  hole {T - 2499 * TF}..{T - 2400 * TF} (raw)" in run.out.splitlines()
+    assert run.line("reconcile-after summary ")["clock_lead_slots_max"] == "2"

@@ -12,6 +12,8 @@ import pytest
 from quasar_market_data.collector import reconcile_reader
 from quasar_market_data.collector.candle_writer import CandleWriter
 from quasar_market_data.collector.reconcile_reader import (
+    ReadGuard,
+    ReadInterrupted,
     ReconcileError,
     ReconcileInputs,
     expected_target,
@@ -547,3 +549,73 @@ def test_window_only_read_issues_no_history_statement(db: Path, monkeypatch: pyt
     assert issued & history == set()
     assert reconcile_reader.BOUNDS_SQL in issued and reconcile_reader.CANDLES_SQL in issued
     assert result[A].history is HistoryStatus.UNKNOWN and result[A].needs_s16_slots is None
+
+
+def test_on_snapshot_is_called_before_the_series_are_read_and_later_writes_are_not_seen(
+    db: Path, monkeypatch: pytest.MonkeyPatch, captured: Captured
+) -> None:
+    put(db, [0, 1, 2, 3])
+    order: list[str] = []
+
+    def on_snapshot() -> None:
+        order.append("snapshot")
+        put(db, [4, 5])  # committed by a writer once the read holds its snapshot
+
+    def before(sql: str, params: Any) -> None:
+        if sql == reconcile_reader.BOUNDS_SQL:
+            order.append("bounds")
+
+    install_proxy(monkeypatch, before)
+    now = as_of(8)
+    inputs = make_inputs()
+    reconcile_blocking(db, inputs, as_of_ms=now, target_open_ms=expected_target(inputs, now), on_snapshot=on_snapshot)
+    assert order == ["snapshot", "bounds"]
+    facts = captured.facts[-1]
+    assert facts is not None and facts.newest_open_ms == slot(3)
+
+
+def test_the_guard_interrupts_a_running_statement(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    put(db, [n for n in range(3_000) if n % 50])  # enough rows that the LAG walk outlasts one progress tick
+    guard = ReadGuard()
+
+    def before(sql: str, params: Any) -> None:
+        if sql == reconcile_reader.HOLES_SQL:
+            guard.interrupt()  # the statement then starts with the flag set and SQLite aborts it
+
+    proxies = install_proxy(monkeypatch, before)
+    now = as_of(3_005)
+    inputs = make_inputs()
+    with pytest.raises(ReadInterrupted) as raised:
+        reconcile_blocking(db, inputs, as_of_ms=now, target_open_ms=expected_target(inputs, now), guard=guard)
+    assert isinstance(raised.value.__cause__, sqlite3.OperationalError)  # SQLite aborted it, not a check after it
+    sqls = [statement.sql for statement in proxies[0].statements]
+    assert sqls[-2:] == [reconcile_reader.HOLES_SQL, "ROLLBACK"]
+    assert proxies[0].closed
+
+
+def test_a_guard_set_between_statements_stops_the_read(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    put(db, [0, 1, 2, 5])
+    put(db, [0, 1, 2, 5], symbol=B)
+    guard = ReadGuard()
+
+    def before(sql: str, params: Any) -> None:
+        if sql == reconcile_reader.HOLES_SQL and params["symbol"] == A:
+            guard.interrupt()
+
+    proxies = install_proxy(monkeypatch, before)
+    now = as_of(8)
+    inputs = make_inputs(A, B)
+    with pytest.raises(ReadInterrupted):
+        reconcile_blocking(db, inputs, as_of_ms=now, target_open_ms=expected_target(inputs, now), guard=guard)
+    assert all(statement.params == () or statement.params["symbol"] == A for statement in proxies[0].statements)
+    assert proxies[0].statements[-1].sql == "ROLLBACK" and proxies[0].closed
+
+
+def test_a_guard_set_before_the_read_opens_nothing(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    put(db, [0, 1, 2])
+    proxies = install_proxy(monkeypatch)
+    guard = ReadGuard()
+    guard.interrupt()
+    with pytest.raises(ReadInterrupted):
+        asyncio.run(reconcile(db, make_inputs(), as_of_ms=as_of(5), target_open_ms=slot(4), guard=guard))
+    assert proxies == []
