@@ -1,7 +1,9 @@
 """Reproducible benchmark of the restart reconcile read (S15, D13). Not part of the default suite except ``smoke``.
 
 Builds a synthetic database in a fresh temporary directory (never an existing path, never production data, no
-network), runs ``reconcile_blocking`` twice behind a statement-timing connection proxy and prints one JSON object.
+network), runs the window-only pre-start read once (``pre_start_ms``, what the start waits for) and the full read with
+history twice (``first_run_ms``, ``second_run_ms``: the background post-check) behind a statement-timing connection
+proxy, and prints one JSON object.
 
 Neither run is a cold-disk figure: the operating-system cache is not dropped, and the second run is typically warmer.
 Run by hand: ``make bench PROFILE=medium`` and ``make bench PROFILE=target``.
@@ -139,7 +141,9 @@ def build_database(
     )
 
 
-def _timed_run(db: Path, inputs: ReconcileInputs, as_of_ms: int) -> tuple[float, list[StatementProxy], int]:
+def _timed_run(
+    db: Path, inputs: ReconcileInputs, as_of_ms: int, *, history: bool = True
+) -> tuple[float, list[StatementProxy], int]:
     proxies: list[StatementProxy] = []
     real_open = open_reader
 
@@ -150,7 +154,9 @@ def _timed_run(db: Path, inputs: ReconcileInputs, as_of_ms: int) -> tuple[float,
 
     with patch("quasar_market_data.collector.reconcile_reader.open_reader", opener):
         start = perf_counter()
-        result = reconcile_blocking(db, inputs, as_of_ms=as_of_ms, target_open_ms=expected_target(inputs, as_of_ms))
+        result = reconcile_blocking(
+            db, inputs, as_of_ms=as_of_ms, target_open_ms=expected_target(inputs, as_of_ms), history=history
+        )
         elapsed_ms = (perf_counter() - start) * 1000
     unaccounted = sum(series.history_unaccounted_holes or 0 for series in result.values())  # a full read: never None
     return elapsed_ms, proxies, unaccounted
@@ -209,6 +215,7 @@ def _measure(profile: str, db: Path, symbols: int, rows_per_symbol: int) -> dict
         max_limit=1000,
     )
     as_of_ms = BASE_MS + stats.span_slots_per_symbol * TF_MS + 20_000
+    pre_start_ms, _, _ = _timed_run(db, inputs, as_of_ms, history=False)  # first: the start's read, coldest cache
     first_ms, first_proxies, unaccounted = _timed_run(db, inputs, as_of_ms)
     second_ms, _, _ = _timed_run(db, inputs, as_of_ms)
     rows_visited, pairs_visited = _count_rows(db, symbols)
@@ -225,6 +232,7 @@ def _measure(profile: str, db: Path, symbols: int, rows_per_symbol: int) -> dict
         "history_unaccounted_holes": unaccounted,
         "db_bytes": _db_bytes(db),
         "build_ms": build_ms,
+        "pre_start_ms": pre_start_ms,
         "total_ms": first_ms,
         "first_run_ms": first_ms,
         "second_run_ms": second_ms,

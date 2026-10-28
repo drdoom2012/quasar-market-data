@@ -30,6 +30,7 @@ def test_smoke_profile_reports_every_field(tmp_path: Path) -> None:
     assert result["db_bytes"] > 0
     assert result["total_ms"] >= 0
     assert result["first_run_ms"] >= 0 and result["second_run_ms"] >= 0
+    assert result["pre_start_ms"] >= 0  # the window-only read the start waits for, run before any full read
     assert result["sqlite_version"] == sqlite3.sqlite_version
     assert result["python_version"] == platform.python_version()
     assert "cache" in result["note"]

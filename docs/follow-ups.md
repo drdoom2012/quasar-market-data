@@ -49,15 +49,31 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 - **Where:** `src/quasar_market_data/api/coverage_reader.py` and `src/quasar_market_data/collector/reconcile_reader.py`.
 - **What:** both run the same window selects. A shared reader in `storage` would remove the copy; deferred because it touches the API read path.
 
-### F-10. The series-wide hole aggregate is a start-up cost that has not been measured
+### F-10. The series-wide hole aggregate: start-up cost fixed, the post-check cost measured
 
-- **Where:** `src/quasar_market_data/collector/reconcile_reader.py`, `tests/collector/bench_reconcile.py`.
-- **What:** the aggregate scans every series' primary key at every start, and again for the post-check. Each read is one
-  index scan per symbol, awaited inline, not interruptible by a stop signal, so it delays shutdown and the start of
-  round two by its duration. `make bench PROFILE=medium|target` measures it and has **not been run**. The acceptance
-  criteria are C1 to C3 of D13 and the decision is the user's (HARD STOP 2): `quasar-collector run` must not be used
-  against a real database with long history until the user accepts the numbers. S23 repeats the measurement on a soak
-  database.
+- **Where:** `src/quasar_market_data/collector/reconcile_reader.py`, `collector/cli.py`, `tests/collector/bench_reconcile.py`.
+- **Before** (`make bench PROFILE=target`, 2026-10-28, 600 series x 105 120 rows): 75.6 s per read, run twice and
+  inline (pre-start and post-check), not interruptible; `holes` 34.3 s, `largest_runs` 34.5 s, `bounds` 6.3 s
+  (`MIN, MAX` in one aggregate walks the series). C1 and C2 failed, C3 passed.
+- **Fixed** (plan `docs/superpowers/plans/2026-10-28-reconcile-read-cost.md`, the user's decision of 2026-10-28,
+  option (b) of S15 D13): bounds by two primary-key seeks (also in the API readers), one materialized `LAG` pass, a
+  backfill hole scan that starts at its horizon, a window-only pre-start read, and the post-check in the background
+  from a round-one snapshot, interruptible at shutdown after 2 s.
+- **After** (same profile and machine, SQLite 3.53.4, page cache not dropped, so not a cold-disk figure):
+
+  | Read | Time |
+  |---|---|
+  | `pre_start_ms` (what the start waits for) | 0.74 s |
+  | post-check, first run / second run | 36.2 s / 35.3 s |
+  | of which `holes` (one walk of all 63 072 000 rows) | 35.1 s |
+  | of which `bounds` (600 series) | 0.45 s |
+  | linear projection of the post-check to 600 x 3 years | 109 s |
+
+  C1 (≤ 60 s) and C2 (≤ 180 s) are met by the post-check; C3 holds (primary key only, no sorter on the candle walk,
+  rows visited = rows stored). The start no longer waits for the history at all. **The numbers are not yet accepted
+  by the user** (HARD STOP 2 of S15): accepting them is the user's decision.
+- **Still open:** a cold disk, a soak database (S23), more than 600 series or 3 years. The post-check holds one read
+  snapshot for its duration, so the WAL cannot be checkpointed past it meanwhile (about 36 s at this size).
 
 ### F-11. `fetch-once` accepts a delay that no limit can serve
 
