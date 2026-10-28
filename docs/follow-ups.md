@@ -59,19 +59,23 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
   option (b) of S15 D13): bounds by two primary-key seeks (also in the API readers), one materialized `LAG` pass, a
   backfill hole scan that starts at its horizon, a window-only pre-start read, and the post-check in the background
   from a round-one snapshot, interruptible at shutdown after 2 s.
-- **After** (same profile and machine, SQLite 3.53.4, page cache not dropped, so not a cold-disk figure):
+- **After** (same profile and machine, SQLite 3.53.4, page cache not dropped, so not a cold-disk figure; the full read
+  measured with the `ReadGuard` installed, as the CLI runs it):
 
   | Read | Time |
   |---|---|
-  | `pre_start_ms` (what the start waits for) | 0.74 s |
-  | post-check, first run / second run | 36.2 s / 35.3 s |
-  | of which `holes` (one walk of all 63 072 000 rows) | 35.1 s |
-  | of which `bounds` (600 series) | 0.45 s |
-  | linear projection of the post-check to 600 x 3 years | 109 s |
+  | `pre_start_ms` (what the start waits for) | 0.68 s |
+  | post-check, first run / second run | 35.9 s / 34.8 s |
+  | of which `holes` (one walk of all 63 072 000 rows) | 34.9 s |
+  | of which `bounds` (600 series) | 0.34 s |
+  | linear projection of the post-check to 600 x 3 years | 108 s |
 
   C1 (≤ 60 s) and C2 (≤ 180 s) are met by the post-check; C3 holds (primary key only, no sorter on the candle walk,
-  rows visited = rows stored). The start no longer waits for the history at all. **The numbers are not yet accepted
-  by the user** (HARD STOP 2 of S15): accepting them is the user's decision.
+  rows visited = rows stored). The start no longer waits for the history at all. The guard stops the read with
+  `sqlite3_interrupt`, not a progress handler: a handler made the read wait for the GIL behind a busy event loop (a
+  review measured 530 s instead of 2 s with a fully busy main thread); with `sqlite3_interrupt` the same probe gives
+  0.69 s with the guard and 0.70 s without. **The numbers are not yet accepted by the user** (HARD STOP 2 of S15):
+  accepting them is the user's decision.
 - **Still open:** a cold disk, a soak database (S23), more than 600 series or 3 years. The post-check holds one read
   snapshot for its duration, so the WAL cannot be checkpointed past it meanwhile (about 36 s at this size).
 
