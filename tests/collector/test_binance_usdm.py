@@ -201,6 +201,25 @@ def test_server_time_must_be_an_exact_int(response: object) -> None:
         run(open_source(exchange).fetch_server_time_ms())
 
 
+@pytest.mark.parametrize(
+    "server_time",
+    [0, 1_700_000_000, 946_684_799_999, 4_102_444_800_001, -1],
+    ids=["zero", "seconds_not_ms", "one_below_min", "one_above_max", "negative"],
+)
+def test_server_time_out_of_range_is_a_source_error(server_time: int) -> None:
+    exchange = FakeExchange()
+    exchange.time_response = {"serverTime": server_time}
+    with pytest.raises(SourceError, match="serverTime"):
+        run(open_source(exchange).fetch_server_time_ms())
+
+
+@pytest.mark.parametrize("server_time", [946_684_800_000, 4_102_444_800_000])
+def test_server_time_at_the_range_bounds_is_accepted(server_time: int) -> None:
+    exchange = FakeExchange()
+    exchange.time_response = {"serverTime": server_time}
+    assert run(open_source(exchange).fetch_server_time_ms()) == server_time
+
+
 @pytest.mark.parametrize("response", [{"rows": []}, None, "[]"], ids=["dict", "none", "str"])
 def test_klines_response_must_be_a_list(response: object) -> None:
     exchange = FakeExchange()

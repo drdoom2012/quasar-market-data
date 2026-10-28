@@ -6,6 +6,9 @@ adapter``). It uses the implicit raw endpoints ``fapiPublicGetKlines`` and ``fap
 
 Fail closed before any klines request: the ``fapiPublic`` base URL must be exactly the USDT-M endpoint, the
 market must be a USDT-margined linear perpetual, and the timeframe must be one ADR-0001 measured.
+
+A ``serverTime`` the domain cannot accept (not an int, or outside the timestamp range) is a failed time request
+(``SourceError``), so the loop retries with time untrusted instead of stopping.
 """
 
 from typing import Any, Final
@@ -16,6 +19,7 @@ import ccxt.async_support as ccxt_async
 
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.domain.timeframe import Timeframe
+from quasar_market_data.domain.timestamps import ensure_timestamp_ms
 
 SUPPORTED_TIMEFRAMES: Final = frozenset({"5m"})  # the only timeframe ADR-0001 measured
 
@@ -100,7 +104,10 @@ class BinanceUsdmSource:
         server_time = response.get("serverTime") if isinstance(response, dict) else None
         if type(server_time) is not int:
             raise SourceError(f"serverTime must be an int, got {type(server_time).__name__}")
-        return server_time
+        try:
+            return ensure_timestamp_ms(server_time, "serverTime")
+        except ValueError as error:
+            raise SourceError(f"serverTime {server_time} is outside the accepted range") from error
 
     async def fetch_klines(
         self,

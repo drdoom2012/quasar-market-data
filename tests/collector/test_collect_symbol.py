@@ -17,7 +17,7 @@ from quasar_market_data.collector.collection_loop import (
     collect_symbol,
 )
 from quasar_market_data.collector.fetch_once import CandleSink, FetchOnceConfig
-from quasar_market_data.collector.kline_source import SourceError
+from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.domain.validation import ValidatedCandle
 from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import migrate
@@ -33,6 +33,8 @@ from tests.collector.fetch_fakes import (
     forming_rows,
 )
 from tests.collector.manual_time import assert_no_leftover_tasks
+from tests.collector.test_binance_usdm import FakeExchange
+from tests.collector.test_binance_usdm import open_source as open_binance_source
 from tests.collector.test_candle_writer import AT
 
 TARGET = int(closed_rows()[-1][0])
@@ -88,7 +90,7 @@ def collect_with(
 
 def collect_real(
     db: Path,
-    source: FakeSource,
+    source: KlineSource,
     clock: FakeClock,
     sleep: AdvancingSleep | None = None,
     target: int | None = TARGET,
@@ -191,6 +193,16 @@ def test_untrusted_time_is_retried_then_gives_up(db: Path) -> None:
     result = collect_real(db, FakeSource(clock, closed_rows(), time_error=SourceError("time down")), clock)
     assert result.outcome is SymbolOutcome.GAVE_UP and result.attempts == 6
     assert result.last_problem is not None and result.last_problem.startswith("time untrusted")
+    assert stored_opens(db) == []
+
+
+def test_a_server_time_in_seconds_from_the_binance_adapter_is_untrusted_not_fatal(db: Path) -> None:
+    exchange = FakeExchange()
+    exchange.time_response = {"serverTime": 1_700_000_000}  # seconds, not milliseconds
+    clock = FakeClock()
+    result = collect_real(db, open_binance_source(exchange), clock)  # no exception escapes
+    assert result.outcome is SymbolOutcome.GAVE_UP and result.attempts == 6
+    assert result.last_problem == "time untrusted: NO_OBSERVATION"
     assert stored_opens(db) == []
 
 
