@@ -135,7 +135,7 @@ def test_a_signal_stops_gracefully_and_exits_0(
     lines = round_lines(captured.out)
     assert (
         lines[0]
-        == f"round target={FIRST_TARGET} collected=1 conflicted=0 gave_up=0 stopped=0 write_uncertain=0 lateness_ms=0 idle_overrun_ms=0 skipped_rounds=0 clock_step_ms=0"
+        == f"round target={FIRST_TARGET} collected=1 conflicted=0 gave_up=0 stopped=0 write_uncertain=0 lateness_ms=0 idle_overrun_ms=0 skipped_rounds=0 clock_step_ms=0 clock_lead_slots=0"
     )
     assert lines[1].startswith("round target=1792677000000 collected=0 conflicted=0 gave_up=0 stopped=1")
     assert "Traceback" not in captured.err
@@ -337,7 +337,7 @@ def test_round_lines_list_conflicts_and_problems(capsys: pytest.CaptureFixture[s
     lines = capsys.readouterr().out.splitlines()
     assert (
         lines[0]
-        == "round target=none collected=1 conflicted=0 gave_up=1 stopped=0 write_uncertain=1 lateness_ms=0 idle_overrun_ms=0 skipped_rounds=0 clock_step_ms=0"
+        == "round target=none collected=1 conflicted=0 gave_up=1 stopped=0 write_uncertain=1 lateness_ms=0 idle_overrun_ms=0 skipped_rounds=0 clock_step_ms=0 clock_lead_slots=-"
     )
     assert lines[1] == "  A collected attempts=1 conflicts=5,7 problem=-"
     assert lines[2] == "  B gave_up attempts=6 conflicts=- problem=target not confirmed (pending=1, invalid=0)"

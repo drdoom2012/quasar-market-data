@@ -229,7 +229,7 @@ Each is specified in its own section of this document and approved before its sl
 | `GET /v1/coverage` | S12 | Specified in section 6.1 below. |
 | `GET /v1/instruments` | S20 | The configured universe and, per instrument, the newest stored candle. |
 | `GET /v1/indicators` | S18 | Indicators computed on demand from stored closed candles; refuses to compute across a gap, a conflicted or unavailable slot, or with insufficient warm-up, and says why (architecture §8). |
-| Health | S17 | Liveness separate from readiness (architecture §8). Path and body are decided in S17; the `503 not_ready` reasons of section 2 are the readiness vocabulary. |
+| Health | S17 | Specified in section 6.2 below (`/health`, `/health/ready`, `/health/ingest`). |
 
 ## 6.1 `GET /v1/coverage`
 
@@ -315,6 +315,49 @@ Hence `slots = present + conflicted + unavailable + missing + not_yet_expected +
 
 The rule is configured when the API starts: `quasar-api serve --publication-delay-ms` (default 15 000, ADR-0001 P-3; `0` to `300 000`) and `--lag-threshold-ms` (default 60 000; `0` to `900 000`). A value outside the bounds, or not a non-negative integer, is refused at start-up (exit status 2) and the process does not bind. The bounds exist because an unbounded threshold would keep every slot `due` and never `stale`.
 
+## 6.2 Health: `GET /health`, `GET /health/ready`, `GET /health/ingest`
+
+- **Status:** decisions H1–H5 (section 9) were approved by the user on 2026-10-28 together with the S17 plan; implemented by S17. These are unversioned operational endpoints outside `/v1` (a probe must not break on `/v2`). Section 1 applies to them as it does to `/v1` (`GET` only, `Cache-Control: no-store`, UTF-8 JSON, a trailing slash is a different path and `404 not_found`, no redirects), and so does the error body of section 2. Compatibility: new response fields may be added; clients must ignore unknown fields; there is no versioning promise beyond that.
+- **Order of checks:** a query parameter (`400 invalid_parameter`; empty pieces such as `?` or `?&` carry no parameter and are ignored) → the host clock (`/health/ingest` only; outside the valid range is `500 internal_error`) → the database (`503 not_ready`).
+
+### 6.2.1 `GET /health` (liveness)
+
+`200 {"status":"alive"}`. It reads no database and no clock. It says only that the process answers; it stays `200` whatever the database state is.
+
+### 6.2.2 `GET /health/ready` (readiness)
+
+`200 {"status":"ready","schema_version":1}` when the database opens read-only and its schema is the one this API was built for, checked inside one read transaction on every call. Otherwise `503 not_ready` with the reason and headers of section 2 (`database_missing`, `schema_mismatch`, `database_unreadable`). Readiness says nothing about freshness: an idle Collector does not make the API unready.
+
+### 6.2.3 `GET /health/ingest` (ingestion freshness)
+
+Information, never a gate: `200` whenever the database is readable, `503 not_ready` when it is not. A lagging Collector never changes an HTTP status.
+
+```json
+{
+  "as_of_ms": 1792677000000,
+  "rule": { "publication_delay_ms": 15000, "lag_threshold_ms": 60000 },
+  "scope": "stored_series",
+  "status": "current",
+  "series_count": 10, "current": 10, "due": 0, "stale": 0,
+  "behind": [
+    { "venue": "binance-usdm", "symbol": "BTC/USDT:USDT", "timeframe": "5m",
+      "newest_open_time_ms": 1792676400000, "lag_slots": 1, "state": "due" }
+  ],
+  "truncated": false
+}
+```
+
+- **`scope` is always `"stored_series"`.** Every count and status describes the series that exist in the database (at least one row in `candles`), never the instruments that should exist. An instrument whose ingestion never started, or whose first write never succeeded, is invisible here and cannot be told from one that is not configured. A consumer that needs "every expected symbol is present" compares its own list with the listed counts, or asks `/v1/coverage` per symbol (`404 unknown_series` for a never-stored one).
+- **`status`** (closed list): `no_series` only when the read found zero stored series; `behind` when `stale > 0`; `catching_up` when `due > 0` and `stale == 0`; `current` otherwise. **`no_series` does not mean the Collector is healthy, idle, broken, not started or not initialised**: a freshly migrated database, a Collector that crashed before its first write and a database with only other tables give the same body. A consumer that needs "data exists" tests `series_count > 0`.
+- **Per series** (the rule of S11, decision 1, unchanged; `x` is the instant the slot after the newest stored one is expected, `L` the lag threshold): `current` when the newest stored slot is the newest expected one or newer (a host clock behind the stored data is `current` with `lag_slots` 0); `due` when `x <= as_of <= x + L`; `stale` when `as_of > x + L`. `lag_slots` is the number of expected slots after the newest stored one: `1 + (as_of - x) // timeframe`. A `due` series has `1 <= lag_slots <= 1 + L // timeframe`, which is exactly `1` only when `L` is below one timeframe (the default `60 000` against `300 000`); a `stale` series has `lag_slots >= 1`. Read `state` and `lag_slots` together.
+- **`behind`** lists the non-current series: `stale` before `due`, then `lag_slots` descending, then `(venue, symbol, timeframe)`; at most 50 entries, `truncated` is `true` when more exist (the counts are always complete).
+- **What it cannot tell.** It reads only the newest stored candle per series. A series with holes behind its newest candle is `current` (`/v1/coverage` reports holes). A stopped Collector, an exchange outage, a halted or delisted symbol and a wrong publication delay all show as `stale`; the endpoint does not know the cause or whether the Collector runs. A retired symbol stays a stored series and keeps `status` at `behind`. A mismatch between the API's rule and the Collector's delay shifts `current`/`due` by the difference.
+- The answer reflects one read transaction, like every other endpoint.
+- A series that cannot be judged (a timeframe label this software does not know, or an open time not aligned to its timeframe; the Collector cannot write either, a hand-edited row can) makes the whole answer `500 internal_error`, never a made-up status.
+- **A round longer than the lag threshold shows up as `stale`.** The Collector serves its symbols one after another through one rate limiter, so with a large universe the last symbols of a round can be written more than `lag_threshold_ms` after their slot was expected; those series are `stale`, and `status` is `behind`, for part of every cycle. This is not a fault of the Collector. Set `--lag-threshold-ms` above the Collector's round duration for the universe, and alert on `behind` that persists for more than one cycle, not on a single answer. (The size of the effect depends on the Collector's request spacing and was not measured.)
+- **`behind` is ordered by state, then by `lag_slots`**, which counts slots of each series' own timeframe: across timeframes it is not an ordering by elapsed time (v1 serves `5m` only).
+- **Latency under a lock.** `/health/ready` and `/health/ingest` wait for a database lock up to SQLite's busy timeout (5 s) before answering `503 database_unreadable`; a probe whose own timeout is shorter sees a timeout instead of the `503`. `/health` does not touch the database and answers at once.
+
 ## 7. Out of scope for v1
 
 Authentication, rate limiting, CORS, write endpoints, streaming, candle revision history, exposing rejected conflict values, a configurable page limit, timeframes other than `5m`, venues other than `binance-usdm`, and any trading functionality.
@@ -336,6 +379,8 @@ Authentication, rate limiting, CORS, write endpoints, streaming, candle revision
 | Coverage derived on read, not stored | ADR-0002 C-4, spec §11.4 |
 | `/v1/coverage` states `not_yet_expected`, `due` and `stale` from `as_of` and the rule; `due` is a third clock state | S11 plan decisions 1–3 (approved 2026-10-25), INV-045 |
 | The response states `as_of_ms` and the rule; the configured lag threshold is bounded | follow-up F-8 |
+| Health endpoints: liveness reads nothing; readiness is the schema check; ingestion freshness is information over stored series only, `200` unless unreadable | S17 plan decisions 1 to 6 and 10, INV-056, INV-057 |
+| `due` bounds `lag_slots` by `1 + L // timeframe` | S17 plan decision 5, `tests/domain/test_freshness.py` |
 
 ## 9. Decisions (answered by the user on 2026-10-23: all as recommended)
 
@@ -350,7 +395,7 @@ Original decisions:
 | Q5 | Expose `ingested_at_ms` per candle? | No: it is diagnostic and excluded from "identical" comparison (ADR-0002 P-2). Freshness belongs to `/v1/coverage`. | Expose it: lets a consumer reason about settling, but ties them to a field the schema calls diagnostic. |
 | Q6 | HTTP status for a bad parameter: `400` or FastAPI's `422`? | `400` for all parameter errors, with our body (section 2); the framework's own validation body is replaced. | `422`: framework default, but the body differs from every other error unless converted anyway. |
 | Q7 | Schema mismatch or missing database: serve or refuse? | `503 not_ready` for every `/v1` request while the API stays running, so liveness and readiness stay separable (S17). | Refuse to start: simpler, but a Collector restart order would then decide whether the API is up. |
-| Q8 | Where is health (architecture §8 `GET /health`)? | Decide in S17; this draft only reserves the readiness vocabulary. | Fix it now: no information yet to justify it. |
+| Q8 | Where is health (architecture §8 `GET /health`)? | Decide in S17; this draft only reserves the readiness vocabulary. (Answered in S17: section 6.2 and decisions H1 to H5 below.) | Fix it now: no information yet to justify it. |
 
 Decisions from the independent review (the user followed all recommendations):
 
@@ -373,3 +418,13 @@ S12 decisions (answered by the user on 2026-10-25: all as proposed):
 | S3 | How is the rule configured and bounded? | Server start-up options with the defaults and bounds of section 6.1.5. The bounds (300 000 ms and 900 000 ms) are the builder's numbers. | No bound: a huge lag keeps every slot `due` forever (follow-up F-8). |
 | S4 | Is `stored_ahead_of_as_of` exposed? | Yes, unchanged from S11. | Hide it: a clock or delay mismatch becomes invisible. |
 | S5 | Are `runs` paginated? | No; at most 10 000 runs, bounded by the window cap. | A second cursor kind for a window with a different fault in every slot. |
+
+S17 decisions (approved by the user on 2026-10-28 with the S17 plan):
+
+| # | Question | Decision | Alternative that was not chosen, and its cost |
+|---|---|---|---|
+| H1 | Where is health (Q8)? | `GET /health` (liveness, the path of architecture §8), `GET /health/ready`, `GET /health/ingest`, unversioned, outside `/v1`. | `/health/live` plus an architecture edit: `/health` would be a `404` for probes that assume it. |
+| H2 | Does freshness gate readiness? | No: `/health/ingest` is information and `200` while the database is readable. | Make a stale Collector `503`: a probe could restart a healthy API because of the Collector. |
+| H3 | Does a query parameter on a health path fail? | `400 invalid_parameter`, as everywhere (section 1); an empty query (`?`, `?&`) names no parameter and is accepted. | Ignore it: probe-friendly, but a second rule next to section 1. A `400` from a liveness probe can trigger a restart. |
+| H4 | How many non-current series are listed? | 50 (`truncated` says more exist); counts are complete. | Unbounded: the response grows with the universe. |
+| H5 | What does `/health/ingest` cover? | Stored series only; `no_series` means zero stored series and nothing else. | Compare with the configured universe: needs a Collector or configuration channel (S20, follow-up F-18). |

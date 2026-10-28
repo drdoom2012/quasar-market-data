@@ -47,6 +47,7 @@ from quasar_market_data.collector.binance_klines import VENUE_BINANCE_USDM, Klin
 from quasar_market_data.collector.binance_usdm import BinanceUsdmSource
 from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown
 from quasar_market_data.collector.clock import Clock, Sleep, SystemClock, system_sleep
+from quasar_market_data.collector.clock_lead import ClockLeadMonitor
 from quasar_market_data.collector.collection_loop import (
     FatalLoopError,
     LoopConfig,
@@ -70,7 +71,6 @@ from quasar_market_data.domain.reconcile import (
     HistoryStatus,
     SeriesReconcile,
     WindowStatus,
-    clock_lead_slots,
     steady_state_limit_needed,
 )
 from quasar_market_data.domain.timeframe import Timeframe
@@ -205,7 +205,8 @@ def _print_round(report: RoundReport) -> None:
         f" conflicted={counts[SymbolOutcome.CONFLICTED]} gave_up={counts[SymbolOutcome.GAVE_UP]}"
         f" stopped={counts[SymbolOutcome.STOPPED]} write_uncertain={len(report.uncertain_symbols)}"
         f" lateness_ms={report.lateness_ms} idle_overrun_ms={report.idle_overrun_ms}"
-        f" skipped_rounds={report.skipped_rounds} clock_step_ms={report.clock_step_ms}",
+        f" skipped_rounds={report.skipped_rounds} clock_step_ms={report.clock_step_ms}"
+        f" clock_lead_slots={_ms(report.clock_lead_slots)}",
         flush=True,
     )
     if report.idle_overrun_ms or report.skipped_rounds:
@@ -319,13 +320,18 @@ def _print_reconcile_after(
     print(f"reconcile-after summary {_summary_fields(after)} clock_lead_slots_max={_ms(lead_max)}", flush=True)
 
 
-def _warn_clock_lead(lead_max: int | None) -> None:
-    if lead_max is not None and lead_max > REACH_MARGIN_SLOTS:
+def _warn_clock_lead(lead: int, first_round: bool) -> None:
+    """Called by ``ClockLeadMonitor`` on a new run-wide maximum above the A1 margin."""
+    head = (
+        f"warning: the server's forming slot was {lead} slots ahead of the local clock"
+        f" (assumption A1 allows {REACH_MARGIN_SLOTS});"
+    )
+    if first_round:
         _error(
-            f"warning: the server's forming slot was {lead_max} slots ahead of the local clock"
-            f" (assumption A1 allows {REACH_MARGIN_SLOTS}); first-round requests may have missed up to"
-            f" {lead_max - REACH_MARGIN_SLOTS} of the oldest wanted slots"
+            f"{head} first-round requests may have missed up to {lead - REACH_MARGIN_SLOTS} of the oldest wanted slots"
         )
+    else:
+        _error(f"{head} every round line reports clock_lead_slots")
 
 
 async def _run_loop(
@@ -380,13 +386,7 @@ async def _reconcile_and_collect(
     if stop.is_set():  # stopped during the read: nothing was fetched or written
         return 0
 
-    tf = config.timeframe.milliseconds
-    lead_max: int | None = None
-
-    def observe_forming_slot(symbol: str, forming_open_ms: int, wall_ms: int) -> None:
-        nonlocal lead_max
-        lead = clock_lead_slots(forming_open_ms, wall_ms, tf)
-        lead_max = lead if lead_max is None else max(lead_max, lead)
+    monitor = ClockLeadMonitor(config.timeframe.milliseconds, _warn_clock_lead)
 
     async def after_first_round(report: RoundReport) -> None:
         # The loop does not bound this hook by ``stop``: its only I/O is one read on a read-only connection (bounded
@@ -396,8 +396,8 @@ async def _reconcile_and_collect(
         except Exception as error:  # noqa: BLE001 - the claim is withheld; collection itself is healthy
             _error(f"reconcile-after status=unverified error={error}")
         else:
-            _print_reconcile_after(after, before, lead_max)
-        _warn_clock_lead(lead_max)
+            _print_reconcile_after(after, before, monitor.max_lead)
+        monitor.first_round_done()
 
     writer_close_error: Exception | None = None
 
@@ -433,7 +433,7 @@ async def _reconcile_and_collect(
                     s: r.oldest_wanted_ms for s, r in before.items() if r.oldest_wanted_ms is not None
                 },
                 after_first_round=after_first_round,
-                observe_forming_slot=observe_forming_slot,
+                observe_forming_slot=monitor.observe,
                 idle_work=None if backfiller is None else backfiller.run_idle,
             )
         except FatalLoopError as error:

@@ -16,7 +16,7 @@ from quasar_market_data.collector.clock import Clock, Sleep
 from quasar_market_data.collector.fetch_once import MAX_LIMIT, CandleSink, FetchOnceConfig, fetch_once
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.domain.closed_candles import DEFAULT_PUBLICATION_DELAY_MS
-from quasar_market_data.domain.reconcile import attempt_limit
+from quasar_market_data.domain.reconcile import attempt_limit, clock_lead_slots
 from quasar_market_data.domain.schedule import cycles_skipped, newest_expected_open_ms, next_wake_ms
 from quasar_market_data.domain.server_time import DEFAULT_TIME_TRUST, TimeTrustConfig
 from quasar_market_data.domain.timeframe import Timeframe
@@ -222,6 +222,9 @@ class RoundReport:
     idle_overrun_ms: int = 0
     skipped_rounds: int = 0
     clock_step_ms: int = 0
+    clock_lead_slots: int | None = (
+        None  # the largest server-forming-slot lead seen in this round; None: no row came back
+    )
 
 
 @dataclass(frozen=True)
@@ -279,6 +282,7 @@ async def run_collection_loop(
     watches = {symbol: _WriteWatch(sink) for symbol in config.symbols}  # one per symbol for the whole run
     semaphore = asyncio.Semaphore(config.max_concurrency)
     fatal: list[Exception] = []
+    round_lead: int | None = None  # reset at every round start; updated by every successful fetch of the round
 
     def uncertain() -> tuple[str, ...]:
         return tuple(symbol for symbol in config.symbols if watches[symbol].uncertain)
@@ -288,7 +292,6 @@ async def run_collection_loop(
             if stop.is_set():
                 return SymbolResult(symbol, SymbolOutcome.STOPPED, 0, 0, None, (), None)
             limit_for_attempt: Callable[[], int] | None = None
-            observe: Callable[[int, int], None] | None = None
             if first and symbol in wanted:
                 oldest = wanted[symbol]
 
@@ -301,11 +304,12 @@ async def run_collection_loop(
                         max_limit=MAX_LIMIT,
                     )
 
-            if first and observe_forming_slot is not None:
-                hook = observe_forming_slot
-
-                def observe(open_ms: int, wall_ms: int) -> None:
-                    hook(symbol, open_ms, wall_ms)
+            def observe(open_ms: int, wall_ms: int) -> None:
+                nonlocal round_lead
+                lead = clock_lead_slots(open_ms, wall_ms, tf_ms)
+                round_lead = lead if round_lead is None else max(round_lead, lead)
+                if observe_forming_slot is not None:
+                    observe_forming_slot(symbol, open_ms, wall_ms)
 
             try:
                 return await collect_symbol(
@@ -384,10 +388,11 @@ async def run_collection_loop(
             step = 0
         overrun_ms, idle_overrun_ms = idle_overrun_ms, 0
         previous = (started, started_ns)
+        round_lead = None
         results = await run_round(target, first_round)
         if fatal:
             raise FatalLoopError(fatal[0], uncertain()) from fatal[0]
-        report = RoundReport(target, started, results, uncertain(), lateness_ms, overrun_ms, skipped, step)
+        report = RoundReport(target, started, results, uncertain(), lateness_ms, overrun_ms, skipped, step, round_lead)
         on_round(report)
         if first_round and after_first_round is not None and not stop.is_set():
             try:

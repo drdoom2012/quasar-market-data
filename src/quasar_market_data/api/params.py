@@ -66,6 +66,12 @@ def parse_coverage_request(raw_query: bytes) -> CoverageRequest:
     return CoverageRequest(venue, symbol, SERVED_TIMEFRAME, start, end)
 
 
+def require_no_query(raw_query: bytes) -> None:
+    """The health endpoints take no parameters: any name is a ``400``, malformed escapes included (contract 6.2)."""
+    for name, value in _decode(raw_query):
+        raise invalid_parameter("health endpoints take no parameters", parameter=cut_received(name), received=value)
+
+
 def _parse(raw_query: bytes, names: tuple[str, ...], required: tuple[str, ...]) -> dict[str, str]:
     """Decode the query and apply the shared rules: unknown, repeated, empty, then missing."""
     values: dict[str, str] = {}

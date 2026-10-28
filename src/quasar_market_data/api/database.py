@@ -15,6 +15,7 @@ from typing import Final, Literal
 from quasar_market_data.api.candle_reader import CandlesPage, UnknownSeries, read_candles_page
 from quasar_market_data.api.coverage_reader import CoverageReport, read_coverage_report
 from quasar_market_data.api.errors import ApiError, NotReadyReason, not_ready, unknown_series
+from quasar_market_data.api.health_reader import StoredSeries, check_ready, read_stored_series
 from quasar_market_data.api.params import CandlesRequest, CoverageRequest
 from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.storage.connection import StorageError, open_reader
@@ -56,11 +57,20 @@ def read_coverage(
     )
 
 
+def read_ready(db_path: Path, *, open_connection: ConnectionFactory = open_reader) -> int:
+    """The schema version when the database can be served; the contract's ``503`` otherwise."""
+    return _with_reader(db_path, open_connection, check_ready, None)
+
+
+def read_ingest(db_path: Path, *, open_connection: ConnectionFactory = open_reader) -> tuple[StoredSeries, ...]:
+    return _with_reader(db_path, open_connection, read_stored_series, None)
+
+
 def _with_reader[T](
     db_path: Path,
     open_connection: ConnectionFactory,
     read: Callable[[sqlite3.Connection], T],
-    request: CandlesRequest | CoverageRequest,
+    request: CandlesRequest | CoverageRequest | None,
 ) -> T:
     try:
         conn = open_connection(db_path)
@@ -72,6 +82,8 @@ def _with_reader[T](
     try:
         return read(conn)
     except UnknownSeries:
+        if request is None:
+            raise  # only the series readers raise it: a bug, not a 404
         raise unknown_series(request.venue, request.symbol, request.timeframe.label) from None
     except EmptyDatabaseError as error:  # before its parent: a file the Collector has not initialised yet is a retry
         raise _not_ready("database_unreadable", error) from None

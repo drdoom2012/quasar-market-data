@@ -177,7 +177,7 @@ def test_404_unknown_series_has_the_three_detail_keys(db: Path) -> None:
     assert error["details"] == {"venue": "binance-usdm", "symbol": "X/Y", "timeframe": "5m"}
 
 
-@pytest.mark.parametrize("path", ["/nope", "/docs", "/redoc", "/openapi.json", "/health", "/v1/candles/", "/"])
+@pytest.mark.parametrize("path", ["/nope", "/docs", "/redoc", "/openapi.json", "/healthz", "/v1/candles/", "/"])
 def test_404_not_found_for_unknown_paths_including_docs_and_openapi(db: Path, path: str) -> None:
     response = client_for(db).get(path, follow_redirects=False)
 

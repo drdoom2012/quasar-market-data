@@ -741,7 +741,7 @@ def test_after_first_round_exception_is_a_fatal_loop_error_and_keeps_the_uncerta
     run(scenario)
 
 
-def test_observe_forming_slot_gets_the_newest_returned_row_and_the_wall_time_in_round_one_only() -> None:
+def test_observe_forming_slot_gets_the_newest_returned_row_and_the_wall_time_in_every_round() -> None:
     async def scenario() -> None:
         h = Harness()
         await honouring(h)
@@ -753,7 +753,7 @@ def test_observe_forming_slot_gets_the_newest_returned_row_and_the_wall_time_in_
         assert seen == [("A", F0 + 3 * TF_MS, F0 + 36_000)]
         await h.advance_to_next_boundary()
         await h.until_rounds(2)
-        assert len(seen) == 1
+        assert len(seen) == 2 and seen[1][0] == "A"  # S17: observed in every round, not only round one
         h.stop.set()
         await h.task
 

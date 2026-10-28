@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck imports check live bench
+.PHONY: test lint typecheck imports check live bench bench-health
 
 test:
 	uv run pytest
@@ -23,3 +23,8 @@ live:
 PROFILE ?= smoke
 bench:
 	uv run python -m tests.collector.bench_reconcile --profile $(PROFILE)
+
+# /health/ingest read benchmark on a generated database in a fresh temp dir; not part of `check`.
+# PROFILE: smoke | medium | target. medium and target are slow and large; run them by hand (S17 HARD STOP 2).
+bench-health:
+	uv run python -m tests.api.bench_health --profile $(PROFILE)

@@ -55,9 +55,9 @@ def free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def get(port: int) -> tuple[int, dict[str, str], dict[str, Any]]:
+def get(port: int, path: str | None = None) -> tuple[int, dict[str, str], dict[str, Any]]:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    url = f"http://127.0.0.1:{port}/v1/candles?{QUERY}"
+    url = f"http://127.0.0.1:{port}{path if path is not None else f'/v1/candles?{QUERY}'}"
     try:
         with opener.open(url, timeout=2) as response:
             status, headers, body = response.status, dict(response.headers), response.read()
@@ -143,8 +143,23 @@ def test_collector_writes_and_the_api_process_reads(
     assert body["error"]["details"] == {"reason": "database_missing"}
     assert headers["retry-after"] == "5"
 
+    # (1b) liveness is up while readiness refuses (S17)
+    status, _headers, body = get(server.port, "/health")
+    assert (status, body) == (200, {"status": "alive"})
+    status, headers, body = get(server.port, "/health/ready")
+    assert status == 503
+    assert body["error"]["details"] == {"reason": "database_missing"}
+    assert headers["retry-after"] == "5"
+
     # (2) the Collector (this test) creates the database; the same process now serves it
     make_database(server.db, candles=[slot(0), slot(1), slot(2)])
+    status, _headers, body = get(server.port, "/health/ready")
+    assert (status, body) == (200, {"status": "ready", "schema_version": 1})
+    status, _headers, body = get(server.port, "/health/ingest")
+    assert status == 200
+    assert body["scope"] == "stored_series"
+    assert body["series_count"] == 1
+    assert body["status"] == "behind"  # the stored candles are older than the lag threshold against the host clock
     status, _headers, body = get(server.port)
     assert status == 200
     assert [c["open_time_ms"] for c in body["candles"]] == [slot(0), slot(1), slot(2)]
@@ -175,6 +190,8 @@ def test_collector_writes_and_the_api_process_reads(
     assert status == 503
     assert body["error"]["details"] == {"reason": "schema_mismatch"}
     assert "retry-after" not in headers
+    assert get(server.port, "/health")[0] == 200  # liveness does not follow the database
+    assert get(server.port, "/health/ready")[0] == 503
 
     # (5) restoring the file: the API recovers without a restart
     os.replace(backup, server.db)

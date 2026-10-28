@@ -64,10 +64,6 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 - **What:** `--publication-delay-ms` is accepted by `fetch-once` with no check against `--limit`; `run` refuses such a
   pair before opening anything.
 
-### F-12. A1 is diagnosed in round one only
-
-- **What:** the server-clock lead is observed in the first round. Continuous drift monitoring belongs to S17.
-
 ### F-13. A backward wall-clock step ends the collector
 
 - **Where:** `attempt_limit` in `src/quasar_market_data/domain/reconcile.py`.
@@ -101,3 +97,46 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
   symbol per start, at the normal rate-limited backfill rate. The count over many restarts is unbounded; the rate is
   not. Persisting a marker needs a schema decision (ADR-0002 P-9).
 - **Related:** strong evidence for writing `unavailable_candles` (plan D3) also needs a persisted first observation.
+
+## From the S17 plan (health and readiness)
+
+### F-16. The Collector has no health signal of its own
+
+- **What:** S17 adds health to the API only (`/health`, `/health/ready`, `/health/ingest`). The Collector has no HTTP
+  endpoint, heartbeat or status table; a stopped Collector shows only as `stale` series in `/health/ingest`, which
+  cannot name the cause. A heartbeat needs a schema change (the user's decision). Process supervision (restart policy,
+  container health) belongs to S21.
+
+### F-17. The `/health/ingest` read cost is not accepted
+
+- **Where:** `src/quasar_market_data/api/health_reader.py`, `tests/api/bench_health.py`.
+- **What:** the read does two primary-key seeks per series (the next series and its newest candle), pinned by a test
+  that the work does not grow with rows per series. Measured by the builder on 2026-10-28 with `make bench-health`
+  (SQLite 3.53.4, Python 3.12.5, page cache not dropped, so not a cold-disk figure):
+
+  | Profile | Rows | Steps per series (tiny db: 75.6) | Snapshot, max of 10 reads | Whole handler, max of 5 |
+  |---|---|---|---|---|
+  | `medium` (100 series x 100 000) | 10 000 000 | 67.9 | 1.1 ms | not measured (script added later) |
+  | `target` (600 series x 100 000) | 60 000 000 | 66.3 | 15.4 ms (typically 3 to 5 ms) | 17.7 ms (typically 5 ms) |
+
+  H3 (a writer commits inside each read; the result equals the pre-read snapshot): 5 commits in 5 reads, 0 differing
+  results. The first `target` run used a weaker H3 that could not fail; it was replaced and rerun.
+  The criteria H1 to H3 (S17 plan, Decision 11) were proposals and are **met by these numbers, but not yet accepted by
+  the user** (HARD STOP 2): do not use `/health/ingest` against a real database with long history until the user
+  accepts them. Not measured: a cold cache, a real network client, many concurrent requests, more than 600 series. S23
+  repeats it on a soak database. The read is linear in the number of series and has no deadline beyond SQLite's busy
+  timeout (5 s).
+
+### F-18. Stored series versus the configured universe
+
+- **What:** `/health/ingest` judges only series that exist in the database, so an instrument whose ingestion never
+  started is invisible. Comparing the configured universe with the stored series needs a universe on the API side
+  (S20, `/v1/instruments`); S17 deliberately adds no Collector-to-API channel.
+
+### F-19. Load-sensitive S16 backfill tests
+
+- **Where:** `tests/collector/test_backfill_run.py` (`test_a_slow_backfill_does_not_skip_a_cycle`,
+  `test_unknown_write_outcome_during_backfill_marks_the_symbol_uncertain`).
+- **What:** each failed once in about eight full runs during S17 with `nothing is waiting: the simulation is stuck`,
+  and passed on every rerun, alone and in the full suite, with and without the S17 changes. They take about 7 s of
+  real time each. Not investigated; the pre-commit hook runs the full suite, so a rerun is the workaround.
