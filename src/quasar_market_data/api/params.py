@@ -7,6 +7,8 @@ from urllib.parse import parse_qsl, unquote
 
 from quasar_market_data.api.errors import RECEIVED_MAX_CHARS, ApiError, cut_received, invalid_parameter
 from quasar_market_data.domain.candle import MAX_SYMBOL_LENGTH
+from quasar_market_data.domain.indicators import IndicatorSpec, IndicatorSyntaxError, parse_indicators
+from quasar_market_data.domain.schedule import newest_expected_open_ms
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.timestamps import MAX_TIMESTAMP_MS, MIN_TIMESTAMP_MS
 
@@ -15,6 +17,7 @@ SERVED_TIMEFRAME: Final = Timeframe("5m")
 MAX_LIMIT: Final = 1000
 DEFAULT_LIMIT: Final = 1000
 MAX_WINDOW_SLOTS: Final = 10_000
+MAX_INDICATOR_WINDOW_SLOTS: Final = 2016
 
 # An explicit ASCII class and no flags: `\d` would match other Unicode digits, and `fullmatch` (not `$`)
 # rejects a trailing newline. See the contract: integer parameters match ^[0-9]{1,16}$.
@@ -24,6 +27,8 @@ _NAMES: Final = ("venue", "symbol", "timeframe", "start", "end", "limit")
 _REQUIRED: Final = ("venue", "symbol", "timeframe", "start")
 _COVERAGE_NAMES: Final = ("venue", "symbol", "timeframe", "start", "end")
 _COVERAGE_REQUIRED: Final = ("venue", "symbol", "timeframe", "start", "end")
+_INDICATORS_NAMES: Final = ("venue", "symbol", "timeframe", "start", "end", "indicators")
+_INDICATORS_REQUIRED: Final = ("venue", "symbol", "timeframe", "start", "indicators")
 _MALFORMED_ESCAPE: Final = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
@@ -46,6 +51,16 @@ class CoverageRequest:
     end: int
 
 
+@dataclass(frozen=True)
+class IndicatorsRequest:
+    venue: str
+    symbol: str
+    timeframe: Timeframe
+    start: int
+    end: int | None
+    indicators: tuple[IndicatorSpec, ...]
+
+
 def parse_candles_request(raw_query: bytes) -> CandlesRequest:
     values = _parse(raw_query, _NAMES, _REQUIRED)
     venue, symbol, start = _series_and_start(values)
@@ -64,6 +79,45 @@ def parse_coverage_request(raw_query: bytes) -> CoverageRequest:
     _check_window(start, end)
 
     return CoverageRequest(venue, symbol, SERVED_TIMEFRAME, start, end)
+
+
+def parse_indicators_request(raw_query: bytes) -> IndicatorsRequest:
+    values = _parse(raw_query, _INDICATORS_NAMES, _INDICATORS_REQUIRED)
+    venue, symbol, start = _series_and_start(values)
+    end = _end(values)
+    if end is not None:
+        _check_window(start, end, MAX_INDICATOR_WINDOW_SLOTS)
+    text = values["indicators"]
+    try:
+        indicators = parse_indicators(text)
+    except IndicatorSyntaxError as error:
+        raise invalid_parameter(str(error), parameter="indicators", received=text) from None
+
+    return IndicatorsRequest(venue, symbol, SERVED_TIMEFRAME, start, end, indicators)
+
+
+def indicators_window_end(request: IndicatorsRequest, *, as_of_ms: int, publication_delay_ms: int) -> int:
+    """The window end: an explicit ``end`` unchanged, else one slot past the newest expected slot (contract 6.3.5).
+
+    The clock is an argument; nothing here reads it. ``as_of_ms`` must be in the valid time range: callers validate
+    it first (``ensure_timestamp_ms``), since with a defaulted end a clock below it raises ``ValueError`` here.
+    """
+    if request.end is not None:
+        return request.end
+    timeframe_ms = request.timeframe.milliseconds
+    newest = newest_expected_open_ms(as_of_ms, request.timeframe, publication_delay_ms)
+    if newest is None or newest + timeframe_ms <= request.start:
+        return request.start + timeframe_ms
+    end = newest + timeframe_ms
+    if (end - request.start) // timeframe_ms > MAX_INDICATOR_WINDOW_SLOTS:
+        raise invalid_parameter(
+            f"the window up to the newest expected slot exceeds {MAX_INDICATOR_WINDOW_SLOTS} slots;"
+            " pass an explicit end",
+            parameter="start",
+            received=str(request.start),
+            maximum=MAX_INDICATOR_WINDOW_SLOTS,
+        )
+    return end
 
 
 def require_no_query(raw_query: bytes) -> None:
@@ -117,15 +171,15 @@ def _end(values: dict[str, str]) -> int | None:
     return _end_timestamp(values["end"]) if "end" in values else None
 
 
-def _check_window(start: int, end: int) -> None:
+def _check_window(start: int, end: int, maximum: int = MAX_WINDOW_SLOTS) -> None:
     if end <= start:
         raise invalid_parameter("end must be greater than start", parameter="end", received=str(end))
-    if (end - start) // SERVED_TIMEFRAME.milliseconds > MAX_WINDOW_SLOTS:
+    if (end - start) // SERVED_TIMEFRAME.milliseconds > maximum:
         raise invalid_parameter(
-            f"the window must not exceed {MAX_WINDOW_SLOTS} slots",
+            f"the window must not exceed {maximum} slots",
             parameter="end",
             received=str(end),
-            maximum=MAX_WINDOW_SLOTS,
+            maximum=maximum,
         )
 
 

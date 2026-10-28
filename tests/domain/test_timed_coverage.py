@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+from quasar_market_data.domain import timed_coverage
 from quasar_market_data.domain.span_coverage import classify_span
 from quasar_market_data.domain.timed_coverage import (
     DEFAULT_LAG_THRESHOLD_MS,
@@ -392,3 +393,207 @@ def test_newest_open_time_must_be_aligned() -> None:
 def test_rule_must_be_an_expectation_rule(bad: object) -> None:
     with pytest.raises(TypeError):
         classify_span_at(**valid(rule=bad))
+
+
+# --- Regression cases pinning classify_span_at before the S18 refactor onto timed_slot_states ---
+
+D = 15_000  # RULE.publication_delay_ms
+L = 60_000  # RULE.lag_threshold_ms
+NYE, DUE, STALE = SlotState.NOT_YET_EXPECTED, SlotState.DUE, SlotState.STALE
+
+type RegressionCase = tuple[dict[str, Any], TimedCoverage]
+
+
+def coverage(
+    kwargs: dict[str, Any], counts_: tuple[int, int, int, int, int, int, int], ahead: bool, runs: tuple[GapRun, ...]
+) -> TimedCoverage:
+    present, conflicted, unavailable_, missing, not_yet_expected, due, stale = counts_
+    return TimedCoverage(
+        as_of_ms=kwargs["as_of_ms"],
+        rule=kwargs["rule"],
+        slots=(kwargs["end"] - kwargs["start"]) // TF,
+        present=present,
+        conflicted=conflicted,
+        unavailable=unavailable_,
+        missing=missing,
+        not_yet_expected=not_yet_expected,
+        due=due,
+        stale=stale,
+        stored_ahead_of_as_of=ahead,
+        runs=runs,
+    )
+
+
+def span_kwargs(
+    start: int, end: int, *, newest: int, as_of: int, candles: set[int], conflicts: set[int], unavailable: set[int]
+) -> dict[str, Any]:
+    return {
+        "start": start,
+        "end": end,
+        "timeframe_ms": TF,
+        "candles": candles,
+        "conflicts": conflicts,
+        "unavailable": unavailable,
+        "newest_open_time_ms": newest,
+        "as_of_ms": as_of,
+        "rule": RULE,
+    }
+
+
+def stored_states_case() -> RegressionCase:
+    n = slot(8)
+    x = n + 2 * TF + D
+    kwargs = span_kwargs(
+        S,
+        slot(12),
+        newest=n,
+        as_of=x + TF + L,
+        candles={slot(0), slot(1), slot(2), slot(3), slot(4), slot(8)},
+        conflicts={slot(2)},
+        unavailable={slot(4), slot(5)},
+    )
+    runs = (
+        GapRun(SlotState.CONFLICTED, slot(2), slot(3)),
+        GapRun(SlotState.CONFLICTED, slot(4), slot(5)),
+        GapRun(SlotState.UNAVAILABLE, slot(5), slot(6)),
+        GapRun(SlotState.MISSING, slot(6), slot(8)),
+        GapRun(STALE, slot(9), slot(10)),
+        GapRun(DUE, slot(10), slot(11)),
+        GapRun(NYE, slot(11), slot(12)),
+    )
+    return kwargs, coverage(kwargs, (4, 2, 1, 2, 1, 1, 1), False, runs)
+
+
+def before_oldest_case() -> RegressionCase:
+    kwargs = span_kwargs(
+        S, slot(4), newest=slot(3), as_of=slot(10), candles={slot(3)}, conflicts=set(), unavailable=set()
+    )
+    return kwargs, coverage(kwargs, (1, 0, 0, 3, 0, 0, 0), False, (GapRun(SlotState.MISSING, S, slot(3)),))
+
+
+N = slot(0)  # the newest stored candle of the clock cases
+X = N + 2 * TF + D  # expected_at of the first slot after N
+
+
+def clock_case(as_of: int, slots_after: int, runs: tuple[GapRun, ...]) -> RegressionCase:
+    kwargs = span_kwargs(
+        N, N + (slots_after + 1) * TF, newest=N, as_of=as_of, candles={N}, conflicts=set(), unavailable=set()
+    )
+    nye, due, stale = (sum((r.end_ms - r.start_ms) // TF for r in runs if r.state is s) for s in (NYE, DUE, STALE))
+    return kwargs, coverage(kwargs, (1, 0, 0, 0, nye, due, stale), False, runs)
+
+
+CLOCK_CASES: list[tuple[int, int, tuple[GapRun, ...]]] = [
+    (X - 1, 1, (GapRun(NYE, N + TF, N + 2 * TF),)),
+    (X, 1, (GapRun(DUE, N + TF, N + 2 * TF),)),
+    (X + L, 1, (GapRun(DUE, N + TF, N + 2 * TF),)),
+    (X + L + 1, 1, (GapRun(STALE, N + TF, N + 2 * TF),)),
+    (
+        X + TF + L,
+        3,
+        (
+            GapRun(STALE, N + TF, N + 2 * TF),
+            GapRun(DUE, N + 2 * TF, N + 3 * TF),
+            GapRun(NYE, N + 3 * TF, N + 4 * TF),
+        ),
+    ),
+]
+
+
+def records_after_newest_case() -> RegressionCase:
+    kwargs = span_kwargs(N, slot(4), newest=N, as_of=N + DAY, candles={N}, conflicts={slot(1)}, unavailable={slot(3)})
+    runs = (
+        GapRun(SlotState.CONFLICTED, slot(1), slot(2)),
+        GapRun(STALE, slot(2), slot(3)),
+        GapRun(SlotState.UNAVAILABLE, slot(3), slot(4)),
+    )
+    return kwargs, coverage(kwargs, (1, 1, 1, 0, 0, 0, 1), False, runs)
+
+
+def stored_ahead_case() -> RegressionCase:
+    # as_of = N + TF + D - 1 is before X and before the newest candle's own end plus the delay
+    kwargs = span_kwargs(N, slot(4), newest=N, as_of=N + TF + D - 1, candles={N}, conflicts=set(), unavailable=set())
+    return kwargs, coverage(kwargs, (1, 0, 0, 0, 3, 0, 0), True, (GapRun(NYE, slot(1), slot(4)),))
+
+
+def all_regression_cases() -> list[RegressionCase]:
+    return [
+        stored_states_case(),
+        before_oldest_case(),
+        *(clock_case(*case) for case in CLOCK_CASES),
+        records_after_newest_case(),
+        stored_ahead_case(),
+    ]
+
+
+def test_regression_stored_states_and_runs() -> None:
+    kwargs, expected = stored_states_case()
+    assert classify_span_at(**kwargs) == expected
+
+
+def test_regression_slots_before_the_oldest_candle_are_missing() -> None:
+    kwargs, expected = before_oldest_case()
+    assert classify_span_at(**kwargs) == expected
+
+
+@pytest.mark.parametrize(("as_of", "slots_after", "runs"), CLOCK_CASES)
+def test_regression_clock_boundaries(as_of: int, slots_after: int, runs: tuple[GapRun, ...]) -> None:
+    kwargs, expected = clock_case(as_of, slots_after, runs)
+    assert classify_span_at(**kwargs) == expected
+
+
+def test_regression_records_after_the_newest_candle_win_over_the_clock() -> None:
+    kwargs, expected = records_after_newest_case()
+    assert classify_span_at(**kwargs) == expected
+
+
+def test_regression_stored_ahead_of_as_of() -> None:
+    kwargs, expected = stored_ahead_case()
+    result = classify_span_at(**kwargs)
+    assert result == expected
+    assert result.stored_ahead_of_as_of is True
+    assert result.due == result.stale == 0
+
+
+def test_timed_slot_states_match_the_regression_cases() -> None:
+    for kwargs, expected in all_regression_cases():
+        states = timed_coverage.timed_slot_states(**kwargs)
+        assert [t for t, _ in states] == list(range(kwargs["start"], kwargs["end"], TF))
+        per_state = dict.fromkeys(SlotState, 0)
+        runs: list[GapRun] = []
+        for open_time, state in states:
+            per_state[state] += 1
+            if state is SlotState.PRESENT:
+                continue
+            if runs and runs[-1].state is state and runs[-1].end_ms == open_time:
+                runs[-1] = GapRun(state, runs[-1].start_ms, open_time + TF)
+            else:
+                runs.append(GapRun(state, open_time, open_time + TF))
+        assert tuple(runs) == expected.runs
+        assert (
+            per_state[SlotState.PRESENT],
+            per_state[SlotState.CONFLICTED],
+            per_state[SlotState.UNAVAILABLE],
+            per_state[SlotState.MISSING],
+            per_state[NYE],
+            per_state[DUE],
+            per_state[STALE],
+        ) == counts(expected)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"as_of_ms": True},
+        {"rule": None},
+        {"end": slot(3) + 1},
+        {"candles": set(), "newest_open_time_ms": slot(1)},
+        {"candles": {slot(0), slot(2)}},
+        {"candles": {slot(0), float(slot(1))}},
+    ],
+)
+def test_timed_slot_states_validates_like_classify_span_at(override: dict[str, Any]) -> None:
+    with pytest.raises((TypeError, ValueError)) as from_classify:
+        classify_span_at(**valid(**override))
+    with pytest.raises(from_classify.type):
+        timed_coverage.timed_slot_states(**valid(**override))

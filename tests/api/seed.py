@@ -3,6 +3,7 @@
 import json
 import sqlite3
 from collections.abc import Iterable
+from decimal import Decimal
 from pathlib import Path
 
 from quasar_market_data.collector.binance_klines import parse_klines
@@ -35,12 +36,24 @@ def candle_values(open_time_ms: int) -> tuple[str, str, str, str, str, str | Non
 
 
 def insert_candle(
-    conn: sqlite3.Connection, open_time_ms: int, *, symbol: str = SYMBOL, venue: str = VENUE, timeframe: str = TIMEFRAME
+    conn: sqlite3.Connection,
+    open_time_ms: int,
+    *,
+    symbol: str = SYMBOL,
+    venue: str = VENUE,
+    timeframe: str = TIMEFRAME,
+    close: str | None = None,
 ) -> None:
+    values = candle_values(open_time_ms)
+    if close is not None:
+        open_, volume, turnover = values[0], values[4], values[5]
+        high = max(open_, close, key=Decimal)
+        low = min(open_, close, key=Decimal)
+        values = (open_, high, low, close, volume, turnover)
     conn.execute(
         "INSERT INTO candles (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume, turnover,"
         " ingested_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (venue, symbol, timeframe, open_time_ms, *candle_values(open_time_ms), AT),
+        (venue, symbol, timeframe, open_time_ms, *values, AT),
     )
 
 

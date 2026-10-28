@@ -48,6 +48,8 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 
 - **Where:** `src/quasar_market_data/api/coverage_reader.py` and `src/quasar_market_data/collector/reconcile_reader.py`.
 - **What:** both run the same window selects. A shared reader in `storage` would remove the copy; deferred because it touches the API read path.
+- **S18:** `src/quasar_market_data/api/indicator_reader.py` adds a third copy of the same bounded selects (candles,
+  conflict and unavailable records of one window).
 
 ### F-10. The series-wide hole aggregate: start-up cost fixed, the post-check cost measured
 
@@ -159,3 +161,19 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 - **What:** each failed once in about eight full runs during S17 with `nothing is waiting: the simulation is stuck`,
   and passed on every rerun, alone and in the full suite, with and without the S17 changes. They take about 7 s of
   real time each. Not investigated; the pre-commit hook runs the full suite, so a rerun is the workaround.
+
+## From S18 (`GET /v1/indicators`)
+
+### F-20. RSI reads "0" where it is undefined (0/0), and the value depends on `start`
+
+- **Where:** `src/quasar_market_data/api/indicator_engine.py`, pinned by `tests/api/test_indicator_engine.py::test_r5_constant_closes` and `tests/api/test_indicators_endpoint.py::test_flat_range_after_movement_reads_zero_only_when_the_whole_range_is_flat`.
+- **What (observed on the locked build, ta-lib 0.8.2, C library 0.8.1; the TA-Lib source was not consulted):** TA-Lib returns exactly `0.0` only when the average gain and the average loss are BOTH exactly zero over the whole computation range from the anchor to that point (the 0/0 case, where RSI is undefined). A market that turns flat after moving keeps its last RSI ratio (for example 10.687 stayed flat over 2000 constant slots). So one slot can read `"0"` or about 64 depending on `start`: with RSI(2), closes moving up to the slot before `s` and constant from `s`, slot `s+50` reads `"63.953414949372856"` for `start=s`, `"63.955521365130394"` for `start=s+10`, `"0"` for `start=s+21` and `"0"` for `start=s+40`. A consumer must not read `"0"` as a market statement (oversold or otherwise). For the 0/0 case this contradicts the 'slightly different (observed below 0.01 RSI points)' sentence of contract 6.3.6.
+- **Decision for the user (not taken):** (a) emit `null` with a new reason for the 0/0 point (a contract change), or (b) keep the value and correct contract 6.3.6.
+- **Test:** the characterization test `test_flat_range_after_movement_reads_zero_only_when_the_whole_range_is_flat` pins the current behaviour and must be updated together with that decision.
+
+### F-21. The CPU cost of indicator requests is measured for one request only
+
+- **Where:** `tests/api/bench_indicators.py` (`make bench-indicators`).
+- **What:** the largest request (2016 slots, ten RSI) was measured once on a warm page cache (README, `quasar-api
+  serve`). Concurrent requests, a cold disk and other machines are not measured, and there is no rate limit (contract
+  5.6, accepted risk). Only the computation runs in the thread pool: the response body build (`_indicators_body`, about 20 160 `float_text` calls) and `json.dumps` of up to about 1.66 MB run on the event loop in `api/app.py` (measured 27-41 ms on the largest request), which stalls `/health` and every other request for that time, the same pattern as `/v1/coverage` and `/v1/candles`. Moving the body build and encoding into `run_in_threadpool` is the remedy if it ever matters (not implemented).

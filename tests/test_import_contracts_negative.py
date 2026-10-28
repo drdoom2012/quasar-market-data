@@ -21,6 +21,7 @@ STORAGE_CONTRACT = "storage is a leaf below collector and api"
 MIGRATE_CONTRACT = "only the collector migrates"
 CCXT_CONTRACT = "ccxt is imported only by the Binance adapter"
 NO_NETWORK_CONTRACT = "api reaches no network client"
+ENGINE_ONLY_CONTRACT = "talib and numpy are imported only by the indicator engine"
 CONTRACT_NAMES = (
     DOMAIN_CONTRACT,
     INDEPENDENCE_CONTRACT,
@@ -28,6 +29,7 @@ CONTRACT_NAMES = (
     MIGRATE_CONTRACT,
     CCXT_CONTRACT,
     NO_NETWORK_CONTRACT,
+    ENGINE_ONLY_CONTRACT,
 )
 
 
@@ -81,6 +83,13 @@ CASES = {
         "api/_probe.py", f"import {PACKAGE}.storage.connection\n", None
     ),
     "api_importing_storage_schema_is_allowed": Case("api/_probe.py", f"import {PACKAGE}.storage.schema\n", None),
+    "api_importing_talib_fails_the_engine_only_contract": Case("api/_probe.py", "import talib\n", ENGINE_ONLY_CONTRACT),
+    "api_importing_numpy_fails_the_engine_only_contract": Case("api/_probe.py", "import numpy\n", ENGINE_ONLY_CONTRACT),
+    "collector_importing_talib_fails_the_engine_only_contract": Case(
+        "collector/_probe.py", "import talib\n", ENGINE_ONLY_CONTRACT
+    ),
+    "domain_importing_talib_fails_domain_is_pure": Case("domain/_probe.py", "import talib\n", DOMAIN_CONTRACT),
+    "api_importing_the_engine_is_allowed": Case("api/_probe.py", f"import {PACKAGE}.api.indicator_engine\n", None),
     "storage_importing_sqlite3_is_allowed": Case("storage/_probe.py", "import sqlite3\n", None),
 }
 

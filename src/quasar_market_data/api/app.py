@@ -1,4 +1,5 @@
-"""The HTTP application: ``GET /v1/candles``, ``GET /v1/coverage`` and the one error body (contract api-v1 sections 1, 2, 5 and 6.1).
+"""The HTTP application: ``GET /v1/candles``, ``GET /v1/coverage``, ``GET /v1/indicators``, health and the one error
+body (contract api-v1 sections 1, 2, 5, 6.1, 6.2 and 6.3).
 
 The handler parses the raw query string by hand so the contract's strictness holds (``400``, not FastAPI's ``422``;
 repeated, unknown and empty parameters are visible). Documentation endpoints and redirects are off, so an unknown
@@ -21,12 +22,30 @@ from starlette.responses import Response
 
 from quasar_market_data.api.candle_reader import CandlesPage
 from quasar_market_data.api.coverage_reader import CoverageReport
-from quasar_market_data.api.database import ConnectionFactory, read_candles, read_coverage, read_ingest, read_ready
+from quasar_market_data.api.database import (
+    ConnectionFactory,
+    read_candles,
+    read_coverage,
+    read_indicators,
+    read_ingest,
+    read_ready,
+)
 from quasar_market_data.api.errors import ApiError, internal_error, method_not_allowed, not_found
+from quasar_market_data.api.float_text import float_text
 from quasar_market_data.api.health_reader import StoredSeries
-from quasar_market_data.api.params import parse_candles_request, parse_coverage_request, require_no_query
+from quasar_market_data.api.indicator_reader import IndicatorInputs
+from quasar_market_data.api.indicator_results import indicator_results
+from quasar_market_data.api.params import (
+    indicators_window_end,
+    parse_candles_request,
+    parse_coverage_request,
+    parse_indicators_request,
+    require_no_query,
+)
 from quasar_market_data.api.rule import DEFAULT_RULE, checked_rule
 from quasar_market_data.domain.freshness import Freshness, series_freshness
+from quasar_market_data.domain.indicator_series import IndicatorPoint, IndicatorSeries, read_start_ms
+from quasar_market_data.domain.indicators import IndicatorSpec
 from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
@@ -68,6 +87,20 @@ def create_app(
             read_coverage, db_path, parsed, as_of_ms=as_of_ms, rule=rule, open_connection=open_connection
         )
         return _json(200, _coverage_body(report))
+
+    @app.get("/v1/indicators")
+    async def indicators(request: Request) -> Response:
+        # contract 6.3.7: parameters -> host clock -> window of a defaulted end -> database -> series
+        parsed = parse_indicators_request(request.scope["query_string"])
+        as_of_ms = ensure_timestamp_ms(now_ms(), "as_of_ms")  # a wrong host clock is a 500, not a 503
+        end = indicators_window_end(parsed, as_of_ms=as_of_ms, publication_delay_ms=rule.publication_delay_ms)
+        timeframe_ms = parsed.timeframe.milliseconds
+        read_start = min(read_start_ms(parsed.start, spec.warmup_slots, timeframe_ms) for spec in parsed.indicators)
+        inputs = await run_in_threadpool(
+            read_indicators, db_path, parsed, end=end, read_start=read_start, open_connection=open_connection
+        )
+        series = await run_in_threadpool(indicator_results, inputs, parsed.indicators, as_of_ms=as_of_ms, rule=rule)
+        return _json(200, _indicators_body(inputs, parsed.indicators, series, as_of_ms, rule))
 
     @app.get("/health")
     async def liveness(request: Request) -> Response:
@@ -208,6 +241,53 @@ def _coverage_body(report: CoverageReport) -> dict[str, object]:
             for run in c.runs
         ],
     }
+
+
+def _indicators_body(
+    inputs: IndicatorInputs,
+    specs: Sequence[IndicatorSpec],
+    series: Sequence[IndicatorSeries],
+    as_of_ms: int,
+    rule: ExpectationRule,
+) -> dict[str, object]:
+    """Keys in the order of contract 6.3.4; ``float_text`` raises on a non-finite value, which ends as a ``500``."""
+    return {
+        "venue": inputs.venue,
+        "symbol": inputs.symbol,
+        "timeframe": inputs.timeframe,
+        "start": inputs.start,
+        "end": inputs.end,
+        "as_of_ms": as_of_ms,
+        "rule": {"publication_delay_ms": rule.publication_delay_ms, "lag_threshold_ms": rule.lag_threshold_ms},
+        "series": {
+            "oldest_open_time_ms": inputs.oldest_open_time_ms,
+            "newest_open_time_ms": inputs.newest_open_time_ms,
+        },
+        "indicators": [_indicator_body(spec, one) for spec, one in zip(specs, series, strict=True)],
+    }
+
+
+def _indicator_body(spec: IndicatorSpec, series: IndicatorSeries) -> dict[str, object]:
+    points = [_point_body(spec.outputs, point) for point in series.points]
+    return {
+        "id": spec.id,
+        "name": spec.name,
+        "params": dict(spec.params),
+        "outputs": list(spec.outputs),
+        "warmup_slots": spec.warmup_slots,
+        "anchor_open_time_ms": series.anchor_open_time_ms,
+        "latest": points[-1],
+        "points": points,
+    }
+
+
+def _point_body(outputs: Sequence[str], point: IndicatorPoint) -> dict[str, object]:
+    values = (
+        None
+        if point.values is None
+        else {name: float_text(value) for name, value in zip(outputs, point.values, strict=True)}
+    )
+    return {"open_time_ms": point.open_time_ms, "values": values, "reason": point.reason}
 
 
 def _ingest_body(stored: Sequence[StoredSeries], as_of_ms: int, rule: ExpectationRule) -> dict[str, object]:

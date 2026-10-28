@@ -6,8 +6,11 @@ from quasar_market_data.api.errors import ApiError
 from quasar_market_data.api.params import (
     CandlesRequest,
     CoverageRequest,
+    IndicatorsRequest,
+    indicators_window_end,
     parse_candles_request,
     parse_coverage_request,
+    parse_indicators_request,
 )
 from quasar_market_data.domain.timeframe import Timeframe
 
@@ -335,3 +338,112 @@ def test_received_of_an_undecodable_query_shows_the_bad_part_not_the_valid_prefi
 
     assert len(received) <= 64
     assert shown in received
+
+
+# --- indicators request (contract 6.3.1, 6.3.5) ---
+
+IND_BASE = f"{BASE}&indicators=rsi:period=14"
+
+
+def parse_ind(query: str) -> IndicatorsRequest:
+    return parse_indicators_request(query.encode("ascii"))
+
+
+def ind_error(query: str) -> ApiError:
+    with pytest.raises(ApiError) as caught:
+        parse_indicators_request(query.encode("ascii"))
+    assert caught.value.status == 400
+    assert caught.value.code == "invalid_parameter"
+    return caught.value
+
+
+def test_valid_indicators_request_parses() -> None:
+    request = parse_ind(IND_BASE)
+    assert (request.venue, request.symbol, request.timeframe, request.start, request.end) == (
+        "binance-usdm",
+        "BTC/USDT:USDT",
+        Timeframe("5m"),
+        START,
+        None,
+    )
+    assert [spec.id for spec in request.indicators] == ["rsi:period=14"]
+
+
+@pytest.mark.parametrize("name", ["venue", "symbol", "timeframe", "start", "indicators"])
+def test_indicators_request_requires_every_name_but_end(name: str) -> None:
+    query = IND_BASE.replace(f"&{name}=", "&zz=") if name != "venue" else IND_BASE.replace("venue=", "zz=")
+    assert ind_error(query).details["parameter"] == "zz"
+    pairs = [pair for pair in IND_BASE.split("&") if not pair.startswith(f"{name}=")]
+    assert ind_error("&".join(pairs)).details["parameter"] == name
+
+
+def test_indicators_empty_and_repeated_are_rejected() -> None:
+    assert ind_error(f"{BASE}&indicators=").details["parameter"] == "indicators"
+    assert ind_error(f"{IND_BASE}&indicators=rsi:period=7").details["parameter"] == "indicators"
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["foo", "rsi:period=0", "rsi:period=14;rsi:period=14", "rsi:bogus=1", "rsi:period=14;", "rsi:period=abc"],
+)
+def test_indicator_syntax_errors_surface_on_the_indicators_parameter(value: str) -> None:
+    error = ind_error(f"{BASE}&indicators={value}")
+    assert error.details["parameter"] == "indicators"
+    assert error.details["received"] == value
+
+
+def test_percent_encoded_indicators_equal_the_plain_form() -> None:
+    plain = parse_ind(f"{BASE}&indicators=rsi:period=14;rsi:period=7")
+    encoded = parse_ind(f"{BASE}&indicators=rsi%3Aperiod%3D14%3Brsi%3Aperiod%3D7")
+    assert [s.id for s in encoded.indicators] == [s.id for s in plain.indicators]
+
+
+def test_indicator_window_of_2016_slots_is_accepted_and_2017_rejected() -> None:
+    assert parse_ind(f"{IND_BASE}&end={START + 2016 * TF}").end == START + 2016 * TF
+    error = ind_error(f"{IND_BASE}&end={START + 2017 * TF}")
+    assert (error.details["parameter"], error.details["maximum"]) == ("end", 2016)
+    assert ind_error(f"{IND_BASE}&end={START}").details["parameter"] == "end"
+
+
+def ind_request(end: int | None = None, start: int = START) -> IndicatorsRequest:
+    return parse_ind(
+        f"{BASE.replace(f'start={START}', f'start={start}')}&indicators=rsi:period=14" + (f"&end={end}" if end else "")
+    )
+
+
+DELAY = 15_000
+
+
+def test_explicit_end_is_unchanged() -> None:
+    assert (
+        indicators_window_end(ind_request(START + 10 * TF), as_of_ms=0, publication_delay_ms=DELAY) == START + 10 * TF
+    )
+
+
+def test_default_end_is_the_newest_expected_slot_plus_timeframe() -> None:
+    as_of = START + 10 * TF + TF + DELAY  # slot 10 has just become expected
+    assert indicators_window_end(ind_request(), as_of_ms=as_of, publication_delay_ms=DELAY) == START + 11 * TF
+
+
+def test_default_end_not_after_start_falls_back_to_one_slot() -> None:
+    as_of = START - 5 * TF
+    assert indicators_window_end(ind_request(), as_of_ms=as_of, publication_delay_ms=DELAY) == START + TF
+    as_of = START + TF + DELAY  # newest expected is START itself: newest + tf == start + tf
+    assert indicators_window_end(ind_request(), as_of_ms=as_of, publication_delay_ms=DELAY) == START + TF
+    # start in the future of the newest expected slot
+    assert indicators_window_end(ind_request(), as_of_ms=START - 100 * TF, publication_delay_ms=DELAY) == START + TF
+
+
+def test_clock_before_the_first_expected_slot_gives_one_slot() -> None:
+    assert indicators_window_end(ind_request(), as_of_ms=946684800000, publication_delay_ms=DELAY) == START + TF
+
+
+def test_default_window_beyond_2016_slots_is_rejected_on_start() -> None:
+    as_of = START + 3000 * TF
+    with pytest.raises(ApiError) as caught:
+        indicators_window_end(ind_request(), as_of_ms=as_of, publication_delay_ms=DELAY)
+    assert caught.value.status == 400
+    assert caught.value.details["parameter"] == "start"
+    assert caught.value.details["maximum"] == 2016
+    assert caught.value.details["received"] == str(START)
+    assert caught.value.message == "the window up to the newest expected slot exceeds 2016 slots; pass an explicit end"

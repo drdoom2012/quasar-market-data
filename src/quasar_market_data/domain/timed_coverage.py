@@ -84,7 +84,7 @@ def _ensure_int(value: int, name: str) -> None:
         raise TypeError(f"{name} must be int, got {type(value).__name__}")
 
 
-def classify_span_at(
+def timed_slot_states(
     *,
     start: int,
     end: int,
@@ -95,8 +95,8 @@ def classify_span_at(
     newest_open_time_ms: int,
     as_of_ms: int,
     rule: ExpectationRule,
-) -> TimedCoverage:
-    """Count the states of the slots of ``[start, end)`` at ``as_of_ms``.
+) -> tuple[tuple[int, SlotState], ...]:
+    """Return ``(open_time_ms, state)`` for every slot of ``[start, end)`` at ``as_of_ms``, in ascending order.
 
     Stored facts win over the clock: only a slot after the newest stored candle with no record is refined, by
     decision 1 of the S11 plan: ``as_of < expected_at`` is ``not_yet_expected``, up to ``expected_at + lag``
@@ -129,8 +129,7 @@ def classify_span_at(
         if open_time > newest_open_time_ms:
             raise ValueError(f"candles contains {open_time}, newer than newest_open_time_ms {newest_open_time_ms}")
 
-    counts: dict[SlotState, int] = dict.fromkeys(SlotState, 0)
-    runs: list[GapRun] = []
+    states: list[tuple[int, SlotState]] = []
     for open_time, stored in span_slot_states(
         start=start,
         end=end,
@@ -150,6 +149,37 @@ def classify_span_at(
                 state = SlotState.DUE
             else:
                 state = SlotState.STALE
+        states.append((open_time, state))
+    return tuple(states)
+
+
+def classify_span_at(
+    *,
+    start: int,
+    end: int,
+    timeframe_ms: int,
+    candles: AbstractSet[int],
+    conflicts: AbstractSet[int],
+    unavailable: AbstractSet[int],
+    newest_open_time_ms: int,
+    as_of_ms: int,
+    rule: ExpectationRule,
+) -> TimedCoverage:
+    """Count the states of the slots of ``[start, end)`` at ``as_of_ms`` (see ``timed_slot_states``)."""
+    states = timed_slot_states(
+        start=start,
+        end=end,
+        timeframe_ms=timeframe_ms,
+        candles=candles,
+        conflicts=conflicts,
+        unavailable=unavailable,
+        newest_open_time_ms=newest_open_time_ms,
+        as_of_ms=as_of_ms,
+        rule=rule,
+    )
+    counts: dict[SlotState, int] = dict.fromkeys(SlotState, 0)
+    runs: list[GapRun] = []
+    for open_time, state in states:
         counts[state] += 1
         if state is SlotState.PRESENT:
             continue

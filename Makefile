@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck imports check live bench bench-health
+.PHONY: test lint typecheck imports check live bench bench-health bench-indicators
 
 test:
 	uv run pytest
@@ -28,3 +28,7 @@ bench:
 # PROFILE: smoke | medium | target. medium and target are slow and large; run them by hand (S17 HARD STOP 2).
 bench-health:
 	uv run python -m tests.api.bench_health --profile $(PROFILE)
+
+# The largest /v1/indicators request on a generated database in a fresh temp dir; informative, not part of `check`.
+bench-indicators:
+	uv run python -m tests.api.bench_indicators

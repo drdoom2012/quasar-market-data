@@ -16,7 +16,8 @@ from quasar_market_data.api.candle_reader import CandlesPage, UnknownSeries, rea
 from quasar_market_data.api.coverage_reader import CoverageReport, read_coverage_report
 from quasar_market_data.api.errors import ApiError, NotReadyReason, not_ready, unknown_series
 from quasar_market_data.api.health_reader import StoredSeries, check_ready, read_stored_series
-from quasar_market_data.api.params import CandlesRequest, CoverageRequest
+from quasar_market_data.api.indicator_reader import IndicatorInputs, read_indicator_inputs
+from quasar_market_data.api.params import CandlesRequest, CoverageRequest, IndicatorsRequest
 from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.storage.connection import StorageError, open_reader
 from quasar_market_data.storage.schema import EmptyDatabaseError, SchemaMismatchError
@@ -57,6 +58,22 @@ def read_coverage(
     )
 
 
+def read_indicators(
+    db_path: Path,
+    request: IndicatorsRequest,
+    *,
+    end: int,
+    read_start: int,
+    open_connection: ConnectionFactory = open_reader,
+) -> IndicatorInputs:
+    return _with_reader(
+        db_path,
+        open_connection,
+        lambda conn: read_indicator_inputs(conn, request, end=end, read_start=read_start),
+        request,
+    )
+
+
 def read_ready(db_path: Path, *, open_connection: ConnectionFactory = open_reader) -> int:
     """The schema version when the database can be served; the contract's ``503`` otherwise."""
     return _with_reader(db_path, open_connection, check_ready, None)
@@ -70,7 +87,7 @@ def _with_reader[T](
     db_path: Path,
     open_connection: ConnectionFactory,
     read: Callable[[sqlite3.Connection], T],
-    request: CandlesRequest | CoverageRequest | None,
+    request: CandlesRequest | CoverageRequest | IndicatorsRequest | None,
 ) -> T:
     try:
         conn = open_connection(db_path)
