@@ -74,8 +74,8 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
   rows visited = rows stored). The start no longer waits for the history at all. The guard stops the read with
   `sqlite3_interrupt`, not a progress handler: a handler made the read wait for the GIL behind a busy event loop (a
   review measured 530 s instead of 2 s with a fully busy main thread); with `sqlite3_interrupt` the same probe gives
-  0.69 s with the guard and 0.70 s without. **The numbers are not yet accepted by the user** (HARD STOP 2 of S15):
-  accepting them is the user's decision.
+  0.69 s with the guard and 0.70 s without. **Accepted by the user on 2026-10-28** (HARD STOP 2 of S15 is closed for
+  this profile); the open points below are not covered by that acceptance.
 - **Still open:** a cold disk, a soak database (S23), more than 600 series or 3 years. The post-check holds one read
   snapshot for its duration, so the WAL cannot be checkpointed past it meanwhile (about 36 s at this size).
 
@@ -127,7 +127,7 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
   cannot name the cause. A heartbeat needs a schema change (the user's decision). Process supervision (restart policy,
   container health) belongs to S21.
 
-### F-17. The `/health/ingest` read cost is not accepted
+### F-17. The `/health/ingest` read cost: accepted at 600 series, the rest unmeasured
 
 - **Where:** `src/quasar_market_data/api/health_reader.py`, `tests/api/bench_health.py`.
 - **What:** the read does two primary-key seeks per series (the next series and its newest candle), pinned by a test
@@ -141,9 +141,8 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 
   H3 (a writer commits inside each read; the result equals the pre-read snapshot): 5 commits in 5 reads, 0 differing
   results. The first `target` run used a weaker H3 that could not fail; it was replaced and rerun.
-  The criteria H1 to H3 (S17 plan, Decision 11) were proposals and are **met by these numbers, but not yet accepted by
-  the user** (HARD STOP 2): do not use `/health/ingest` against a real database with long history until the user
-  accepts them. Not measured: a cold cache, a real network client, many concurrent requests, more than 600 series. S23
+  The criteria H1 to H3 (S17 plan, Decision 11) are met by these numbers, and the user **accepted them on 2026-10-28**
+  (HARD STOP 2 of S17 is closed for this profile). Not measured: a cold cache, a real network client, many concurrent requests, more than 600 series. S23
   repeats it on a soak database. The read is linear in the number of series and has no deadline beyond SQLite's busy
   timeout (5 s).
 
