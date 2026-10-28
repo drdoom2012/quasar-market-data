@@ -6,7 +6,7 @@
 
 ## 0. What a consumer can rely on
 
-1. Every candle returned is a **confirmed closed** candle stored by the Collector. The still-forming candle is never returned. This holds as long as every ingestion path routes through the closed-candle selection (INV-007: today `quasar-collector fetch-once` and `quasar-collector run` do; backfill, S16, must).
+1. Every candle returned is a **confirmed closed** candle stored by the Collector. The still-forming candle is never returned. This holds as long as every ingestion path routes through the closed-candle selection (INV-007: `quasar-collector fetch-once`, `run` and its backfill do).
 2. Prices and volumes are **exact decimal text** exactly as stored; the API never converts them to floating point.
 3. The API **never contacts an exchange and never writes**. Read-only access is enforced (INV-014 in `docs/invariants.md`). Exchange isolation is enforced only in a narrowed form (INV-044: no exchange or network-client import in the `api` package, no outbound connection in the API tests); the full guarantee is INV-013, which is planned (S21).
 4. **A response never implies completeness it cannot show.** Every candle response carries a `coverage` block and the series' `oldest`/`newest` stored open times. The absence of a candle is never evidence that nothing traded.
@@ -81,7 +81,7 @@ Pagination is by **time**, not by offset:
 A **slot** is one timeframe interval of one series, aligned to the epoch (`open_time_ms % timeframe == 0`). For every slot in a span the following facts are looked up in stored rows only; sections 4 and 5 use **no clock** (section 6.1 adds the clock-dependent split of the last state):
 
 - `C`: a stored candle exists;
-- `U`: the Collector recorded that the exchange confirmed it has no data for the slot (`unavailable_candles`, ADR-0002 P-6; the Collector does not write these before S16, so `unavailable_slots` is 0 until then);
+- `U`: the Collector recorded that the exchange confirmed it has no data for the slot (`unavailable_candles`, ADR-0002 P-6; the Collector does not write these in v1, so `unavailable_slots` is 0 (INV-054));
 - `X`: at least one conflict record exists (`candle_conflicts`, ADR-0002 P-5).
 
 Each slot of a span gets **exactly one** state, the first that matches (ADR-0002 P-7):

@@ -17,7 +17,7 @@ from quasar_market_data.collector.fetch_once import MAX_LIMIT, CandleSink, Fetch
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.domain.closed_candles import DEFAULT_PUBLICATION_DELAY_MS
 from quasar_market_data.domain.reconcile import attempt_limit
-from quasar_market_data.domain.schedule import newest_expected_open_ms, next_wake_ms
+from quasar_market_data.domain.schedule import cycles_skipped, newest_expected_open_ms, next_wake_ms
 from quasar_market_data.domain.server_time import DEFAULT_TIME_TRUST, TimeTrustConfig
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
@@ -205,12 +205,34 @@ class LoopConfig:
         )
 
 
+IDLE_RESERVE_MS = 15_000  # the idle window ends this long before the next boundary (S16 D5)
+_NS_PER_MS = 1_000_000
+
+
 @dataclass(frozen=True)
 class RoundReport:
+    """``lateness_ms`` and ``idle_overrun_ms`` are monotonic; ``skipped_rounds`` is schedule-based (wall) and
+    ``clock_step_ms`` tells a clock event from load. All four are 0 for the first round (S16 D5)."""
+
     target_open_ms: int | None
     started_wall_ms: int
     results: tuple[SymbolResult, ...]
     uncertain_symbols: tuple[str, ...]
+    lateness_ms: int = 0
+    idle_overrun_ms: int = 0
+    skipped_rounds: int = 0
+    clock_step_ms: int = 0
+
+
+@dataclass(frozen=True)
+class IdleWindow:
+    """The idle time the loop hands to ``idle_work``: monotonic instants, the loop's source and per-symbol sinks."""
+
+    due_mono_ns: int  # when the next round is due
+    deadline_mono_ns: int  # due minus IDLE_RESERVE_MS: no page may need to run past this
+    source: KlineSource
+    sink_for: Callable[[str], CandleSink]
+    stop: asyncio.Event
 
 
 @dataclass(frozen=True)
@@ -237,6 +259,7 @@ async def run_collection_loop(
     first_round_wanted_from: Mapping[str, int] | None = None,
     after_first_round: Callable[[RoundReport], Awaitable[None]] | None = None,
     observe_forming_slot: Callable[[str, int, int], None] | None = None,
+    idle_work: Callable[[IdleWindow], Awaitable[None]] | None = None,
 ) -> LoopExit:
     """Collect on every boundary until ``stop`` is set; see the S14 plan, Decisions 4 to 9.
 
@@ -348,13 +371,23 @@ async def run_collection_loop(
 
     tf, delay = config.timeframe, config.publication_delay_ms
     first_round = True
+    previous: tuple[int, int] | None = None  # wall ms and monotonic ns of the previous round's start
+    due_mono_ns: int | None = None
+    idle_overrun_ms = 0
     while not stop.is_set():
-        started = clock.wall_ms()
+        started, started_ns = clock.wall_ms(), clock.monotonic_ns()
         target = newest_expected_open_ms(started, tf, delay)
+        lateness_ms = 0 if due_mono_ns is None else max(0, (started_ns - due_mono_ns) // _NS_PER_MS)
+        skipped = cycles_skipped(None if previous is None else previous[0], started, tf, delay)
+        step = 0 if previous is None else (started - previous[0]) - (started_ns - previous[1]) // _NS_PER_MS
+        if abs(step) <= config.time_trust.max_clock_divergence_ms:
+            step = 0
+        overrun_ms, idle_overrun_ms = idle_overrun_ms, 0
+        previous = (started, started_ns)
         results = await run_round(target, first_round)
         if fatal:
             raise FatalLoopError(fatal[0], uncertain()) from fatal[0]
-        report = RoundReport(target, started, results, uncertain())
+        report = RoundReport(target, started, results, uncertain(), lateness_ms, overrun_ms, skipped, step)
         on_round(report)
         if first_round and after_first_round is not None and not stop.is_set():
             try:
@@ -366,5 +399,21 @@ async def run_collection_loop(
         if stop.is_set():
             break
         now = clock.wall_ms()
-        await _sleep_or_stop(sleep, next_wake_ms(now, tf, delay) - now, stop)
+        planned_ms = next_wake_ms(now, tf, delay)
+        due_mono_ns = clock.monotonic_ns() + (planned_ms - now) * _NS_PER_MS
+        if idle_work is None:
+            await _sleep_or_stop(sleep, planned_ms - now, stop)
+            continue
+        deadline_ns = due_mono_ns - IDLE_RESERVE_MS * _NS_PER_MS
+        if deadline_ns > clock.monotonic_ns():
+            window = IdleWindow(due_mono_ns, deadline_ns, source, lambda symbol: watches[symbol], stop)
+            try:
+                await idle_work(window)
+            except Exception as error:
+                stop.set()
+                raise FatalLoopError(error, uncertain()) from error
+            idle_overrun_ms = max(0, (clock.monotonic_ns() - due_mono_ns) // _NS_PER_MS)
+        remaining_ns = due_mono_ns - clock.monotonic_ns()
+        if remaining_ns > 0:  # a delayed round starts at once: no jump to the following boundary
+            await _sleep_or_stop(sleep, -(-remaining_ns // _NS_PER_MS), stop)
     return LoopExit(uncertain())

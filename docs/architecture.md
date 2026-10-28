@@ -132,8 +132,8 @@ The initial primary OHLCV timeframe is **5m**. The target scale is roughly **300
 
 1. At startup, load configuration and persisted collection checkpoints.
    In v1 the persisted checkpoints are the stored facts (candles, conflicts, unavailable intervals); no separate checkpoint table exists.
-2. Reconcile expected closed periods with persisted periods.
-3. Prioritize recent closed candles; queue recoverable historical gaps separately.
+2. Reconcile expected closed periods with persisted periods. (v1: the restart reconcile reads the stored facts, and the backfill re-derives its holes from them on every cycle; see `docs/superpowers/plans/2026-10-27-s16-gap-detection-and-backfill.md`.)
+3. Prioritize recent closed candles; queue recoverable historical gaps separately. (v1: backfill runs only in the idle window between rounds, with a monotonic deadline; a gap the exchange does not serve stays `missing` and `unavailable_candles` is not written.)
 4. Apply bounded per-exchange concurrency and rate limiting.
 5. Normalize and validate responses before writes.
 6. Commit data and progress atomically where applicable.

@@ -218,14 +218,24 @@ class RecordingSource:
     def __init__(self, t: ManualTime) -> None:
         self.t = t
         self.starts: list[int] = []
+        self.ranges: list[tuple[int | None, int | None]] = []
         self.closed = False
 
     async def fetch_server_time_ms(self) -> int:
         self.starts.append(self.t.monotonic_ns())
         return 0
 
-    async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> Sequence[object]:
+    async def fetch_klines(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        limit: int,
+        *,
+        start_time_ms: int | None = None,
+        end_time_ms: int | None = None,
+    ) -> Sequence[object]:
         self.starts.append(self.t.monotonic_ns())
+        self.ranges.append((start_time_ms, end_time_ms))
         return []
 
     async def close(self) -> None:
@@ -259,3 +269,15 @@ def test_invalid_interval_type(value: object) -> None:
 def test_negative_interval() -> None:
     with pytest.raises(ValueError):
         RateLimiter(-1, ManualTime(), ManualTime().sleep)
+
+
+def test_rate_limited_source_forwards_the_range() -> None:
+    async def scenario() -> None:
+        t = ManualTime()
+        inner = RecordingSource(t)
+        source = RateLimitedSource(inner, limiter(t, interval=0))
+        await source.fetch_klines("BTC/USDT:USDT", Timeframe("5m"), 10, start_time_ms=1000, end_time_ms=2000)
+        await source.fetch_klines("BTC/USDT:USDT", Timeframe("5m"), 10)
+        assert inner.ranges == [(1000, 2000), (None, None)]
+
+    run(scenario)

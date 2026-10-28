@@ -56,9 +56,21 @@ class RateLimitedSource:
         await self._limiter.acquire()
         return await self._inner.fetch_server_time_ms()
 
-    async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> Sequence[object]:
+    async def fetch_klines(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        limit: int,
+        *,
+        start_time_ms: int | None = None,
+        end_time_ms: int | None = None,
+    ) -> Sequence[object]:
         await self._limiter.acquire()
-        return await self._inner.fetch_klines(symbol, timeframe, limit)
+        if start_time_ms is None and end_time_ms is None:
+            return await self._inner.fetch_klines(symbol, timeframe, limit)
+        return await self._inner.fetch_klines(
+            symbol, timeframe, limit, start_time_ms=start_time_ms, end_time_ms=end_time_ms
+        )
 
     async def close(self) -> None:
         await self._inner.close()

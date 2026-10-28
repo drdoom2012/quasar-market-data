@@ -74,7 +74,9 @@ class FakeSource:
         *,
         honour_limit: bool = False,
         server_ahead_ms: int = 0,
+        series: Sequence[int] | None = None,
     ) -> None:
+        self.series = series  # open times the exchange holds; served filtered by range and limit when set
         self.honour_limit = honour_limit  # True: ``limit`` rows ending at the server's forming slot; ``rows`` unused
         self.server_ahead_ms = server_ahead_ms  # honour_limit only: the server clock is the local one plus this
         self.clock = clock
@@ -86,6 +88,7 @@ class FakeSource:
         self.on_klines = on_klines
         self.time_calls = 0
         self.kline_calls: list[tuple[str, Timeframe, int]] = []
+        self.kline_ranges: list[tuple[int | None, int | None]] = []
         self.closed = False
 
     async def fetch_server_time_ms(self) -> int:
@@ -102,14 +105,28 @@ class FakeSource:
         forming = (self.clock.wall_ms() + self.server_ahead_ms) // tf_ms * tf_ms
         return [kline_row(open_ms, tf_ms) for open_ms in range(forming - (limit - 1) * tf_ms, forming + tf_ms, tf_ms)]
 
-    async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> Sequence[object]:
+    async def fetch_klines(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        limit: int,
+        *,
+        start_time_ms: int | None = None,
+        end_time_ms: int | None = None,
+    ) -> Sequence[object]:
         self.kline_calls.append((symbol, timeframe, limit))
+        self.kline_ranges.append((start_time_ms, end_time_ms))
         if self.on_klines is not None:
             self.on_klines()
         if self.klines_error is not None:
             raise self.klines_error
         if self.honour_limit:
             return self.limited_rows(limit, timeframe.milliseconds)
+        if self.series is not None:
+            tf_ms = timeframe.milliseconds
+            lo = start_time_ms if start_time_ms is not None else 0
+            hi = end_time_ms if end_time_ms is not None else 1 << 62
+            return [kline_row(t, tf_ms) for t in sorted(self.series) if lo <= t <= hi][:limit]
         return self.rows
 
     async def close(self) -> None:
@@ -162,3 +179,7 @@ class ControlledSink:
         if index < len(self.raises) and self.raises[index] is not None:
             raise self.raises[index]  # type: ignore[misc]
         return WriteReport(len(candles), 0, ())
+
+    @property
+    def write_calls(self) -> int:
+        return len(self.calls)

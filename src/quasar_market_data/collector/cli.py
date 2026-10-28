@@ -24,6 +24,10 @@ oldest absent slot of the window, and after round one reads the database again t
 * ``1`` a fatal error with nothing in doubt, a failure before the loop started, or a failing writer ``close``
   after an otherwise clean stop;
 * ``2`` usage error.
+
+Between rounds ``run`` backfills holes of the stored history (S16; ``--no-backfill`` disables it, ``--backfill-days``
+bounds how far back it looks). Backfill never writes ``unavailable_candles`` and never says a history is complete: a
+slot the exchange does not serve stays missing. Exit codes are unchanged.
 """
 
 import argparse
@@ -38,6 +42,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from quasar_market_data.collector.async_candle_writer import AsyncCandleWriter
+from quasar_market_data.collector.backfill import BackfillConfig, Backfiller, SliceReport
 from quasar_market_data.collector.binance_klines import VENUE_BINANCE_USDM, KlineParseError
 from quasar_market_data.collector.binance_usdm import BinanceUsdmSource
 from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown
@@ -80,6 +85,7 @@ EXIT_UNKNOWN_OUTCOME = 4
 EXIT_INTERRUPTED = 130
 DEFAULT_CONCURRENCY = 4
 DEFAULT_REQUEST_INTERVAL_MS = 100
+DEFAULT_BACKFILL_DAYS = 30
 
 type OpenSource = Callable[[], Awaitable[KlineSource]]
 
@@ -109,6 +115,13 @@ def _positive(text: str) -> int:
     return value
 
 
+def _backfill_days(text: str) -> int:
+    value = int(text)
+    if not 1 <= value <= 365:
+        raise argparse.ArgumentTypeError("must be in 1..365")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=PROG)
     parser.add_argument("--version", action="version", version=f"{PROG} {version('quasar-market-data')}")
@@ -134,6 +147,13 @@ def _parser() -> argparse.ArgumentParser:
         default=DEFAULT_REQUEST_INTERVAL_MS,
         help="minimum spacing of adapter calls (not of network requests)",
     )
+    run.add_argument(
+        "--backfill-days",
+        type=_backfill_days,
+        default=DEFAULT_BACKFILL_DAYS,
+        help="how far back idle-time backfill looks for holes (1..365 days)",
+    )
+    run.add_argument("--no-backfill", action="store_true", help="do not backfill holes in the idle time between rounds")
     return parser
 
 
@@ -183,9 +203,17 @@ def _print_round(report: RoundReport) -> None:
     print(
         f"round target={target} collected={counts[SymbolOutcome.COLLECTED]}"
         f" conflicted={counts[SymbolOutcome.CONFLICTED]} gave_up={counts[SymbolOutcome.GAVE_UP]}"
-        f" stopped={counts[SymbolOutcome.STOPPED]} write_uncertain={len(report.uncertain_symbols)}",
+        f" stopped={counts[SymbolOutcome.STOPPED]} write_uncertain={len(report.uncertain_symbols)}"
+        f" lateness_ms={report.lateness_ms} idle_overrun_ms={report.idle_overrun_ms}"
+        f" skipped_rounds={report.skipped_rounds} clock_step_ms={report.clock_step_ms}",
         flush=True,
     )
+    if report.idle_overrun_ms or report.skipped_rounds:
+        _error(
+            f"warning: the round started late: lateness_ms={report.lateness_ms}"
+            f" idle_overrun_ms={report.idle_overrun_ms} skipped_rounds={report.skipped_rounds}"
+            f" clock_step_ms={report.clock_step_ms}"
+        )
     for result in report.results:
         plain = result.outcome in (SymbolOutcome.COLLECTED, SymbolOutcome.NOTHING_EXPECTED)
         if plain and not result.conflict_open_times:
@@ -197,6 +225,33 @@ def _print_round(report: RoundReport) -> None:
             f" problem={result.last_problem or '-'}",
             flush=True,
         )
+
+
+def _count(value: int | None) -> str:
+    return "unverified" if value is None else str(value)
+
+
+def _print_slice(report: SliceReport) -> None:
+    """One line per symbol slice. Three separate statements: what the exchange served, what the writer reported,
+    and what the read-back recovered (an integer only when it could be attributed to this slice)."""
+    print(
+        f"backfill symbol={report.symbol} pages={report.pages}"
+        f" | served_all={report.served_all} served_some={report.served_some} served_none={report.served_none}"
+        f" | stored={report.stored} duplicates={report.duplicates} conflicts={report.conflicts}"
+        f" invalid={report.invalid} pending={report.pending}"
+        f" | new_in_targets={_count(report.new_in_targets)} recovered={_count(report.recovered)}"
+        f" missing_in_targets={_count(report.missing_in_targets)} attribution={report.attribution.value}"
+        f" | status={report.status.value}",
+        flush=True,
+    )
+
+
+def _report_suspension(consecutive: int, idle_overrun_ms: int) -> None:
+    print(f"backfill suspended reason=idle_overrun consecutive={consecutive} until=restart", flush=True)
+    _error(
+        f"warning: backfill suspended after {consecutive} consecutive idle overruns"
+        f" (last idle_overrun_ms={idle_overrun_ms}); restart to resume"
+    )
 
 
 def _flag(value: bool) -> str:
@@ -274,7 +329,13 @@ def _warn_clock_lead(lead_max: int | None) -> None:
 
 
 async def _run_loop(
-    config: LoopConfig, db: Path, min_interval_ms: int, open_source: OpenSource, clock: Clock, sleep: Sleep
+    config: LoopConfig,
+    db: Path,
+    min_interval_ms: int,
+    open_source: OpenSource,
+    clock: Clock,
+    sleep: Sleep,
+    backfill: BackfillConfig | None,
 ) -> int:
     """Handlers first, so that a stop during the pre-start read is honoured; restored on every way out."""
     stop = asyncio.Event()
@@ -283,7 +344,7 @@ async def _run_loop(
     for sig in previous:
         loop.add_signal_handler(sig, stop.set)
     try:
-        return await _reconcile_and_collect(config, db, min_interval_ms, open_source, clock, sleep, stop)
+        return await _reconcile_and_collect(config, db, min_interval_ms, open_source, clock, sleep, stop, backfill)
     finally:
         for sig, handler in previous.items():
             loop.remove_signal_handler(sig)
@@ -298,6 +359,7 @@ async def _reconcile_and_collect(
     clock: Clock,
     sleep: Sleep,
     stop: asyncio.Event,
+    backfill: BackfillConfig | None,
 ) -> int:
     inputs = ReconcileInputs(
         symbols=config.symbols,
@@ -352,6 +414,11 @@ async def _reconcile_and_collect(
         writer = await AsyncCandleWriter.open(db)
         stack.push_async_callback(close_writer, writer)
         limited = RateLimitedSource(source, RateLimiter(min_interval_ms, clock, sleep))
+        backfiller = (
+            None
+            if backfill is None
+            else Backfiller(backfill, config, db, clock, sleep, _print_slice, _report_suspension)
+        )
         outcome: LoopExit | FatalLoopError
         try:
             outcome = await run_collection_loop(
@@ -367,6 +434,7 @@ async def _reconcile_and_collect(
                 },
                 after_first_round=after_first_round,
                 observe_forming_slot=observe_forming_slot,
+                idle_work=None if backfiller is None else backfiller.run_idle,
             )
         except FatalLoopError as error:
             outcome = error
@@ -399,7 +467,8 @@ def _run_command(args: argparse.Namespace, open_source: OpenSource, clock: Clock
     )
     try:
         _migrate(db, clock)
-        return asyncio.run(_run_loop(config, db, args.min_request_interval_ms, open_source, clock, sleep))
+        backfill = None if args.no_backfill else BackfillConfig(args.backfill_days)
+        return asyncio.run(_run_loop(config, db, args.min_request_interval_ms, open_source, clock, sleep, backfill))
     except (SourceError, StorageError, sqlite3.Error) as error:  # raised before the loop started
         _error(f"error: {error}")
         return EXIT_FAILED

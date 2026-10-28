@@ -6,6 +6,7 @@ import pytest
 from quasar_market_data.domain.closed_candles import is_closed_eligible
 from quasar_market_data.domain.schedule import (
     CollectionPlan,
+    cycles_skipped,
     expected_at_ms,
     newest_expected_open_ms,
     next_wake_ms,
@@ -200,3 +201,35 @@ def test_expected_slot_agrees_with_classify_span_at(delay: int) -> None:
     assert newest_expected_open_ms(expected_at, TF, delay) == slot
     assert next_wake_ms(expected_at - 1, TF, delay) == expected_at
     assert next_wake_ms(expected_at, TF, delay) == expected_at + TF_MS
+
+
+# --- skipped cycles (S16) --------------------------------------------------------------------------------------
+
+DELAY_15 = 15_000
+C10 = MIN + 20 * TF_MS + DELAY_15  # the start of cycle 10 relative to MIN (cycle(t) = (t - delay) // tf)
+
+
+def test_cycles_skipped_same_and_next_cycle_is_zero() -> None:
+    assert cycles_skipped(C10, C10 + 5, TF, DELAY_15) == 0
+    assert cycles_skipped(C10, C10 + TF_MS, TF, DELAY_15) == 0
+    assert cycles_skipped(C10, C10 + 2 * TF_MS - 1, TF, DELAY_15) == 0
+
+
+def test_one_missing_cycle_is_one() -> None:
+    assert cycles_skipped(C10, C10 + 2 * TF_MS, TF, DELAY_15) == 1
+
+
+def test_three_cycles_later_is_two() -> None:
+    assert cycles_skipped(C10, C10 + 3 * TF_MS + 1, TF, DELAY_15) == 2
+
+
+def test_none_or_backwards_time_is_zero() -> None:
+    assert cycles_skipped(None, C10, TF, DELAY_15) == 0
+    assert cycles_skipped(C10, C10 - 5 * TF_MS, TF, DELAY_15) == 0
+    assert cycles_skipped(C10, C10 - 1, TF, DELAY_15) == 0
+
+
+def test_cycles_skipped_after_a_backward_step_is_zero_and_the_next_forward_cycle_counts_from_the_new_start() -> None:
+    starts = [C10, C10 - 12 * TF_MS, C10 - 11 * TF_MS]
+    got = [cycles_skipped(a, b, TF, DELAY_15) for a, b in zip([None, *starts[:-1]], starts, strict=True)]
+    assert got == [0, 0, 0]

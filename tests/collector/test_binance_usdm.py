@@ -269,3 +269,26 @@ def test_default_exchange_is_the_ccxt_async_usdm_client(monkeypatch: pytest.Monk
     assert len(created) == 1
     assert isinstance(created[0], real)
     assert created[0].enableRateLimit is True
+
+
+def test_range_is_sent_as_startTime_and_endTime() -> None:
+    exchange = FakeExchange()
+    source = open_source(exchange)
+    run(source.fetch_klines(SYMBOL, FIVE_MINUTES, 100, start_time_ms=1_700_000_100_000, end_time_ms=1_700_000_399_999))
+    assert exchange.calls[-1] == (
+        "klines",
+        {
+            "symbol": "BTCUSDT",
+            "interval": "5m",
+            "limit": 100,
+            "startTime": 1_700_000_100_000,
+            "endTime": 1_700_000_399_999,
+        },
+    )
+
+
+def test_request_without_a_range_is_unchanged() -> None:
+    exchange = FakeExchange()
+    source = open_source(exchange)
+    run(source.fetch_klines(SYMBOL, FIVE_MINUTES, 100, start_time_ms=None, end_time_ms=None))
+    assert exchange.calls[-1] == ("klines", {"symbol": "BTCUSDT", "interval": "5m", "limit": 100})

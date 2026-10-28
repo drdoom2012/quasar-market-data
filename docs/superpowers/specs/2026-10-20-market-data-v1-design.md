@@ -86,7 +86,7 @@ Each slice ends green and demonstrable, is written test-first, and adds only wha
 - **S13 Scheduler planner** — pure UTC boundary + publication-delay planner using the injected `Clock`.
 - **S14 Collection loop** — bounded concurrency, rate limiting, safe shutdown.
 - **S15 Checkpoints and restart reconcile.**
-- **S16 Gap detection and backfill** — must not starve current collection.
+- **S16 Gap detection and backfill** — must not starve current collection. Plan: `docs/superpowers/plans/2026-10-27-s16-gap-detection-and-backfill.md`.
 - **S17 Health and readiness** — liveness separate from readiness.
 
 **Indicators and operations**
@@ -139,6 +139,7 @@ These were settled without a user decision; each can be overridden.
 9. **Scheduler planner and `Clock` (S13).** S13 is a pure planner in the domain that takes `now_ms`; the `Clock` protocol stays in the collector (S14 moved it to `collector/clock.py`) and S14 passes `clock.wall_ms()`. The planner only says when to look; a pending candle needs its own bounded retry in S14.
 10. **Collection loop (S14).** The loop reuses `fetch_once` per symbol and attempt, so the closed-candle selection stays the single gate. Its decisions are in `docs/superpowers/plans/2026-10-26-s14-collection-loop.md`: a round targets one slot and `COLLECTED` needs a returned write report without a conflict at that slot; retries are bounded (6 attempts, 1 to 8 s); a write that was ever unknown or cancelled keeps its symbol marked for the whole run and gives exit 4; shutdown gives running attempts a grace and does not bound `writer.close()`.
 11. **Restart reconcile (S15).** Decisions D1 to D6 of `docs/superpowers/plans/2026-10-27-s15-checkpoints-and-restart-reconcile.md`: v1 has no checkpoint table, the stored candles and records are the facts (D1); `run` reads them before any network call and prints a window verdict and a separate history verdict per symbol (D3, D4) that never says "complete" (D6); the first-round request size is computed from the clock at every attempt (D7) and what it cannot reach is `needs_s16` (D5); recovery is shown only by a second database read after round one. S16 reuses `first_round_wanted_from` and owns `needs_s16`. Start-up cost is unmeasured (HARD STOP 2, D13).
+12. **Gap detection and backfill (S16).** D1 to D10 of `docs/superpowers/plans/2026-10-27-s16-gap-detection-and-backfill.md`: holes are derived from the stored candles every cycle, never remembered (D1); targets are the newest 20 interior runs and the head, inside a horizon (D2); v1 never writes `unavailable_candles`, so a slot the exchange does not serve stays `missing` (D3); every page is judged against its request between `parse_klines` and the closed-candle selection, and recovery is a database read-back attributed to the slice (D4); backfill runs only in the idle window with a monotonic deadline, cancels network calls and never a write, and reports lateness, idle overrun and skipped rounds (D5); writes use the loop's per-symbol sink (D6); failures back off, restarts re-ask at a bounded rate (D7); output keeps served, written and recovered apart (D8); hole discovery is rate-limited (D9); out of scope: health (S17), resolving conflicts, other timeframes (D10).
 
 ## 12. Left to the builder
 

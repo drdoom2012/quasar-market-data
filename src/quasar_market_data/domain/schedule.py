@@ -70,3 +70,21 @@ def plan_collection(now_ms: int, timeframe: Timeframe, publication_delay_ms: int
     """Both answers at once; fails closed as a whole when ``next_wake_ms`` does."""
     newest, wake = _newest_and_wake(now_ms, timeframe, publication_delay_ms)
     return CollectionPlan(now_ms, newest, ensure_timestamp_ms(wake, "next_wake_ms"))
+
+
+def cycles_skipped(
+    previous_started_ms: int | None, started_ms: int, timeframe: Timeframe, publication_delay_ms: int
+) -> int:
+    """Whole collection cycles in which no round started between two round starts (wall clock).
+
+    ``cycle(t) = (t - delay) // tf``; consecutive rounds on consecutive boundaries give 0. A first round, or time
+    that went backwards, gives 0, never a negative number. The cause (slow round, backfill, clock step) is not
+    known here; the caller reports it next to ``clock_step_ms``.
+    """
+    _check(timeframe, publication_delay_ms)
+    ensure_timestamp_ms(started_ms, "started_ms")
+    if previous_started_ms is None:
+        return 0
+    ensure_timestamp_ms(previous_started_ms, "previous_started_ms")
+    tf = timeframe.milliseconds
+    return max(0, (started_ms - publication_delay_ms) // tf - (previous_started_ms - publication_delay_ms) // tf - 1)

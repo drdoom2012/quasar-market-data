@@ -102,16 +102,27 @@ class BinanceUsdmSource:
             raise SourceError(f"serverTime must be an int, got {type(server_time).__name__}")
         return server_time
 
-    async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> list[object]:
+    async def fetch_klines(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        limit: int,
+        *,
+        start_time_ms: int | None = None,
+        end_time_ms: int | None = None,
+    ) -> list[object]:
         market_id = _market_id(self._exchange.markets, symbol)
         if timeframe.label not in SUPPORTED_TIMEFRAMES:
             raise SourceError(
                 f"timeframe {timeframe.label!r} is not verified (supported: {sorted(SUPPORTED_TIMEFRAMES)})"
             )
+        params: dict[str, Any] = {"symbol": market_id, "interval": timeframe.label, "limit": limit}
+        if start_time_ms is not None:
+            params["startTime"] = start_time_ms
+        if end_time_ms is not None:
+            params["endTime"] = end_time_ms
         try:
-            response = await self._exchange.fapiPublicGetKlines(
-                {"symbol": market_id, "interval": timeframe.label, "limit": limit}
-            )
+            response = await self._exchange.fapiPublicGetKlines(params)
         except ccxt.BaseError as error:
             raise SourceError(f"klines request for {symbol!r} failed: {error}") from error
         if type(response) is not list:

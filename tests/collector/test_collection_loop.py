@@ -843,7 +843,15 @@ def test_600_symbol_first_round_keeps_the_spacing_and_the_concurrency_bound() ->
                 starts.append(h.t.monotonic_ns())
                 return await self.inner.fetch_server_time_ms()
 
-            async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> Any:
+            async def fetch_klines(
+                self,
+                symbol: str,
+                timeframe: Timeframe,
+                limit: int,
+                *,
+                start_time_ms: int | None = None,
+                end_time_ms: int | None = None,
+            ) -> Any:
                 starts.append(h.t.monotonic_ns())
                 return await self.inner.fetch_klines(symbol, timeframe, limit)
 
@@ -866,7 +874,15 @@ def test_600_symbol_first_round_keeps_the_spacing_and_the_concurrency_bound() ->
                 finally:
                     in_flight -= 1
 
-            async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> Any:
+            async def fetch_klines(
+                self,
+                symbol: str,
+                timeframe: Timeframe,
+                limit: int,
+                *,
+                start_time_ms: int | None = None,
+                end_time_ms: int | None = None,
+            ) -> Any:
                 nonlocal in_flight, peak
                 in_flight += 1
                 peak = max(peak, in_flight)

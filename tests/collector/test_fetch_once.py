@@ -15,6 +15,7 @@ from quasar_market_data.collector.fetch_once import (
     fetch_once,
 )
 from quasar_market_data.collector.kline_source import SourceError
+from quasar_market_data.domain.backfill import PageKind, PagePlan, PageViolation
 from quasar_market_data.domain.server_time import TimeRejection
 from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import migrate
@@ -22,10 +23,12 @@ from tests.collector.fetch_fakes import (
     FIVE_MINUTES,
     ROW0_END_MS,
     SYMBOL,
+    ControlledSink,
     FakeClock,
     FakeSource,
     closed_rows,
     forming_rows,
+    kline_row,
 )
 from tests.collector.test_candle_writer import AT
 from tests.typing_helpers import untyped
@@ -210,3 +213,112 @@ def test_config_rejects_a_bad_limit(limit: object) -> None:
 def test_config_rejects_a_bad_symbol(symbol: object) -> None:
     with pytest.raises((TypeError, ValueError)):
         FetchOnceConfig(symbol=untyped(symbol), timeframe=FIVE_MINUTES, limit=10)
+
+
+# --- backfill pages (S16): judged before anything is selected or written --------------------------------------
+
+TF_MS = FIVE_MINUTES.milliseconds
+
+
+def page_rows() -> list[list[Any]]:
+    return closed_rows()[10:20]
+
+
+def page_plan(limit: int = 10) -> PagePlan:
+    rows = closed_rows()
+    return PagePlan(rows[10][0], rows[10 + limit - 1][0], limit)
+
+
+def page_config(limit: int = 10) -> FetchOnceConfig:
+    return FetchOnceConfig(symbol=SYMBOL, timeframe=FIVE_MINUTES, limit=limit, page=page_plan(limit))
+
+
+def run_page(source: FakeSource, sink: ControlledSink, clock: FakeClock, cfg: FetchOnceConfig) -> FetchOnceReport:
+    return asyncio.run(fetch_once(source, sink, cfg, clock))
+
+
+def test_fetch_once_requests_the_page_range() -> None:
+    clock = FakeClock()
+    plan = page_plan()
+    source = FakeSource(clock, page_rows())
+    sink = ControlledSink()
+    run_page(source, sink, clock, page_config())
+    assert source.kline_ranges == [(plan.start_ms, plan.end_ms)]
+    assert source.kline_calls == [(SYMBOL, FIVE_MINUTES, plan.limit)]
+
+
+def _bad_pages() -> dict[str, tuple[list[list[Any]], type[Exception] | None, dict[str, Any]]]:
+    good = page_rows()
+    before = [closed_rows()[9], *good[:-1]]
+    after = [*good[:-1], closed_rows()[20]]
+    dup = [*good[:-1], good[-2]]
+    desc = [*good[:-2], good[-1], good[-2]]
+    mis = [*good[:-1], [good[-1][0] + 7, *good[-1][1:]]]
+    too_many = [*good, closed_rows()[20]]
+    one_bad = [*good[:4], kline_row(good[3][0] + 30 * TF_MS, TF_MS)]  # four valid rows, then one beyond the end
+    parser = [*good[:-1], [*good[-1][:6], good[-1][6] + 1, *good[-1][7:]]]
+    return {
+        "row_before_start": (before, PageViolation, {}),
+        "row_after_end": (after, PageViolation, {}),
+        "duplicate": (dup, KlineParseError, {}),
+        "descending": (desc, KlineParseError, {}),
+        "misaligned": (mis, KlineParseError, {}),
+        "more_than_limit": (too_many, PageViolation, {}),
+        "one_bad_among_valid": (one_bad, PageViolation, {}),
+        "parser_close_time": (parser, KlineParseError, {}),
+        "untrusted_time": (good, None, {"rtt_ms": 3000}),
+    }
+
+
+@pytest.mark.parametrize("case", list(_bad_pages()))
+def test_an_invalid_page_writes_nothing(case: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    rows, error, source_args = _bad_pages()[case]
+    gate_calls: list[int] = []
+    import quasar_market_data.collector.fetch_once as module
+    from quasar_market_data.domain.closed_candles import select_closed_candles as real
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        gate_calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, "select_closed_candles", spy)
+    clock = FakeClock()
+    sink = ControlledSink()
+    source = FakeSource(clock, rows, **source_args)
+    if error is None:
+        report = run_page(source, sink, clock, page_config())
+        assert report.write is None
+    else:
+        with pytest.raises(error):
+            run_page(source, sink, clock, page_config())
+        assert gate_calls == []  # the page was refused before the closed-candle gate
+    assert sink.write_calls == 0
+
+
+def test_a_valid_page_still_goes_through_the_closed_candle_selection() -> None:
+    clock = FakeClock()
+    # server time just after row 12 closed: the later rows of the page are still pending
+    server_time = closed_rows()[12][6] + 15_000 + 100
+    source = FakeSource(clock, page_rows(), server_time_ms=server_time, rtt_ms=100)
+    sink = ControlledSink()
+    report = run_page(source, sink, clock, page_config())
+    assert report.page is not None and report.page.kind is PageKind.FULL
+    assert len(report.selection.pending) > 0
+    assert sink.write_calls == 1
+    assert {c.key.open_time_ms for c in sink.calls[0]} == {c.key.open_time_ms for c in report.selection.eligible}
+    assert len(report.selection.eligible) + len(report.selection.pending) == 10
+
+
+def test_a_page_with_a_limit_that_differs_from_its_plan_is_refused_at_construction() -> None:
+    with pytest.raises(ValueError):
+        FetchOnceConfig(symbol=SYMBOL, timeframe=FIVE_MINUTES, limit=500, page=PagePlan(1, 2, 1000))
+    with pytest.raises(TypeError):
+        FetchOnceConfig(symbol=SYMBOL, timeframe=FIVE_MINUTES, limit=10, page=(1, 2, 10))  # type: ignore[arg-type]
+
+
+def test_without_a_page_fetch_once_reports_no_page_outcome(db: Path) -> None:
+    clock = FakeClock()
+    source = FakeSource(clock, forming_rows())
+    report = run(source, db, clock)
+    assert report.page is None
+    assert source.kline_ranges == [(None, None)]

@@ -60,7 +60,15 @@ class ScriptedSource:
             out.append(row)
         return out
 
-    async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> Sequence[object]:
+    async def fetch_klines(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        limit: int,
+        *,
+        start_time_ms: int | None = None,
+        end_time_ms: int | None = None,
+    ) -> Sequence[object]:
         self.klines_calls.append(symbol)
         self.limits.append((symbol, limit))
         self.active += 1

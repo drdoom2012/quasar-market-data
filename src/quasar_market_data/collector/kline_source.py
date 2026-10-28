@@ -17,6 +17,14 @@ class SourceError(Exception):
 class KlineSource(Protocol):
     async def fetch_server_time_ms(self) -> int: ...
 
-    async def fetch_klines(self, symbol: str, timeframe: Timeframe, limit: int) -> Sequence[object]: ...
+    async def fetch_klines(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        limit: int,
+        *,
+        start_time_ms: int | None = None,
+        end_time_ms: int | None = None,
+    ) -> Sequence[object]: ...
 
     async def close(self) -> None: ...

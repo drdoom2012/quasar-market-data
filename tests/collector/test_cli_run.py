@@ -68,7 +68,7 @@ def opener(source: FakeSource, opened: list[FakeSource] | None = None) -> Callab
 
 
 def argv(db: Path, *extra: str) -> list[str]:
-    return ["run", "--db", str(db), "--symbol", SYMBOL, "--max-concurrency", "1", *extra]
+    return ["run", "--db", str(db), "--symbol", SYMBOL, "--max-concurrency", "1", "--no-backfill", *extra]
 
 
 def run_cli(
@@ -133,7 +133,10 @@ def test_a_signal_stops_gracefully_and_exits_0(
     assert all_lines[0].startswith(f"reconcile symbol={SYMBOL} window=no_baseline ")  # the pre-start read comes first
     assert all_lines[1].startswith("reconcile summary symbols=1 ")
     lines = round_lines(captured.out)
-    assert lines[0] == f"round target={FIRST_TARGET} collected=1 conflicted=0 gave_up=0 stopped=0 write_uncertain=0"
+    assert (
+        lines[0]
+        == f"round target={FIRST_TARGET} collected=1 conflicted=0 gave_up=0 stopped=0 write_uncertain=0 lateness_ms=0 idle_overrun_ms=0 skipped_rounds=0 clock_step_ms=0"
+    )
     assert lines[1].startswith("round target=1792677000000 collected=0 conflicted=0 gave_up=0 stopped=1")
     assert "Traceback" not in captured.err
     assert candle_count(db) == 1
@@ -332,6 +335,9 @@ def test_round_lines_list_conflicts_and_problems(capsys: pytest.CaptureFixture[s
     gave_up = SymbolResult("B", SymbolOutcome.GAVE_UP, 6, 0, None, (), "target not confirmed (pending=1, invalid=0)")
     cli._print_round(RoundReport(None, 1, (result, gave_up), ("B",)))
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0] == "round target=none collected=1 conflicted=0 gave_up=1 stopped=0 write_uncertain=1"
+    assert (
+        lines[0]
+        == "round target=none collected=1 conflicted=0 gave_up=1 stopped=0 write_uncertain=1 lateness_ms=0 idle_overrun_ms=0 skipped_rounds=0 clock_step_ms=0"
+    )
     assert lines[1] == "  A collected attempts=1 conflicts=5,7 problem=-"
     assert lines[2] == "  B gave_up attempts=6 conflicts=- problem=target not confirmed (pending=1, invalid=0)"

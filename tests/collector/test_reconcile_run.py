@@ -191,7 +191,7 @@ def invoke(
             opened.append(source)
         return source
 
-    argv = ["run", "--db", str(db), "--max-concurrency", "1", *extra]
+    argv = ["run", "--db", str(db), "--max-concurrency", "1", "--no-backfill", *extra]
     for symbol in symbols:
         argv += ["--symbol", symbol]
     code = cli.main(argv, open_source=open_source, clock=clock, sleep=sleep)

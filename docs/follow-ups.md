@@ -87,3 +87,17 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
   correct clock because it is computed against `started_wall_ms`. Diagnostic only; counts and gaps stay correct.
   Reproduced with two symbols, `--max-concurrency 1` and the clock advanced inside the first `fetch_klines`.
 - **Fix:** compute the flag from a fresh wall reading.
+
+### F-8 (S16). Backfill does not identify an uncertain batch either
+
+- A backfill page write with an unknown outcome marks the symbol uncertain exactly as in a round (exit 4); the batch is
+  not identified, and the mark is process-local.
+
+### F-15. "Tried, nothing returned" and back-off are not persisted
+
+- **Where:** `src/quasar_market_data/collector/backfill.py`.
+- **What:** the exhaustion of a target the exchange did not serve (288 cycles), the per-symbol back-off and a
+  suspension after repeated idle overruns live in memory, so every restart re-asks: up to `K + 1 = 21` probes per
+  symbol per start, at the normal rate-limited backfill rate. The count over many restarts is unbounded; the rate is
+  not. Persisting a marker needs a schema decision (ADR-0002 P-9).
+- **Related:** strong evidence for writing `unavailable_candles` (plan D3) also needs a persisted first observation.
