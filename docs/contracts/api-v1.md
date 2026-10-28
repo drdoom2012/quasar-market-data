@@ -1,6 +1,6 @@
 # Quasar Market Data API v1 — contract
 
-- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). `GET /v1/candles` (section 5) is implemented by S10. `GET /v1/coverage` (section 6.1) was APPROVED by the user on 2026-10-25 (decisions S1–S5 as proposed, including the bounds 300 000 ms and 900 000 ms) and is implemented by S12. Sections for the other reserved endpoints (section 6) still need their own approval before their slices.
+- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). `GET /v1/candles` (section 5) is implemented by S10. `GET /v1/coverage` (section 6.1) was APPROVED by the user on 2026-10-25 (decisions S1–S5 as proposed, including the bounds 300 000 ms and 900 000 ms) and is implemented by S12. Sections for the other reserved endpoints (section 6) still need their own approval before their slices. `GET /v1/indicators` (section 6.3) is PROPOSED for S18 and not yet approved.
 - **Scope of this draft:** the conventions shared by every `/v1` endpoint (sections 1–4, 7) and the full specification of `GET /v1/candles` (section 5), which is what S10 implements. The other endpoints are only reserved (section 6) and get their own sections, approved before their slices.
 - **Inputs:** `docs/architecture.md` §4.2, §8; spec `docs/superpowers/specs/2026-10-20-market-data-v1-design.md` (§6.3, §11.3–11.5, D5); ADR-0001 (P-3, P-6, P-8); ADR-0002 (C-3, C-5, P-2, P-5, P-6, P-7, P-8); `docs/invariants.md` (INV-007, INV-009, INV-013, INV-014, INV-028).
 
@@ -228,7 +228,7 @@ Each is specified in its own section of this document and approved before its sl
 |---|---|---|
 | `GET /v1/coverage` | S12 | Specified in section 6.1 below. |
 | `GET /v1/instruments` | S20 | The configured universe and, per instrument, the newest stored candle. |
-| `GET /v1/indicators` | S18 | Indicators computed on demand from stored closed candles; refuses to compute across a gap, a conflicted or unavailable slot, or with insufficient warm-up, and says why (architecture §8). |
+| `GET /v1/indicators` | S18 | Specified in section 6.3 below (indicators computed on demand from stored closed candles; no value across a gap, a conflicted or unavailable slot, or before warm-up; says why). |
 | Health | S17 | Specified in section 6.2 below (`/health`, `/health/ready`, `/health/ingest`). |
 
 ## 6.1 `GET /v1/coverage`
@@ -358,6 +358,102 @@ Information, never a gate: `200` whenever the database is readable, `503 not_rea
 - **`behind` is ordered by state, then by `lag_slots`**, which counts slots of each series' own timeframe: across timeframes it is not an ordering by elapsed time (v1 serves `5m` only).
 - **Latency under a lock.** `/health/ready` and `/health/ingest` wait for a database lock up to SQLite's busy timeout (5 s) before answering `503 database_unreadable`; a probe whose own timeout is shorter sees a timeout instead of the `503`. `/health` does not touch the database and answers at once.
 
+## 6.3 `GET /v1/indicators`
+
+- **Status:** PROPOSED for S18, awaiting the user's approval (HARD STOP 1 of the S18 plan); decisions I1–I6 (section 9). Design: `docs/superpowers/specs/2026-10-28-s18-indicators-design.md` (the section numbers in parentheses below point into it). v1 serves one indicator, `rsi`; the request and response shape, the segment and warm-up rules and the reasons are the same for every indicator S19 adds.
+- **What it answers:** for one series and a window of at most 2016 slots, the value of each requested indicator at every slot, or the reason there is none, and for each indicator its `latest` point. It reads stored rows and the server clock only; it never computes across a slot that is not `present`.
+
+### 6.3.1 Request
+
+| Parameter | Required | Meaning |
+|---|---|---|
+| `venue` | yes | `binance-usdm` in v1. |
+| `symbol` | yes | As in section 5.1. |
+| `timeframe` | yes | `5m` in v1. |
+| `start` | yes | Inclusive window start, epoch ms, aligned. |
+| `end` | no | **Exclusive** window end, epoch ms, aligned, `> start`, within the valid range (as in section 5.1). Default: the end of the newest **expected** slot at the server clock (section 6.3.5). |
+| `indicators` | yes | One to ten indicators, separated by `;`, each `name:key=value,key=value`: for example `rsi:period=14;rsi:period=7`. |
+
+- **Window.** `end - start` is at most **2016 slots** (7 days of `5m`) for an explicit and for a defaulted `end` alike; longer is `400 invalid_parameter` with `details.maximum` `2016`. A defaulted `end` is never capped (section 6.3.5).
+- **`indicators`.** It is one parameter, so section 1's rule against repeated parameters holds without an exception. Names and keys are lower case and case-sensitive. **Every parameter of an indicator is required**: there are no defaults. Integer values follow section 1's integer rule. An unknown name, an unknown, missing or repeated key, a value outside its range, an empty item (a leading, trailing or doubled `;`), more than ten items, or the same normalized id twice is `400` with `details.parameter` `indicators`. The characters `:`, `=`, `,` and `;` are legal unencoded in a query string; their percent-encoded forms are accepted and mean the same.
+- **Normalized id.** `name:key=value,…`, keys in the order the indicator defines, integers without leading zeros (`rsi:period=014` is `rsi:period=14`). The response identifies each indicator by its id and lists them in request order.
+- **`rsi`.** Parameter `period`, an integer from `2` to `100`. Output `rsi`. `warmup_slots = 10 × period`.
+
+### 6.3.2 Reasons
+
+Every slot of `[start, end)` is a point. A point has either `values` (an object with one entry per output of the indicator) and `reason: null`, or `values: null` and a `reason`. The first matching row decides:
+
+| Order | `reason` | When |
+|---|---|---|
+| 1 | `conflicted`, `unavailable`, `missing` | The slot has this state (section 4). |
+| 2 | `not_yet_expected`, `due`, `stale` | The slot is after the newest stored candle, split by the server clock exactly as in section 6.1.2 with the same `rule`. Stored records win over the clock: a conflict or unavailable record after the newest candle is `conflicted` or `unavailable`. |
+| 3 | `warmup` | The slot is `present`, but fewer than `warmup_slots` present slots precede it in its segment (section 6.3.3). |
+| 4 | none | The point has a value. |
+
+Rows 1, 3 and 4 depend on stored rows only; only row 2 depends on the clock.
+
+### 6.3.3 Segments, warm-up and read range
+
+- A **segment** is a maximal run of consecutive `present` slots. A slot that is `conflicted`, `unavailable`, `missing`, or after the newest stored candle ends a segment; so does the start of the stored history (slots before the oldest candle are `missing`). **No value is computed from a slot outside its segment.** After a gap the next present slot starts a new segment, and values return only after `warmup_slots` present slots of that segment.
+- A point has a value only if at least `warmup_slots` present slots precede it **in its segment**.
+- The **read range** of an indicator is `[max(start − warmup_slots × timeframe, 946684800000), end)`. Rows before it never influence the indicator; a computation starts at the first slot of its segment inside the read range (the response states the start as `anchor_open_time_ms`). The read cost is bounded: at most `2016 + 1000` slots of one series on the primary key, plus the conflict and unavailable records of the same range.
+- **Each indicator is evaluated on its own read range.** Requesting another indicator in the same request never changes a value.
+
+### 6.3.4 Response `200`
+
+```json
+{
+  "venue": "binance-usdm",
+  "symbol": "BTC/USDT:USDT",
+  "timeframe": "5m",
+  "start": 1792643400000,
+  "end": 1792673400000,
+  "as_of_ms": 1792673430000,
+  "rule": { "publication_delay_ms": 15000, "lag_threshold_ms": 60000 },
+  "series": { "oldest_open_time_ms": 1792500000000, "newest_open_time_ms": 1792673100000 },
+  "indicators": [
+    {
+      "id": "rsi:period=14",
+      "name": "rsi",
+      "params": { "period": 14 },
+      "outputs": ["rsi"],
+      "warmup_slots": 140,
+      "anchor_open_time_ms": 1792601400000,
+      "latest": { "open_time_ms": 1792673100000, "values": { "rsi": "54.21378915036672" }, "reason": null },
+      "points": [
+        { "open_time_ms": 1792643400000, "values": { "rsi": "48.9930125837313" }, "reason": null },
+        { "open_time_ms": 1792643700000, "values": null, "reason": "missing" }
+      ]
+    }
+  ]
+}
+```
+
+- **The example is an abbreviated illustration and computed by nobody**: its window has 100 slots but only two `points` are shown, and the values are not computed from real data. A real response lists **every slot** of `[start, end)`, in ascending order, with the same open times for every indicator.
+- `start`, `end` echo the effective window. `as_of_ms` is the server clock read once for this request; `rule` and `series` are as in sections 6.1.3 and 5.2.
+- `anchor_open_time_ms` is the first slot of the computation that produced the first value in the window, or `null` when no point of the window has a value.
+- `params` are the normalized integers in the indicator's key order; `outputs` are the keys of `values`.
+
+### 6.3.5 `latest`
+
+`latest` repeats the **last point of the requested window** (`end` minus one timeframe). **It is not the current market value.** It is the newest expected slot only when the window ends there, which the default `end` arranges:
+
+- **Default `end`:** the end of the newest slot with `expected_at <= as_of_ms` (section 6.1.2). If that is not after `start`, the window is the one slot at `start`. If the window from `start` to that end exceeds 2016 slots, the answer is `400` (`details.parameter` `start`, `details.maximum` `2016`), never a shortened window: a shortened default would silently turn `latest` into an old point.
+- **Explicit `end`:** `latest` is whatever slot precedes `end`. In the past it is an ordinary historical point: a present, warmed-up slot has its value, a gap is `missing`; `stale` applies only to slots after the newest stored candle. In the future it is `not_yet_expected`.
+
+A series that stopped therefore answers `latest.reason` `due` or `stale`, never the last value it has. A consumer that wants the current value omits `end` and compares `latest.open_time_ms` with `as_of_ms`.
+
+### 6.3.6 Numbers and reproducibility
+
+- Values are **float64 results** (TA-Lib), not exact decimals: a JSON **string** holding the shortest decimal that parses back to the same float64, in positional notation (no exponent, no leading `+`, no trailing fractional zero, `-0` written `0`, a leading `-` possible for indicators that go negative). Inputs are the stored decimal closes converted to float64 for the computation only. A result that is NaN or infinite at a point that passed warm-up is `500 internal_error`, never a value.
+- **Reproducible only for the same build.** For one indicator the `values` and the reasons of rows 1, 3 and 4 are byte-identical when the effective window, the indicator id, the stored rows of its read range and the build (TA-Lib, numpy, the TA-Lib C library, the platform) are the same. The whole body is not: `as_of_ms` and the reasons of row 2 depend on the clock. Another build may differ in the last digits.
+- **Warm-up is an approximation, not the whole-history value.** Wilder's RSI keeps the influence of its starting state; starting at the anchor instead of at the oldest stored candle is an accepted approximation whose remaining weight after `10 × period` steps is about `e^-9`. **A value is not promised to equal the RSI over the whole stored history, and two requests with different `start` may give slightly different values for the same slot** (observed below `0.01` RSI points on generated data; not a guaranteed bound).
+- A flat market (constant closes) gives the value TA-Lib defines for it; the contract adds no interpretation.
+
+### 6.3.7 Errors
+
+`400 invalid_parameter`, `404 unknown_series`, `503 not_ready`, `500 internal_error`, in the order of section 2 with these additions: parameters (every `indicators` error included) → the host clock (outside the valid range is `500`, as in section 6.1.5, checked before the database is opened) → the window of a defaulted `end` (`400`) → the database (`503`) → the series (`404`). A data-quality situation (gaps, conflicts, staleness, warm-up) is never an error: it is `200` with reasons. A window entirely before the oldest stored candle is `200` with every point `missing`.
+
 ## 7. Out of scope for v1
 
 Authentication, rate limiting, CORS, write endpoints, streaming, candle revision history, exposing rejected conflict values, a configurable page limit, timeframes other than `5m`, venues other than `binance-usdm`, and any trading functionality.
@@ -381,6 +477,7 @@ Authentication, rate limiting, CORS, write endpoints, streaming, candle revision
 | The response states `as_of_ms` and the rule; the configured lag threshold is bounded | follow-up F-8 |
 | Health endpoints: liveness reads nothing; readiness is the schema check; ingestion freshness is information over stored series only, `200` unless unreadable | S17 plan decisions 1 to 6 and 10, INV-056, INV-057 |
 | `due` bounds `lag_slots` by `1 + L // timeframe` | S17 plan decision 5, `tests/domain/test_freshness.py` |
+| `/v1/indicators`: per-point values or reasons, segments that never cross a non-present slot, `warmup_slots`, `latest` is the window's last point, float64 values reproducible only for the same build | S18 design (`docs/superpowers/specs/2026-10-28-s18-indicators-design.md`), decisions I1–I6 |
 
 ## 9. Decisions (answered by the user on 2026-10-23: all as recommended)
 
@@ -428,3 +525,14 @@ S17 decisions (approved by the user on 2026-10-28 with the S17 plan):
 | H3 | Does a query parameter on a health path fail? | `400 invalid_parameter`, as everywhere (section 1); an empty query (`?`, `?&`) names no parameter and is accepted. | Ignore it: probe-friendly, but a second rule next to section 1. A `400` from a liveness probe can trigger a restart. |
 | H4 | How many non-current series are listed? | 50 (`truncated` says more exist); counts are complete. | Unbounded: the response grows with the universe. |
 | H5 | What does `/health/ingest` cover? | Stored series only; `no_series` means zero stored series and nothing else. | Compare with the configured universe: needs a Collector or configuration channel (S20, follow-up F-18). |
+
+S18 decisions (proposed on 2026-10-28, awaiting the user's approval):
+
+| # | Question | Proposal | Alternative that is not proposed, and its cost |
+|---|---|---|---|
+| I1 | How are several indicators requested? | One `indicators` parameter, items separated by `;` (`rsi:period=14;rsi:period=7`), so section 1's rule against repeated parameters has no exception. | A repeated `indicator=` parameter: reads better, but needs an exception to the rule that protects against typos and duplicates. |
+| I2 | Which bounds? | RSI `period` 2 to 100; at most 10 indicators per request; every parameter required, no defaults (architecture §8, explicit parameters). | Defaults (`period=14`): shorter URLs, but a silent default that has to be kept forever. |
+| I3 | How long is the warm-up? | `warmup_slots = 10 × period` for RSI. An approximation of the whole-history value, stated as such (section 6.3.6). | Compute from the start of each segment: exact, but the read grows with the stored history of every request. |
+| I4 | How big is the window? | At most 2016 slots (7 days), also for a defaulted `end`, which is never capped. | A capped default: always answers, but `latest` could silently be an old point. |
+| I5 | How are values written? | float64 results as the shortest round-trip decimal string, positional; declared not exact; reproducible for the same build only. | JSON numbers: shorter, but parsers differ on precision and exponents. Exact decimals: not what TA-Lib computes. |
+| I6 | What is `latest`? | The last point of the requested window, never the current market value; a stopped series answers `due` or `stale`. | The newest stored value: always has a number, but would present stale data as current. |
