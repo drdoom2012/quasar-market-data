@@ -1,11 +1,13 @@
 import itertools
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import pytest
 
 from quasar_market_data.domain.indicator_series import (
     IndicatorPoint,
     IndicatorSeries,
+    Prices,
+    SegmentPrices,
     evaluate,
     read_start_ms,
 )
@@ -23,9 +25,13 @@ class Recorder:
     def __init__(self) -> None:
         self.calls: list[list[float]] = []
 
-    def __call__(self, closes: Sequence[float]) -> Sequence[Sequence[float]]:
-        self.calls.append(list(closes))
-        return (list(itertools.accumulate(closes)),)
+    def __call__(self, segment: SegmentPrices) -> Sequence[Sequence[float]]:
+        self.calls.append(list(segment.close))
+        return (list(itertools.accumulate(segment.close)),)
+
+
+def as_prices(closes: Mapping[int, float]) -> dict[int, Prices]:
+    return {t: (c, c, c) for t, c in closes.items()}
 
 
 def slot(n: int, start: int = S) -> int:
@@ -43,17 +49,17 @@ def direct(anchor: int, open_time: int) -> float:
 
 def build(
     start: int = S, end: int = END, non_present: dict[int, SlotState] | None = None, warmup: int = W
-) -> tuple[list[tuple[int, SlotState]], dict[int, float]]:
+) -> tuple[list[tuple[int, SlotState]], dict[int, Prices]]:
     non_present = non_present or {}
     states = [(t, non_present.get(t, SlotState.PRESENT)) for t in range(read_start_ms(start, warmup, TF), end, TF)]
     closes = {t: close(t) for t, state in states if state is SlotState.PRESENT}
-    return states, closes
+    return states, as_prices(closes)
 
 
 def run(
     start: int = S, end: int = END, non_present: dict[int, SlotState] | None = None
 ) -> tuple[IndicatorSeries, Recorder]:
-    states, closes = build(start, end, non_present)
+    states, prices = build(start, end, non_present)
     recorder = Recorder()
     series = evaluate(
         start=start,
@@ -61,7 +67,7 @@ def run(
         timeframe_ms=TF,
         warmup_slots=W,
         states=states,
-        closes=closes,
+        prices=prices,
         compute=recorder,
         output_count=1,
     )
@@ -182,14 +188,14 @@ def test_a8_exactly_w_present_slots_before_a_point_give_a_value_and_w_minus_1_do
 def test_a9_a_segment_shorter_than_period_plus_one_has_no_values() -> None:
     end = slot(20)
     present = set(range(S, slot(14), TF))  # one segment of 14 slots
-    states, closes = build(
+    states, prices = build(
         end=end, non_present={t: SlotState.MISSING for t in range(slot(-140), end, TF) if t not in present}
     )
     calls: list[int] = []
 
-    def nan_compute(values: Sequence[float]) -> Sequence[Sequence[float]]:
-        calls.append(len(values))
-        return ([float("nan")] * len(values),)
+    def nan_compute(segment: SegmentPrices) -> Sequence[Sequence[float]]:
+        calls.append(len(segment.close))
+        return ([float("nan")] * len(segment.close),)
 
     series = evaluate(
         start=S,
@@ -197,7 +203,7 @@ def test_a9_a_segment_shorter_than_period_plus_one_has_no_values() -> None:
         timeframe_ms=TF,
         warmup_slots=W,
         states=states,
-        closes=closes,
+        prices=prices,
         compute=nan_compute,
         output_count=1,
     )
@@ -211,10 +217,10 @@ def test_a9_a_segment_shorter_than_period_plus_one_has_no_values() -> None:
 
 def test_a10_indicators_are_evaluated_independently() -> None:
     # each evaluate call takes its own read range; a longer warm-up read for another indicator never reaches it
-    states, closes = build(warmup=1000)
+    states, prices = build(warmup=1000)
     own_start = read_start_ms(S, W, TF)
     own_states = [(t, state) for t, state in states if t >= own_start]
-    own_closes = {t: c for t, c in closes.items() if t >= own_start}
+    own_prices = {t: c for t, c in prices.items() if t >= own_start}
     alone, _ = run()
     together = evaluate(
         start=S,
@@ -222,7 +228,7 @@ def test_a10_indicators_are_evaluated_independently() -> None:
         timeframe_ms=TF,
         warmup_slots=W,
         states=own_states,
-        closes=own_closes,
+        prices=own_prices,
         compute=Recorder(),
         output_count=1,
     )
@@ -288,7 +294,7 @@ def test_warmup_zero_gives_a_value_at_every_present_slot() -> None:
         timeframe_ms=TF,
         warmup_slots=0,
         states=states,
-        closes={slot(0): 2.0, slot(2): 5.0},
+        prices=as_prices({slot(0): 2.0, slot(2): 5.0}),
         compute=Recorder(),
         output_count=1,
     )
@@ -305,8 +311,8 @@ def test_warmup_zero_gives_a_value_at_every_present_slot() -> None:
 def test_multiple_outputs_are_carried_in_order() -> None:
     states = [(slot(0), SlotState.PRESENT), (slot(1), SlotState.PRESENT)]
 
-    def two(values: Sequence[float]) -> Sequence[Sequence[float]]:
-        return ([v + 1 for v in values], [v * 10 for v in values])
+    def two(segment: SegmentPrices) -> Sequence[Sequence[float]]:
+        return ([v + 1 for v in segment.close], [v * 10 for v in segment.close])
 
     series = evaluate(
         start=S,
@@ -314,23 +320,23 @@ def test_multiple_outputs_are_carried_in_order() -> None:
         timeframe_ms=TF,
         warmup_slots=0,
         states=states,
-        closes={slot(0): 1.0, slot(1): 2.0},
+        prices=as_prices({slot(0): 1.0, slot(1): 2.0}),
         compute=two,
         output_count=2,
     )
     assert [p.values for p in series.points] == [(2.0, 10.0), (3.0, 20.0)]
 
 
-def bad_compute_wrong_length(values: Sequence[float]) -> Sequence[Sequence[float]]:
-    return (list(values)[:-1],)
+def bad_compute_wrong_length(segment: SegmentPrices) -> Sequence[Sequence[float]]:
+    return (list(segment.close)[:-1],)
 
 
-def bad_compute_wrong_outputs(values: Sequence[float]) -> Sequence[Sequence[float]]:
-    return (list(values), list(values))
+def bad_compute_wrong_outputs(segment: SegmentPrices) -> Sequence[Sequence[float]]:
+    return (list(segment.close), list(segment.close))
 
 
 def inconsistent_cases() -> dict[str, dict[str, object]]:
-    states, closes = build(end=slot(5))
+    states, prices = build(end=slot(5))
     return {
         "states_not_at_read_start": {"states": states[1:]},
         "states_shifted_by_one_slot": {"states": [(t + TF, state) for t, state in states]},
@@ -338,11 +344,11 @@ def inconsistent_cases() -> dict[str, dict[str, object]]:
         "states_short_of_end": {"states": states[:-1]},
         "states_past_end": {"states": [*states, (slot(5), SlotState.PRESENT)]},
         "states_out_of_order": {"states": [states[1], states[0], *states[2:]]},
-        "close_for_a_non_present_slot": {
+        "price_for_a_non_present_slot": {
             "states": [*states[:-1], (slot(4), SlotState.MISSING)],
         },
-        "missing_close_for_a_present_slot": {"closes": {t: c for t, c in closes.items() if t != S}},
-        "close_outside_the_states": {"closes": {**closes, slot(9): 1.0}},
+        "missing_price_for_a_present_slot": {"prices": {t: c for t, c in prices.items() if t != S}},
+        "price_outside_the_states": {"prices": {**prices, slot(9): (1.0, 1.0, 1.0)}},
         "compute_wrong_length": {"compute": bad_compute_wrong_length},
         "compute_wrong_output_count": {"compute": bad_compute_wrong_outputs},
         "empty_window": {"end": S, "states": states[:140]},
@@ -355,17 +361,68 @@ def inconsistent_cases() -> dict[str, dict[str, object]]:
 
 @pytest.mark.parametrize("case", sorted(inconsistent_cases()))
 def test_inconsistent_inputs_raise(case: str) -> None:
-    states, closes = build(end=slot(5))
+    states, prices = build(end=slot(5))
     kwargs: dict[str, object] = {
         "start": S,
         "end": slot(5),
         "timeframe_ms": TF,
         "warmup_slots": W,
         "states": states,
-        "closes": closes,
+        "prices": prices,
         "compute": Recorder(),
         "output_count": 1,
     }
     kwargs.update(inconsistent_cases()[case])
     with pytest.raises(ValueError):
         evaluate(**kwargs)  # type: ignore[arg-type]
+
+
+def test_compute_receives_aligned_high_low_close_of_the_segment() -> None:
+    def high(t: int) -> float:
+        return close(t) + 2.0
+
+    def low(t: int) -> float:
+        return close(t) - 3.0
+
+    states, _ = build(non_present=mid_gap(SlotState.MISSING))
+    prices = {t: (high(t), low(t), close(t)) for t, state in states if state is SlotState.PRESENT}
+    seen: list[SegmentPrices] = []
+
+    def spy(segment: SegmentPrices) -> Sequence[Sequence[float]]:
+        seen.append(segment)
+        return (list(segment.close),)
+
+    evaluate(
+        start=S,
+        end=END,
+        timeframe_ms=TF,
+        warmup_slots=W,
+        states=states,
+        prices=prices,
+        compute=spy,
+        output_count=1,
+    )
+    layout = [(slot(-140), slot(200)), (slot(201), END)]
+    assert len(seen) == len(layout)
+    for segment, (first, last) in zip(seen, layout, strict=True):
+        times = range(first, last, TF)
+        assert segment.high == tuple(high(t) for t in times)
+        assert segment.low == tuple(low(t) for t in times)
+        assert segment.close == tuple(close(t) for t in times)
+
+
+@pytest.mark.parametrize("extra", [True, False])
+def test_prices_must_hold_exactly_the_present_slots(extra: bool) -> None:
+    states, prices = build(end=slot(5))
+    changed = {**prices, slot(9): (1.0, 1.0, 1.0)} if extra else {t: p for t, p in prices.items() if t != S}
+    with pytest.raises(ValueError, match="prices"):
+        evaluate(
+            start=S,
+            end=slot(5),
+            timeframe_ms=TF,
+            warmup_slots=W,
+            states=states,
+            prices=changed,
+            compute=Recorder(),
+            output_count=1,
+        )

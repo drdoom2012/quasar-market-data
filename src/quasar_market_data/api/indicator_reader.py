@@ -1,8 +1,8 @@
 """The stored inputs of one indicator window, read in a single read transaction (contract api-v1 section 6.3.3).
 
 Same discipline as ``coverage_reader``: ``BEGIN`` makes the readiness check, the series lookup and the three fact
-reads see one snapshot, every statement is bound and consumed before the next. Closes are returned as the stored
-decimal text; the conversion to float belongs to the engine. Nothing here reads a clock.
+reads see one snapshot, every statement is bound and consumed before the next. High, low and close are returned as the
+stored decimal text; the conversion to float belongs to the engine. Nothing here reads a clock.
 """
 
 import sqlite3
@@ -24,7 +24,7 @@ class IndicatorInputs:
     read_start: int
     oldest_open_time_ms: int
     newest_open_time_ms: int
-    closes: Mapping[int, str]
+    prices: Mapping[int, tuple[str, str, str]]  # (high, low, close) as the stored decimal text
     conflicts: frozenset[int]
     unavailable: frozenset[int]
 
@@ -56,10 +56,10 @@ def _read(conn: sqlite3.Connection, request: IndicatorsRequest, end: int, read_s
         raise UnknownSeries
 
     window = (*series, read_start, end)
-    closes = {
-        row[0]: row[1]
+    prices = {
+        row[0]: (row[1], row[2], row[3])
         for row in conn.execute(
-            "SELECT open_time_ms, close FROM candles"
+            "SELECT open_time_ms, high, low, close FROM candles"
             " WHERE venue = ? AND symbol = ? AND timeframe = ? AND open_time_ms >= ? AND open_time_ms < ?",
             window,
         ).fetchall()
@@ -89,7 +89,7 @@ def _read(conn: sqlite3.Connection, request: IndicatorsRequest, end: int, read_s
         read_start=read_start,
         oldest_open_time_ms=oldest,
         newest_open_time_ms=newest,
-        closes=closes,
+        prices=prices,
         conflicts=conflicts,
         unavailable=unavailable,
     )

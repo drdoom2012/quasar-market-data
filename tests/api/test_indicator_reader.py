@@ -10,7 +10,16 @@ from quasar_market_data.domain.indicators import parse_indicators
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
-from tests.api.seed import AT, SYMBOL, VENUE, insert_candle, insert_conflict, insert_unavailable, make_database
+from tests.api.seed import (
+    AT,
+    SYMBOL,
+    VENUE,
+    candle_values,
+    insert_candle,
+    insert_conflict,
+    insert_unavailable,
+    make_database,
+)
 
 TF = 300_000
 S = 1792643400000
@@ -44,7 +53,7 @@ def test_reads_exactly_the_read_range(tmp_path: Path) -> None:
         reader.close()
 
     wanted = {slot(n) for n in range(7)}
-    assert set(inputs.closes) == wanted
+    assert set(inputs.prices) == wanted
     assert inputs.conflicts == wanted
     assert inputs.unavailable == wanted
     assert (inputs.read_start, inputs.end, inputs.start) == (read_start, end, slot(2))
@@ -91,5 +100,24 @@ def test_closes_are_the_stored_text(tmp_path: Path) -> None:
 
     inputs = read_indicators(path, request(slot(0), slot(2)), end=slot(2), read_start=slot(0))
     assert isinstance(inputs, IndicatorInputs)
-    assert dict(inputs.closes) == {slot(0): "80000.1", slot(1): "79999.123456789012"}
-    assert all(type(v) is str for v in inputs.closes.values())
+    assert {t: prices[2] for t, prices in inputs.prices.items()} == {
+        slot(0): "80000.1",
+        slot(1): "79999.123456789012",
+    }
+    assert all(type(v) is str for prices in inputs.prices.values() for v in prices)
+
+
+def test_reads_high_low_close_of_the_read_range(tmp_path: Path) -> None:
+    path = tmp_path / "m.db"
+    conn = open_writer(path)
+    migrate(conn, applied_at_ms=AT)
+    for n in range(-2, 4):  # slots -2 and -1 are before the read range
+        insert_candle(conn, slot(n))
+    conn.close()
+
+    inputs = read_indicators(path, request(slot(0), slot(4)), end=slot(4), read_start=slot(0))
+    assert isinstance(inputs, IndicatorInputs)
+    assert set(inputs.prices) == {slot(n) for n in range(4)}
+    for n in range(4):
+        _open, high, low, close, *_ = candle_values(slot(n))
+        assert inputs.prices[slot(n)] == (high, low, close)

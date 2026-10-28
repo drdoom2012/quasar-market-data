@@ -1,26 +1,30 @@
 """``GET /v1/indicators`` end to end (contract api-v1 section 6.3; design S18 sections 5.3 to 5.7)."""
 
+import asyncio
 import json
 import logging
 import math
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 from starlette.testclient import TestClient
 
+from quasar_market_data.api import app as app_module
 from quasar_market_data.api import indicator_results
 from quasar_market_data.api.app import create_app
 from quasar_market_data.api.float_text import float_text
 from quasar_market_data.api.indicator_engine import compute_function
 from quasar_market_data.api.indicator_reader import IndicatorInputs
 from quasar_market_data.api.rule import DEFAULT_RULE
+from quasar_market_data.domain.indicator_series import SegmentPrices
 from quasar_market_data.domain.indicators import IndicatorSpec, parse_indicators
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
-from tests.api.seed import AT, insert_candle, insert_conflict, insert_unavailable
+from tests.api.seed import AT, candle_values, insert_candle, insert_conflict, insert_unavailable
 from tests.indicator_data import generated_closes
 
 TF = 300_000
@@ -54,13 +58,21 @@ def seed_db(
     *,
     conflicts: Iterable[int] = (),
     unavailable: Iterable[int] = (),
+    high_of: Callable[[int], str] | None = None,
+    low_of: Callable[[int], str] | None = None,
 ) -> Path:
     conn = open_writer(path)
     try:
         migrate(conn, applied_at_ms=AT)
         conn.execute("BEGIN")
         for n in present:
-            insert_candle(conn, slot(n), close=close_at(n))
+            insert_candle(
+                conn,
+                slot(n),
+                close=close_at(n),
+                high=None if high_of is None else high_of(n),
+                low=None if low_of is None else low_of(n),
+            )
         for n in conflicts:
             insert_conflict(conn, slot(n), 0)
         for n in unavailable:
@@ -328,7 +340,8 @@ def test_values_equal_the_engine_on_the_segment(tmp_path: Path) -> None:
     rsi = compute_function(parse_indicators("rsi:period=14")[0])
 
     def engine(first: int, last: int) -> Sequence[float]:
-        return rsi([float(close_at(n)) for n in range(first, last + 1)])[0]
+        closes = tuple(float(close_at(n)) for n in range(first, last + 1))
+        return rsi(SegmentPrices(closes, closes, closes))[0]
 
     before_gap = engine(-140, 49)  # the first segment, cut at the read range's start
     for n in range(50):
@@ -386,7 +399,7 @@ def test_largest_request(tmp_path: Path) -> None:
     for indicator in body["indicators"]:
         assert len(indicator["points"]) == 2016
         assert all(p["values"] is not None for p in indicator["points"])
-    candle_reads = [s for s in statements if s.startswith("SELECT open_time_ms, close FROM candles")]
+    candle_reads = [s for s in statements if s.startswith("SELECT open_time_ms, high, low, close FROM candles")]
     assert len(candle_reads) == 1
     assert f"open_time_ms >= {slot(-1000)} AND open_time_ms < {slot(2016)}" in candle_reads[0]
 
@@ -467,7 +480,7 @@ def test_a_non_finite_value_is_a_500(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     def infinite(spec: IndicatorSpec) -> Any:
-        return lambda closes: ([math.inf] * len(closes),)
+        return lambda segment: ([math.inf] * len(segment.close),)
 
     db = seed_db(tmp_path / "m.db", range(-200, 10))
     client = client_for(db, now_ms=lambda: expected(9))
@@ -496,7 +509,7 @@ def test_inputs_starting_after_a_read_range_are_refused() -> None:
         read_start=slot(-100),  # later than slot(-140), the read start of rsi:period=14
         oldest_open_time_ms=slot(-100),
         newest_open_time_ms=slot(9),
-        closes={slot(n): close_at(n) for n in range(-100, 10)},
+        prices={slot(n): (close_at(n), close_at(n), close_at(n)) for n in range(-100, 10)},
         conflicts=frozenset(),
         unavailable=frozenset(),
     )
@@ -533,3 +546,238 @@ def test_flat_range_after_movement_reads_zero_only_when_the_whole_range_is_flat(
 
     assert values == ["63.953414949372856", "63.955521365130394", "0", "0"]
     assert abs(float(values[0]) - float(values[1])) < 0.01
+
+
+def test_rsi_ignores_high_and_low(tmp_path: Path) -> None:
+    def raised(n: int) -> str:
+        return str(Decimal(candle_values(slot(n))[1]) + 1000)
+
+    def lowered(n: int) -> str:
+        return str(Decimal(candle_values(slot(n))[2]) - 1)
+
+    plain = seed_db(tmp_path / "plain.db", range(-200, 300))
+    skewed = seed_db(tmp_path / "skewed.db", range(-200, 300), high_of=raised, low_of=lowered)
+    target = url(slot(0), slot(300), "rsi:period=14")
+
+    a = client_for(plain, now_ms=lambda: expected(299)).get(target)
+    b = client_for(skewed, now_ms=lambda: expected(299)).get(target)
+
+    assert a.status_code == b.status_code == 200
+    assert a.content == b.content
+
+
+class _Spy:
+    def __init__(self) -> None:
+        self.segments: list[SegmentPrices] = []
+
+    def wrap(self, spec: IndicatorSpec) -> Any:
+        real = compute_function(spec)
+
+        def compute(segment: SegmentPrices) -> Sequence[Sequence[float]]:
+            self.segments.append(segment)
+            return real(segment)
+
+        return compute
+
+
+def _spied_segments(db: Path, monkeypatch: pytest.MonkeyPatch, *, as_of: int) -> list[SegmentPrices]:
+    spy = _Spy()
+    monkeypatch.setattr(indicator_results, "compute_function", spy.wrap)
+    get_ok(client_for(db, now_ms=lambda: expected(as_of)), url(slot(0), slot(300), "rsi:period=14"))
+    return spy.segments
+
+
+def test_a_conflicted_slot_never_feeds_high_or_low(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    extreme_text = "900000.5"  # more than 10x the ordinary stored highs (about 80100)
+
+    def stored_with_extreme_high(name: str, conflicts: Iterable[int]) -> Path:
+        return seed_db(
+            tmp_path / name,
+            range(-200, 300),
+            conflicts=conflicts,
+            high_of=lambda n: extreme_text if n == 200 else candle_values(slot(n))[1],
+        )
+
+    # control: the spy does see the extreme high when the slot is a plain present candle
+    control = _spied_segments(stored_with_extreme_high("control.db", ()), monkeypatch, as_of=299)
+    assert [len(s.close) for s in control] == [440]
+    assert float(extreme_text) in control[0].high
+
+    segments = _spied_segments(stored_with_extreme_high("conflicted.db", [200]), monkeypatch, as_of=299)
+
+    assert all(float(extreme_text) not in s.high for s in segments)
+    assert all(max(s.high) < float(extreme_text) for s in segments)
+    # none spans the conflicted slot: the read range -140..299 splits into -140..199 and 201..299
+    assert [(len(s.high), len(s.low), len(s.close)) for s in segments] == [(340, 340, 340), (99, 99, 99)]
+    assert segments[0].close == tuple(float(close_at(n)) for n in range(-140, 200))
+    assert segments[1].close == tuple(float(close_at(n)) for n in range(201, 300))
+    # RSI reads the closes of the surrounding present slots only
+    body_points = get_ok(client_for(tmp_path / "conflicted.db", now_ms=lambda: expected(299)), url(slot(0), slot(300)))
+    assert {p["open_time_ms"]: p["reason"] for p in only(body_points)["points"]}[slot(200)] == "conflicted"
+
+
+# --- S19: five more indicators (design S19 sections 5.4, 5.6, 6) -------------------------------------------------------
+
+MIXED = (
+    "rsi:period=100;ema:period=200;macd:fast=100,slow=200,signal=50;atr:period=100;adx:period=100;"
+    "bbands:period=200,stddev=5;ema:period=2;macd:fast=12,slow=26,signal=9;adx:period=14;bbands:period=20,stddev=2"
+)
+
+
+def test_mixed_request_each_indicator_equals_itself_alone(tmp_path: Path) -> None:
+    """Review focus 4: all six names at the largest warm-ups, ten items, read range 2016 + 1500 slots."""
+    db = seed_db(tmp_path / "m.db", range(-1600, 2016))
+    statements: list[str] = []
+
+    def traced(path: Path) -> sqlite3.Connection:
+        conn = open_reader(path)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    together_client = client_for(db, now_ms=lambda: expected(2015), open_connection=traced)
+    together = get_ok(together_client, url(slot(0), slot(2016), MIXED))["indicators"]
+
+    candle_reads = [s for s in statements if s.startswith("SELECT open_time_ms, high, low, close FROM candles")]
+    assert len(candle_reads) == 1
+    assert f"open_time_ms >= {slot(-1500)} AND open_time_ms < {slot(2016)}" in candle_reads[0]
+    assert (2016 + 1500) == (slot(2016) - slot(-1500)) // TF
+
+    items = MIXED.split(";")
+    assert len(together) == len(items) == 10
+    alone_client = client_for(db, now_ms=lambda: expected(2015))
+    for combined, item in zip(together, items, strict=True):
+        alone = only(get_ok(alone_client, url(slot(0), slot(2016), item)))
+        assert combined["id"] == item
+        assert len(combined["points"]) == 2016
+        assert json.dumps(combined) == json.dumps(alone), item
+        assert all(p["values"] is not None for p in combined["points"]), item
+
+
+def test_three_output_indicator_shape_and_latest(tmp_path: Path) -> None:
+    indicators = "macd:fast=12,slow=26,signal=9;adx:period=14;bbands:period=20,stddev=2"
+    db = seed_db(tmp_path / "m.db", range(-500, 101))
+    body = get_ok(client_for(db, now_ms=lambda: expected(100)), url(slot(0), indicators=indicators))
+    macd, adx, bbands = body["indicators"]
+
+    assert macd["outputs"] == ["macd", "signal", "histogram"]
+    assert adx["outputs"] == ["adx", "plus_di", "minus_di"]
+    assert bbands["outputs"] == ["upper", "middle", "lower"]
+    for indicator in (macd, adx, bbands):
+        assert indicator["latest"] == indicator["points"][-1]
+        for point in indicator["points"]:
+            assert list(point["values"]) == indicator["outputs"]
+            assert all(isinstance(text, str) for text in point["values"].values())
+
+    stopped = seed_db(tmp_path / "due.db", range(-500, 100))  # L2: newest stored slot 99
+    for indicator in get_ok(client_for(stopped, now_ms=lambda: expected(100)), url(slot(0), indicators=indicators))[
+        "indicators"
+    ]:
+        assert indicator["latest"] == {"open_time_ms": slot(100), "values": None, "reason": "due"}
+    stale = seed_db(tmp_path / "stale.db", range(-500, 96))  # L3: newest stored slot 95
+    for indicator in get_ok(
+        client_for(stale, now_ms=lambda: expected(100) + LAG + 1), url(slot(0), indicators=indicators)
+    )["indicators"]:
+        assert indicator["latest"] == {"open_time_ms": slot(100), "values": None, "reason": "stale"}
+
+
+_S19_ITEMS = [
+    ("ema:period=14", 84),
+    ("macd:fast=12,slow=26,signal=9", 210),
+    ("atr:period=14", 140),
+    ("adx:period=14", 182),
+    ("bbands:period=20,stddev=2", 19),
+]
+
+
+def _reasons(indicator: dict[str, Any]) -> dict[int, str | None]:
+    return {p["open_time_ms"]: p["reason"] for p in indicator["points"]}
+
+
+def _first_value(indicator: dict[str, Any]) -> int:
+    first: int = next(p["open_time_ms"] for p in indicator["points"] if p["values"] is not None)
+    return first
+
+
+@pytest.mark.parametrize(("item", "w"), _S19_ITEMS, ids=[i for i, _ in _S19_ITEMS])
+def test_s19_segment_scenarios(tmp_path: Path, item: str, w: int) -> None:
+    """A3, A4, A6 and A8 of the S18 design with the warm-up of the indicator under test."""
+    end = 200 + w + 60
+    now = lambda: expected(end - 1)
+
+    def run(name: str, present: Iterable[int]) -> dict[str, Any]:
+        return only(get_ok(client_for(seed_db(tmp_path / name, present), now_ms=now), url(slot(0), slot(end), item)))
+
+    # A3: a missing slot inside the warm-up range moves the anchor past it
+    h = w // 2
+    a3 = run("a3.db", without(range(-500, end), -h))
+    assert a3["anchor_open_time_ms"] == slot(-h + 1)
+    first = w - h + 1  # the segment starts at -h + 1; its first value is W slots later
+    assert [n for n in range(end) if _reasons(a3)[slot(n)] == "warmup"] == list(range(first))
+    assert _first_value(a3) == slot(first)
+    # A8: exactly W present slots before the first value, W - 1 before the last warm-up point
+    assert _reasons(a3)[slot(first - 1)] == "warmup"
+    assert _reasons(a3)[slot(first)] is None
+
+    # A4: a missing slot at s + 200 restarts the warm-up; the values equal those of a database cut at s + 201
+    a4 = run("a4.db", without(range(-500, end), 200))
+    assert _reasons(a4)[slot(200)] == "missing"
+    assert all(_reasons(a4)[slot(n)] == "warmup" for n in range(201, 201 + w))
+    assert next(p for p in a4["points"] if p["open_time_ms"] > slot(200) and p["values"] is not None)[
+        "open_time_ms"
+    ] == slot(201 + w)
+    cut = only(
+        get_ok(client_for(seed_db(tmp_path / "a4cut.db", range(201, end)), now_ms=now), url(slot(201), slot(end), item))
+    )
+    after = [p for p in a4["points"] if p["open_time_ms"] >= slot(201)]
+    assert json.dumps(after) == json.dumps(cut["points"])
+
+    # A6: start itself missing; the segment starts at s + 1
+    a6 = run("a6.db", without(range(-500, end), 0))
+    assert _reasons(a6)[slot(0)] == "missing"
+    assert all(_reasons(a6)[slot(n)] == "warmup" for n in range(1, 1 + w))
+    assert _first_value(a6) == slot(1 + w)
+    assert a6["anchor_open_time_ms"] == slot(1)
+
+
+def test_a_non_finite_value_in_a_later_output_is_a_500(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review focus 5: finite ``macd`` and ``signal`` with an infinite ``histogram`` never give a partial ``values``."""
+
+    def later_output(spec: IndicatorSpec) -> Any:
+        def compute(segment: SegmentPrices) -> Sequence[Sequence[float]]:
+            count = len(segment.close)
+            return ([1.0] * count, [2.0] * count, [math.inf] * count)
+
+        return compute
+
+    db = seed_db(tmp_path / "m.db", range(-300, 10))
+    client = client_for(db, now_ms=lambda: expected(9))
+    target = url(slot(0), slot(10), "macd:fast=12,slow=26,signal=9")
+    assert client.get(target).status_code == 200  # the same request without the patch
+
+    monkeypatch.setattr(indicator_results, "compute_function", later_output)
+    response = client.get(target)
+
+    assert_error(response, 500, "internal_error")
+    assert "values" not in response.text
+
+
+def test_the_body_is_built_off_the_event_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """J7: the body is built (and encoded) in the thread pool, so a large response cannot stall ``/health``."""
+    on_loop: list[bool] = []
+    real = app_module._indicators_body
+
+    def wrapper(*args: Any, **kwargs: Any) -> dict[str, object]:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            on_loop.append(False)
+        else:
+            on_loop.append(True)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(app_module, "_indicators_body", wrapper)
+    db = seed_db(tmp_path / "m.db", range(-200, 10))
+
+    get_ok(client_for(db, now_ms=lambda: expected(9)), url(slot(0), slot(10)))
+
+    assert on_loop == [False]

@@ -360,7 +360,7 @@ Information, never a gate: `200` whenever the database is readable, `503 not_rea
 
 ## 6.3 `GET /v1/indicators`
 
-- **Status:** APPROVED by the user on 2026-10-28, decisions I1–I6 as proposed (section 9); implemented by S18. Design: `docs/superpowers/specs/2026-10-28-s18-indicators-design.md` (the section numbers in parentheses below point into it). v1 serves one indicator, `rsi`; the request and response shape, the segment and warm-up rules and the reasons are the same for every indicator S19 adds.
+- **Status:** APPROVED by the user on 2026-10-28, decisions I1–I6 as proposed (section 9); implemented by S18. Design: `docs/superpowers/specs/2026-10-28-s18-indicators-design.md` (the section numbers in parentheses below point into it). **S19 adds `ema`, `macd`, `atr`, `adx` and `bbands`** (APPROVED by the user on 2026-10-28, decisions J1–J7 as proposed, section 9); design: `docs/superpowers/specs/2026-10-28-s19-indicators-design.md`. The request and response shape, the segment and warm-up rules and the reasons are the same for every indicator.
 - **What it answers:** for one series and a window of at most 2016 slots, the value of each requested indicator at every slot, or the reason there is none, and for each indicator its `latest` point. It reads stored rows and the server clock only; it never computes across a slot that is not `present`.
 
 ### 6.3.1 Request
@@ -375,9 +375,14 @@ Information, never a gate: `200` whenever the database is readable, `503 not_rea
 | `indicators` | yes | One to ten indicators, separated by `;`, each `name:key=value,key=value`: for example `rsi:period=14;rsi:period=7`. |
 
 - **Window.** `end - start` is at most **2016 slots** (7 days of `5m`) for an explicit and for a defaulted `end` alike; longer is `400 invalid_parameter` with `details.maximum` `2016`. A defaulted `end` is never capped (section 6.3.5).
-- **`indicators`.** It is one parameter, so section 1's rule against repeated parameters holds without an exception. Names and keys are lower case and case-sensitive. **Every parameter of an indicator is required**: there are no defaults. Integer values follow section 1's integer rule. An unknown name, an unknown, missing or repeated key, a value outside its range, an empty item (a leading, trailing or doubled `;`), more than ten items, or the same normalized id twice is `400` with `details.parameter` `indicators`. The characters `:`, `=`, `,` and `;` are legal unencoded in a query string; their percent-encoded forms are accepted and mean the same.
+- **`indicators`.** It is one parameter, so section 1's rule against repeated parameters holds without an exception. Names and keys are lower case and case-sensitive. **Every parameter of an indicator is required**: there are no defaults. Integer values follow section 1's integer rule. An unknown name, an unknown, missing or repeated key, a value outside its range, a constraint between parameters of one indicator that is not met (`macd`: `fast < slow`), an empty item (a leading, trailing or doubled `;`), more than ten items, or the same normalized id twice is `400` with `details.parameter` `indicators`. The characters `:`, `=`, `,` and `;` are legal unencoded in a query string; their percent-encoded forms are accepted and mean the same.
 - **Normalized id.** `name:key=value,…`, keys in the order the indicator defines, integers without leading zeros (`rsi:period=014` is `rsi:period=14`). The response identifies each indicator by its id and lists them in request order.
 - **`rsi`.** Parameter `period`, an integer from `2` to `100`. Output `rsi`. `warmup_slots = 10 × period`.
+- **`ema`.** Parameter `period`, `2` to `200`. Output `ema`. `warmup_slots = 6 × period`. TA-Lib `EMA` (SMA seed).
+- **`macd`.** Parameters `fast` (`2` to `100`), `slow` (`3` to `200`), `signal` (`2` to `50`), with **`fast < slow`** (otherwise `400`; TA-Lib would silently swap them, the API refuses so one MACD has one id). Outputs, in this order: `macd`, `signal`, `histogram`. `warmup_slots = 6 × (slow + signal)`. TA-Lib `MACD` on EMAs (not `MACDEXT`); `histogram = macd − signal`. The values can be negative.
+- **`atr`.** Parameter `period`, `2` to `100`. Output `atr`. `warmup_slots = 10 × period`. Uses high, low and close.
+- **`adx`.** Parameter `period`, `2` to `100`. Outputs, in this order: `adx`, `plus_di`, `minus_di`. `warmup_slots = 13 × period`. Uses high, low and close.
+- **`bbands`.** Parameters `period` (`2` to `200`) and `stddev` (`1` to `5`, an integer). Outputs, in this order: `upper`, `middle`, `lower`. `warmup_slots = period − 1`. The middle band is the simple moving average of `period` closes; `upper` and `lower` are the middle ± `stddev` × the **population** standard deviation of the same closes (one `stddev` for both bands). `lower` can be negative near a zero price.
 
 ### 6.3.2 Reasons
 
@@ -396,7 +401,7 @@ Rows 1, 3 and 4 depend on stored rows only; only row 2 depends on the clock.
 
 - A **segment** is a maximal run of consecutive `present` slots. A slot that is `conflicted`, `unavailable`, `missing`, or after the newest stored candle ends a segment; so does the start of the stored history (slots before the oldest candle are `missing`). **No value is computed from a slot outside its segment.** After a gap the next present slot starts a new segment, and values return only after `warmup_slots` present slots of that segment.
 - A point has a value only if at least `warmup_slots` present slots precede it **in its segment**.
-- The **read range** of an indicator is `[max(start − warmup_slots × timeframe, 946684800000), end)`. Rows before it never influence the indicator; a computation starts at the first slot of its segment inside the read range (the response states the start as `anchor_open_time_ms`). The read cost is bounded: at most `2016 + 1000` slots of one series on the primary key, plus the conflict and unavailable records of the same range.
+- The **read range** of an indicator is `[max(start − warmup_slots × timeframe, 946684800000), end)`. Rows before it never influence the indicator; a computation starts at the first slot of its segment inside the read range (the response states the start as `anchor_open_time_ms`). The read cost is bounded: at most `2016 + 1500` slots of one series on the primary key, plus the conflict and unavailable records of the same range.
 - **Each indicator is evaluated on its own read range.** Requesting another indicator in the same request never changes a value.
 
 ### 6.3.4 Response `200`
@@ -445,10 +450,11 @@ A series that stopped therefore answers `latest.reason` `due` or `stale`, never 
 
 ### 6.3.6 Numbers and reproducibility
 
-- Values are **float64 results** (TA-Lib), not exact decimals: a JSON **string** holding the shortest decimal that parses back to the same float64, in positional notation (no exponent, no leading `+`, no trailing fractional zero, `-0` written `0`, a leading `-` possible for indicators that go negative). Inputs are the stored decimal closes converted to float64 for the computation only. A result that is NaN or infinite at a point that passed warm-up is `500 internal_error`, never a value.
+- Values are **float64 results** (TA-Lib), not exact decimals: a JSON **string** holding the shortest decimal that parses back to the same float64, in positional notation (no exponent, no leading `+`, no trailing fractional zero, `-0` written `0`, a leading `-` possible for indicators that go negative). Inputs are the stored decimal closes, and for `atr` and `adx` also the highs and lows, **of `present` slots only** (a conflicted slot's stored high or low reaches no computation), converted to float64 for the computation only. The API does not re-validate stored candles. A result that is NaN or infinite at a point that passed warm-up is `500 internal_error`, never a value.
 - **Reproducible only for the same build.** For one indicator the `values` and the reasons of rows 1, 3 and 4 are byte-identical when the effective window, the indicator id, the stored rows of its read range and the build (TA-Lib, numpy, the TA-Lib C library, the platform) are the same. The whole body is not: `as_of_ms` and the reasons of row 2 depend on the clock. Another build may differ in the last digits.
-- **Warm-up is an approximation, not the whole-history value.** Wilder's RSI keeps the influence of its starting state; starting at the anchor instead of at the oldest stored candle is an accepted approximation whose remaining weight after `10 × period` steps is about `e^-9`. **A value is not promised to equal the RSI over the whole stored history, and two requests with different `start` may give slightly different values for the same slot** (observed below `0.01` RSI points on generated data; not a guaranteed bound).
-- A flat market (constant closes) gives the value TA-Lib defines for it; the contract adds no interpretation.
+- **Warm-up is an approximation, not the whole-history value.** The smoothed indicators (`rsi`, `ema`, `macd`, `atr`, `adx`) keep the influence of their starting state; starting at the anchor instead of at the oldest stored candle is an accepted approximation. `warmup_slots` is chosen so that the remaining weight of the initial averages (the seeds), counting every path through which they reach the output, is at most about `e^-9`. **That is a weight, not an accuracy bound:** no difference in output units is promised. **A value is not promised to equal the value over the whole stored history, and two requests with different `start` may give slightly different values for the same slot.** Observed on generated data (not guaranteed bounds): on ordinary data and after a sudden trend reversal, about `0.001` points for RSI and ADX; after a 1000× volatility collapse, up to `0.5` RSI points, `0.13` ADX points and `3.6 %` of ATR; after a flat run that follows a move, see the next point.
+- `bbands` depend only on the last `period` closes and are exact in principle, but TA-Lib keeps running sums, so the last digits of a value can depend on where its segment starts.
+- A flat market (constant closes) gives the value TA-Lib defines for it; the contract adds no interpretation. For RSI, ADX and both DI this means: if the whole computation range from the anchor is flat they read `0`, but if the market turns flat after moving they stay at a frozen value, so one slot can read `0` or a frozen value depending on `start` (follow-up F-20; whatever is decided for F-20 covers ADX and DI too).
 
 ### 6.3.7 Errors
 
@@ -478,6 +484,7 @@ Authentication, rate limiting, CORS, write endpoints, streaming, candle revision
 | Health endpoints: liveness reads nothing; readiness is the schema check; ingestion freshness is information over stored series only, `200` unless unreadable | S17 plan decisions 1 to 6 and 10, INV-056, INV-057 |
 | `due` bounds `lag_slots` by `1 + L // timeframe` | S17 plan decision 5, `tests/domain/test_freshness.py` |
 | `/v1/indicators`: per-point values or reasons, segments that never cross a non-present slot, `warmup_slots`, `latest` is the window's last point, float64 values reproducible only for the same build | S18 design (`docs/superpowers/specs/2026-10-28-s18-indicators-design.md`), decisions I1–I6 |
+| S19 indicators: `ema`, `macd`, `atr`, `adx`, `bbands`, the `macd` parameter constraint, high/low inputs, the `2016 + 1500` read bound | S19 design (`docs/superpowers/specs/2026-10-28-s19-indicators-design.md`), decisions J1–J7 |
 
 ## 9. Decisions (answered by the user on 2026-10-23: all as recommended)
 
@@ -536,3 +543,15 @@ S18 decisions (approved by the user on 2026-10-28: all as proposed):
 | I4 | How big is the window? | At most 2016 slots (7 days), also for a defaulted `end`, which is never capped. | A capped default: always answers, but `latest` could silently be an old point. |
 | I5 | How are values written? | float64 results as the shortest round-trip decimal string, positional; declared not exact; reproducible for the same build only. | JSON numbers: shorter, but parsers differ on precision and exponents. Exact decimals: not what TA-Lib computes. |
 | I6 | What is `latest`? | The last point of the requested window, never the current market value; a stopped series answers `due` or `stale`. | The newest stored value: always has a number, but would present stale data as current. |
+
+S19 decisions (approved by the user on 2026-10-28: all as proposed):
+
+| # | Question | Proposal | Alternative that is not proposed, and its cost |
+|---|---|---|---|
+| J1 | Names and outputs? | `ema`, `macd` (`macd`, `signal`, `histogram`), `atr`, `adx` (`adx`, `plus_di`, `minus_di`), `bbands` (`upper`, `middle`, `lower`). | Long names (`bollinger`): readable, but diverge from TA-Lib names that consumers search for. |
+| J2 | Ranges? | Section 6.3.1; `macd` `fast < slow` or `400`. | Accept `slow < fast` and let TA-Lib swap: two ids for one indicator. |
+| J3 | Warm-up? | One criterion (total seed weight over all paths `≤ e^−9`, RSI's), per-indicator integer formulas (ADX `13 × period`), verified for every allowed value; read bound `2016 + 1500`. | One factor `10 × longest period` for all: simpler to state, but EMA(200) and MACD would read 2000–2500 extra slots for no gain; or keep the bound at 1000 by shrinking ranges: no EMA(200). |
+| J4 | Bollinger multiplier? | Integer `stddev` 1..5, both bands; population deviation, SMA middle. | Decimal parameter (`2.5`): needs a decimal grammar and normalization (`2.50` vs `2.5`) in the contract; can be added later without breaking. |
+| J5 | ADX outputs? | `adx` with `plus_di` and `minus_di`. | ADX only: smaller body, but Core cannot tell trend direction without a second indicator name. |
+| J6 | Flat markets (ADX/DI 0/0)? | Characterize TA-Lib's value, extend F-20; the F-20 decision applies to all indicators. | Decide F-20 now inside S19: widens S19 into a contract change of S18's reasons. |
+| J7 | Event-loop cost of a bigger body? | Build and encode the `/v1/indicators` body in the thread pool. | Leave it (F-21): a 5 MB body built on the loop stalls `/health` for roughly 100 ms (estimate, unmeasured). |

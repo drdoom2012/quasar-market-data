@@ -43,13 +43,15 @@ def insert_candle(
     venue: str = VENUE,
     timeframe: str = TIMEFRAME,
     close: str | None = None,
+    high: str | None = None,
+    low: str | None = None,
 ) -> None:
     values = candle_values(open_time_ms)
     if close is not None:
         open_, volume, turnover = values[0], values[4], values[5]
-        high = max(open_, close, key=Decimal)
-        low = min(open_, close, key=Decimal)
-        values = (open_, high, low, close, volume, turnover)
+        derived_high = max(open_, close, key=Decimal)
+        derived_low = min(open_, close, key=Decimal)
+        values = (open_, high or derived_high, low or derived_low, close, volume, turnover)
     conn.execute(
         "INSERT INTO candles (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume, turnover,"
         " ingested_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

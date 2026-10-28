@@ -27,6 +27,13 @@ class IndicatorDefinition:
     params: tuple[ParamRange, ...]
     outputs: tuple[str, ...]
     warmup: Callable[[Mapping[str, int]], int]
+    check: Callable[[Mapping[str, int]], str | None] = lambda params: None
+
+
+def _macd_check(params: Mapping[str, int]) -> str | None:
+    if params["fast"] >= params["slow"]:
+        return "fast must be less than slow"
+    return None
 
 
 DEFINITIONS: Final[Mapping[str, IndicatorDefinition]] = {
@@ -35,6 +42,37 @@ DEFINITIONS: Final[Mapping[str, IndicatorDefinition]] = {
         params=(ParamRange("period", 2, 100),),
         outputs=("rsi",),
         warmup=lambda params: 10 * params["period"],
+    ),
+    "ema": IndicatorDefinition(
+        name="ema",
+        params=(ParamRange("period", 2, 200),),
+        outputs=("ema",),
+        warmup=lambda params: 6 * params["period"],
+    ),
+    "macd": IndicatorDefinition(
+        name="macd",
+        params=(ParamRange("fast", 2, 100), ParamRange("slow", 3, 200), ParamRange("signal", 2, 50)),
+        outputs=("macd", "signal", "histogram"),
+        warmup=lambda params: 6 * (params["slow"] + params["signal"]),
+        check=_macd_check,
+    ),
+    "atr": IndicatorDefinition(
+        name="atr",
+        params=(ParamRange("period", 2, 100),),
+        outputs=("atr",),
+        warmup=lambda params: 10 * params["period"],
+    ),
+    "adx": IndicatorDefinition(
+        name="adx",
+        params=(ParamRange("period", 2, 100),),
+        outputs=("adx", "plus_di", "minus_di"),
+        warmup=lambda params: 13 * params["period"],
+    ),
+    "bbands": IndicatorDefinition(
+        name="bbands",
+        params=(ParamRange("period", 2, 200), ParamRange("stddev", 1, 5)),
+        outputs=("upper", "middle", "lower"),
+        warmup=lambda params: params["period"] - 1,
     ),
 }
 
@@ -94,6 +132,9 @@ def _parse_item(item: str) -> IndicatorSpec:
     missing = [p.name for p in definition.params if p.name not in values]
     if missing:
         raise IndicatorSyntaxError(f"indicator {item!r} is missing parameters {missing}")
+    violation = definition.check(values)
+    if violation is not None:
+        raise IndicatorSyntaxError(f"invalid parameters in {item!r}: {violation}")
     return IndicatorSpec(name=name, params=tuple((p.name, values[p.name]) for p in definition.params))
 
 

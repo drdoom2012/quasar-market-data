@@ -2,7 +2,7 @@
 
 Each indicator is evaluated on its own read range: the facts read once for the widest range are filtered to
 ``[read_start_ms(...), end)`` of that indicator before its slot states are derived, so no row before its own read
-range and no other indicator of the request can influence it. Stored closes are converted with ``float(text)`` for
+range and no other indicator of the request can influence it. Stored highs, lows and closes are converted with ``float(text)`` for
 the computation only.
 """
 
@@ -34,14 +34,18 @@ def indicator_results(
             start=read_start,
             end=inputs.end,
             timeframe_ms=timeframe_ms,
-            candles={t for t in inputs.closes if in_range(t)},
+            candles={t for t in inputs.prices if in_range(t)},
             conflicts={t for t in inputs.conflicts if in_range(t)},
             unavailable={t for t in inputs.unavailable if in_range(t)},
             newest_open_time_ms=inputs.newest_open_time_ms,
             as_of_ms=as_of_ms,
             rule=rule,
         )
-        closes = {t: float(inputs.closes[t]) for t, state in states if state is SlotState.PRESENT}
+        prices = {
+            t: (float(inputs.prices[t][0]), float(inputs.prices[t][1]), float(inputs.prices[t][2]))
+            for t, state in states
+            if state is SlotState.PRESENT
+        }
         results.append(
             evaluate(
                 start=inputs.start,
@@ -49,7 +53,7 @@ def indicator_results(
                 timeframe_ms=timeframe_ms,
                 warmup_slots=spec.warmup_slots,
                 states=states,
-                closes=closes,
+                prices=prices,
                 compute=compute_function(spec),
                 output_count=len(spec.outputs),
             )

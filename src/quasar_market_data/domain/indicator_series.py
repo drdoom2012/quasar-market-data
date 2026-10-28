@@ -1,6 +1,6 @@
 """Segments, warm-up and points of one indicator over a window (design S18 sections 5.2 and 5.3; pure, no I/O).
 
-The indicator function itself is injected as ``compute``; this module never inspects its values, so finiteness
+The indicator function itself is injected as ``compute``; this module never inspects its values or the prices, so finiteness
 checks belong to the adapter that computes them.
 """
 
@@ -13,8 +13,20 @@ from quasar_market_data.domain.timestamps import MIN_TIMESTAMP_MS
 
 type PointReason = Literal["conflicted", "unavailable", "missing", "not_yet_expected", "due", "stale", "warmup"]
 
-# One sequence per output, each as long as the input closes.
-type Compute = Callable[[Sequence[float]], Sequence[Sequence[float]]]
+type Prices = tuple[float, float, float]  # (high, low, close) of one present slot
+
+
+@dataclass(frozen=True)
+class SegmentPrices:
+    """One segment as three aligned sequences of equal length, in slot order."""
+
+    high: tuple[float, ...]
+    low: tuple[float, ...]
+    close: tuple[float, ...]
+
+
+# One sequence per output, each as long as the segment.
+type Compute = Callable[[SegmentPrices], Sequence[Sequence[float]]]
 
 _REASONS: Final[Mapping[SlotState, PointReason]] = {
     SlotState.CONFLICTED: "conflicted",
@@ -77,15 +89,16 @@ def evaluate(
     timeframe_ms: int,
     warmup_slots: int,
     states: Sequence[tuple[int, SlotState]],
-    closes: Mapping[int, float],
+    prices: Mapping[int, Prices],
     compute: Compute,
     output_count: int,
 ) -> IndicatorSeries:
     """Evaluate one indicator over the points of ``[start, end)``.
 
     ``states`` must hold one ``(open_time_ms, state)`` per slot of ``[read_start_ms(...), end)`` in ascending
-    order and ``closes`` exactly the closes of its ``present`` slots. ``compute`` is called once per segment (a
-    maximal run of ``present`` slots of the read range) with that segment's closes in order. A present slot with
+    order and ``prices`` exactly the ``(high, low, close)`` of its ``present`` slots. ``compute`` is called once per
+    segment (a maximal run of ``present`` slots of the read range) with that segment's aligned highs, lows and
+    closes in order. A present slot with
     index ``k`` in its segment has values only if ``k >= warmup_slots``, otherwise reason ``warmup``; any other
     slot has the reason named after its state. Raises ``TypeError`` or ``ValueError`` for inconsistent inputs or a
     ``compute`` result with the wrong number of outputs or lengths.
@@ -127,19 +140,25 @@ def evaluate(
             raise TypeError(f"state must be SlotState, got {type(state).__name__}")
         if state is SlotState.PRESENT:
             present.add(open_time)
-    if set(closes) != present:
-        raise ValueError("closes must hold exactly the present slots of the states")
+    if set(prices) != present:
+        raise ValueError("prices must hold exactly the present slots of the states")
 
     # valued[i] is (values, anchor) of states[i] when it is a present slot past the warm-up of its segment.
     valued: dict[int, tuple[tuple[float, ...], int]] = {}
     for first, last in _segments(states):
-        segment_closes = [closes[open_time] for open_time, _ in states[first:last]]
-        outputs = compute(segment_closes)
+        segment = [prices[open_time] for open_time, _ in states[first:last]]
+        outputs = compute(
+            SegmentPrices(
+                high=tuple(p[0] for p in segment),
+                low=tuple(p[1] for p in segment),
+                close=tuple(p[2] for p in segment),
+            )
+        )
         if len(outputs) != output_count:
             raise ValueError(f"compute returned {len(outputs)} outputs, expected {output_count}")
         for output in outputs:
-            if len(output) != len(segment_closes):
-                raise ValueError(f"compute returned an output of length {len(output)}, expected {len(segment_closes)}")
+            if len(output) != len(segment):
+                raise ValueError(f"compute returned an output of length {len(output)}, expected {len(segment)}")
         for k in range(warmup_slots, last - first):
             valued[first + k] = (tuple(output[k] for output in outputs), states[first][0])
 

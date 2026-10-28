@@ -100,7 +100,7 @@ def create_app(
             read_indicators, db_path, parsed, end=end, read_start=read_start, open_connection=open_connection
         )
         series = await run_in_threadpool(indicator_results, inputs, parsed.indicators, as_of_ms=as_of_ms, rule=rule)
-        return _json(200, _indicators_body(inputs, parsed.indicators, series, as_of_ms, rule))
+        return await run_in_threadpool(_indicators_response, inputs, parsed.indicators, series, as_of_ms, rule)
 
     @app.get("/health")
     async def liveness(request: Request) -> Response:
@@ -241,6 +241,17 @@ def _coverage_body(report: CoverageReport) -> dict[str, object]:
             for run in c.runs
         ],
     }
+
+
+def _indicators_response(
+    inputs: IndicatorInputs,
+    specs: Sequence[IndicatorSpec],
+    series: Sequence[IndicatorSeries],
+    as_of_ms: int,
+    rule: ExpectationRule,
+) -> Response:
+    """Build and encode the body in the thread pool: the largest body must not stall the event loop (J7)."""
+    return _json(200, _indicators_body(inputs, specs, series, as_of_ms, rule))
 
 
 def _indicators_body(
