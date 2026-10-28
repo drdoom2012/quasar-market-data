@@ -1,6 +1,6 @@
 # Quasar Market Data API v1 — contract
 
-- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). `GET /v1/candles` (section 5) is implemented by S10. `GET /v1/coverage` (section 6.1) was APPROVED by the user on 2026-10-25 (decisions S1–S5 as proposed, including the bounds 300 000 ms and 900 000 ms) and is implemented by S12. Sections for the other reserved endpoints (section 6) still need their own approval before their slices. `GET /v1/indicators` (section 6.3) is PROPOSED for S18 and not yet approved.
+- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). `GET /v1/candles` (section 5) is implemented by S10. `GET /v1/coverage` (section 6.1) was APPROVED by the user on 2026-10-25 (decisions S1–S5 as proposed, including the bounds 300 000 ms and 900 000 ms) and is implemented by S12. Sections for the other reserved endpoints (section 6) still need their own approval before their slices. `GET /v1/indicators` (section 6.3) was APPROVED by the user on 2026-10-28 (decisions I1–I6 as proposed) and is implemented by S18.
 - **Scope of this draft:** the conventions shared by every `/v1` endpoint (sections 1–4, 7) and the full specification of `GET /v1/candles` (section 5), which is what S10 implements. The other endpoints are only reserved (section 6) and get their own sections, approved before their slices.
 - **Inputs:** `docs/architecture.md` §4.2, §8; spec `docs/superpowers/specs/2026-10-20-market-data-v1-design.md` (§6.3, §11.3–11.5, D5); ADR-0001 (P-3, P-6, P-8); ADR-0002 (C-3, C-5, P-2, P-5, P-6, P-7, P-8); `docs/invariants.md` (INV-007, INV-009, INV-013, INV-014, INV-028).
 
@@ -360,7 +360,7 @@ Information, never a gate: `200` whenever the database is readable, `503 not_rea
 
 ## 6.3 `GET /v1/indicators`
 
-- **Status:** PROPOSED for S18, awaiting the user's approval (HARD STOP 1 of the S18 plan); decisions I1–I6 (section 9). Design: `docs/superpowers/specs/2026-10-28-s18-indicators-design.md` (the section numbers in parentheses below point into it). v1 serves one indicator, `rsi`; the request and response shape, the segment and warm-up rules and the reasons are the same for every indicator S19 adds.
+- **Status:** APPROVED by the user on 2026-10-28, decisions I1–I6 as proposed (section 9); implemented by S18. Design: `docs/superpowers/specs/2026-10-28-s18-indicators-design.md` (the section numbers in parentheses below point into it). v1 serves one indicator, `rsi`; the request and response shape, the segment and warm-up rules and the reasons are the same for every indicator S19 adds.
 - **What it answers:** for one series and a window of at most 2016 slots, the value of each requested indicator at every slot, or the reason there is none, and for each indicator its `latest` point. It reads stored rows and the server clock only; it never computes across a slot that is not `present`.
 
 ### 6.3.1 Request
@@ -526,7 +526,7 @@ S17 decisions (approved by the user on 2026-10-28 with the S17 plan):
 | H4 | How many non-current series are listed? | 50 (`truncated` says more exist); counts are complete. | Unbounded: the response grows with the universe. |
 | H5 | What does `/health/ingest` cover? | Stored series only; `no_series` means zero stored series and nothing else. | Compare with the configured universe: needs a Collector or configuration channel (S20, follow-up F-18). |
 
-S18 decisions (proposed on 2026-10-28, awaiting the user's approval):
+S18 decisions (approved by the user on 2026-10-28: all as proposed):
 
 | # | Question | Proposal | Alternative that is not proposed, and its cost |
 |---|---|---|---|
