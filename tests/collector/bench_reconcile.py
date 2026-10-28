@@ -49,7 +49,6 @@ _SQL_NAMES = {
     reconcile_reader.CONFLICTS_SQL: "conflicts",
     reconcile_reader.UNAVAILABLE_SQL: "unavailable",
     reconcile_reader.HOLES_SQL: "holes",
-    reconcile_reader.LARGEST_RUNS_SQL: "largest_runs",
     reconcile_reader.UNAVAILABLE_IN_HOLES_SQL: "unavailable_in_holes",
     reconcile_reader.CONFLICTED_SQL: "conflicted",
 }

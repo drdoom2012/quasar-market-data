@@ -39,14 +39,17 @@ BOUNDS_SQL: Final = (
 CANDLES_SQL: Final = f"SELECT open_time_ms FROM candles WHERE {_WINDOW}"
 CONFLICTS_SQL: Final = f"SELECT DISTINCT open_time_ms FROM candle_conflicts WHERE {_WINDOW}"
 UNAVAILABLE_SQL: Final = f"SELECT open_time_ms FROM unavailable_candles WHERE {_WINDOW}"
+# One walk of the series: the holes are materialized once, then aggregated and ranked. 1 to 5 rows of
+# (raw, raw_old, runs, start_ms, end_ms); the first three are equal on every row, and a series without holes gives one
+# row with NULL run columns. Runs are ordered longest first, then oldest first.
 HOLES_SQL: Final = (
-    "SELECT COALESCE(SUM((open_time_ms - prev) / :tf - 1), 0),"
-    " COALESCE(SUM(MAX(0, (MIN(open_time_ms, :ws) - prev) / :tf - 1)), 0), COUNT(*)"
-    f" FROM ({_PAIRS}) WHERE open_time_ms - prev > :tf"
-)
-LARGEST_RUNS_SQL: Final = (
-    f"SELECT prev + :tf, open_time_ms FROM ({_PAIRS}) WHERE open_time_ms - prev > :tf"
-    " ORDER BY open_time_ms - prev DESC, prev ASC LIMIT 5"
+    f"WITH gaps AS MATERIALIZED (SELECT prev, open_time_ms FROM ({_PAIRS}) WHERE open_time_ms - prev > :tf)"
+    " SELECT s.raw, s.raw_old, s.runs, top.start_ms, top.end_ms FROM"
+    " (SELECT COALESCE(SUM((open_time_ms - prev) / :tf - 1), 0) AS raw,"
+    " COALESCE(SUM(MAX(0, (MIN(open_time_ms, :ws) - prev) / :tf - 1)), 0) AS raw_old, COUNT(*) AS runs FROM gaps) AS s"
+    " LEFT JOIN (SELECT prev + :tf AS start_ms, open_time_ms AS end_ms FROM gaps"
+    " ORDER BY open_time_ms - prev DESC, prev ASC LIMIT 5) AS top ON 1"
+    " ORDER BY top.end_ms - top.start_ms DESC, top.start_ms ASC"
 )
 UNAVAILABLE_IN_HOLES_SQL: Final = (
     "SELECT COUNT(*), COALESCE(SUM(u.open_time_ms < :ws), 0) FROM unavailable_candles AS u"
@@ -144,8 +147,9 @@ def _read_series(
     )
 
     ws = oldest if window is None else window[0]
-    raw, raw_old, runs = conn.execute(HOLES_SQL, {**series, "tf": tf, "ws": ws}).fetchone()
-    largest = tuple((row[0], row[1]) for row in conn.execute(LARGEST_RUNS_SQL, {**series, "tf": tf}).fetchall())
+    hole_rows = conn.execute(HOLES_SQL, {**series, "tf": tf, "ws": ws}).fetchall()
+    raw, raw_old, runs = hole_rows[0][:3]
+    largest = tuple((row[3], row[4]) for row in hole_rows if row[3] is not None)
     in_holes, in_holes_old = conn.execute(
         UNAVAILABLE_IN_HOLES_SQL, {**series, "ws": ws, "oldest": oldest, "newest": newest}
     ).fetchone()

@@ -1,7 +1,9 @@
 import asyncio
+import random
 import re
 import sqlite3
 import threading
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +18,14 @@ from quasar_market_data.collector.reconcile_reader import (
     reconcile,
     reconcile_blocking,
 )
-from quasar_market_data.domain.reconcile import HistoryFacts, HistoryStatus, SeriesFacts, WindowStatus, reconcile_series
+from quasar_market_data.domain.reconcile import (
+    HistoryFacts,
+    HistoryStatus,
+    SeriesFacts,
+    WindowStatus,
+    reconcile_series,
+    reconcile_window,
+)
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.validation import require_valid
 from quasar_market_data.storage.connection import StorageError, open_reader, open_writer
@@ -397,6 +406,81 @@ def test_the_connection_is_closed_and_rolled_back_when_a_read_fails(db: Path, mo
     assert proxies[0].statements[-1].sql == "ROLLBACK"
 
 
+def _sorters_under_the_candle_walk(conn: sqlite3.Connection, sql: str, params: Any) -> list[str]:
+    """Sorters inside the co-routine that walks ``candles``: the ``LAG`` pairs must come in key order unsorted."""
+    nodes = {row[0]: (row[1], row[3]) for row in conn.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()}
+    walks = [node for node, (_, detail) in nodes.items() if detail.startswith("SEARCH candles")]
+    assert len(walks) == 1, nodes
+    walk_parent = nodes[walks[0]][0]
+
+    def under(node: int) -> bool:
+        while node in nodes:
+            if node == walk_parent:
+                return True
+            node = nodes[node][0]
+        return False
+
+    return [detail for node, (_, detail) in nodes.items() if "TEMP B-TREE" in detail and under(node)]
+
+
+def _reference_history(stored: list[int], ws: int) -> tuple[int, int, int, tuple[tuple[int, int], ...]]:
+    """Holes from consecutive stored open times, in ms: raw slots, slots older than ``ws``, runs, largest five."""
+    opens = sorted(slot(n) for n in stored)
+    raw = old = 0
+    runs: list[tuple[int, int]] = []
+    for prev, current in pairwise(opens):
+        if current - prev > TFMS:
+            raw += (current - prev) // TFMS - 1
+            old += max(0, (min(current, ws) - prev) // TFMS - 1)
+            runs.append((prev + TFMS, current))
+    largest = tuple(sorted(runs, key=lambda run: (-(run[1] - run[0]), run[0]))[:5])
+    return raw, old, len(runs), largest
+
+
+def test_history_matches_a_reference_over_random_series(db: Path, captured: Captured) -> None:
+    rng = random.Random(20261028)
+    symbols = tuple(f"R{index}/USDT:USDT" for index in range(30))
+    stored_by_symbol: dict[str, list[int]] = {}
+    for symbol in symbols:
+        stored: list[int] = []
+        n = rng.randrange(0, 3)
+        while n < 300:
+            stored.append(n)
+            n += 1 if rng.random() < 0.85 else rng.choice([2, 3, 4, 4, 7])  # equal lengths produce ties
+        stored_by_symbol[symbol] = stored
+        put(db, stored, symbol=symbol)
+        mark_unavailable(db, [m for m in range(stored[0], stored[-1]) if m not in stored][:2], symbol=symbol)
+    inputs = make_inputs(*symbols, max_limit=40)
+    now = as_of(305)
+    target = expected_target(inputs, now)
+    assert target is not None
+    window = reconcile_window(now, target, TFMS, 40)
+    assert window is not None
+    reconcile_blocking(db, inputs, as_of_ms=now, target_open_ms=target)
+    for symbol, history in zip(symbols, captured.history, strict=True):
+        assert history is not None
+        raw, old, runs, largest = _reference_history(stored_by_symbol[symbol], window[0])
+        got = (history.raw_hole_slots, history.raw_hole_slots_older_than_window, history.hole_runs)
+        assert got == (raw, old, runs), symbol
+        assert history.largest_runs == largest, symbol
+
+
+def test_the_history_walks_the_series_once(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    put(db, [*range(10), *range(20, 30), 40])
+    put(db, [*range(5), 9], symbol=B)
+    proxies = install_proxy(monkeypatch)
+    run(db, make_inputs(A, B), 45)
+    lag = [s for s in proxies[0].statements if "LAG(" in s.sql]
+    assert len(lag) == 2 and {s.params["symbol"] for s in lag} == {A, B}
+    raw = open_reader(db)
+    try:
+        for statement in lag:
+            plan = [r[3] for r in raw.execute("EXPLAIN QUERY PLAN " + statement.sql, statement.params).fetchall()]
+            assert sum(detail.startswith("SEARCH candles USING PRIMARY KEY") for detail in plan) == 1, plan
+    finally:
+        raw.close()
+
+
 def test_the_history_statements_use_the_primary_key_and_no_table_scan(
     db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -408,7 +492,7 @@ def test_the_history_statements_use_the_primary_key_and_no_table_scan(
     raw = open_reader(db)
     seen: set[str] = set()
     for statement in proxies[0].statements:
-        if not statement.sql.startswith("SELECT") or statement.sql in seen:
+        if not statement.sql.startswith(("SELECT", "WITH")) or statement.sql in seen:
             continue
         seen.add(statement.sql)
         plan = [row[3] for row in raw.execute("EXPLAIN QUERY PLAN " + statement.sql, statement.params).fetchall()]
@@ -419,11 +503,11 @@ def test_the_history_statements_use_the_primary_key_and_no_table_scan(
             if re.match(r"(SCAN|SEARCH) (candles|unavailable_candles|candle_conflicts|c|u)\b", detail):
                 assert re.search(r"USING (PRIMARY KEY|INDEX|COVERING INDEX)", detail), detail
         if statement.sql == reconcile_reader.HOLES_SQL:
-            assert not any("USE TEMP B-TREE" in detail for detail in plan), plan
+            assert _sorters_under_the_candle_walk(raw, statement.sql, statement.params) == [], plan
         if statement.sql in (reconcile_reader.CANDLES_SQL, reconcile_reader.UNAVAILABLE_SQL):
             assert not any("USE TEMP B-TREE" in detail for detail in plan), plan
     raw.close()
-    assert {reconcile_reader.HOLES_SQL, reconcile_reader.LARGEST_RUNS_SQL} <= seen
+    assert reconcile_reader.HOLES_SQL in seen
 
 
 def _bounds_steps(path: Path) -> int:

@@ -16,7 +16,6 @@ STATEMENT_CLASSES = {
     "conflicts",
     "unavailable",
     "holes",
-    "largest_runs",
     "unavailable_in_holes",
     "conflicted",
 }
