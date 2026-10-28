@@ -228,8 +228,11 @@ def test_interior_hole() -> None:
     assert r.catch_up_limit_at_read == 304
 
 
+NO_HOLES = HistoryFacts(0, 0, 0, (), 0, 0, 0)
+
+
 def test_gap_beyond_the_reach() -> None:
-    r = run(facts(WS - 2000 * TF, t(-2000)))
+    r = run(facts(WS - 2000 * TF, t(-2000)), NO_HOLES)
     assert r.unreachable_tail_slots == 1003
     assert r.catch_up_limit_at_read == 1000
     assert r.slots_classified == 997
@@ -379,3 +382,28 @@ def test_bad_inputs_raise_on_every_path() -> None:
         run(out, None)
     with pytest.raises(ValueError):
         run(f, None, target=F0)
+
+
+def _history_counts(r: SeriesReconcile) -> tuple[int | None, ...]:
+    return (
+        r.history_unaccounted_holes,
+        r.history_holes_older_than_window,
+        r.hole_runs,
+        r.history_conflicted_slots,
+        r.needs_s16_slots,
+    )
+
+
+def test_unread_history_is_none_not_zero() -> None:
+    r = run(facts(WS - 2000 * TF, t(-2000)))  # a stored series whose history was not read
+    assert r.history is HistoryStatus.UNKNOWN
+    assert _history_counts(r) == (None, None, None, None, None)
+    assert r.largest_hole_runs == ()
+    assert r.unreachable_tail_slots == 1003  # the window facts stay known
+    assert r.unknown_before_ms == WS - 2000 * TF
+
+
+def test_no_stored_candle_keeps_zero_history_counts() -> None:
+    r = run(None)
+    assert r.history is HistoryStatus.UNKNOWN
+    assert _history_counts(r) == (0, 0, 0, 0, 0)

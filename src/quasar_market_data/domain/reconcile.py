@@ -64,6 +64,9 @@ class HistoryFacts:
 
 @dataclass(frozen=True)
 class SeriesReconcile:
+    """``history_*``, ``hole_runs`` and ``needs_s16_slots`` are ``None`` when a stored series' history was not read
+    (``history`` is then ``UNKNOWN``): unknown, never 0. A series without a stored candle has 0."""
+
     window: WindowStatus
     all_present: bool
     clock_behind_stored: bool
@@ -79,13 +82,13 @@ class SeriesReconcile:
     catch_up_limit_at_read: int
     unreachable_tail_slots: int
     history: HistoryStatus
-    history_unaccounted_holes: int
-    history_holes_older_than_window: int
-    hole_runs: int
+    history_unaccounted_holes: int | None
+    history_holes_older_than_window: int | None
+    hole_runs: int | None
     largest_hole_runs: tuple[tuple[int, int], ...]
-    history_conflicted_slots: int
+    history_conflicted_slots: int | None
     unknown_before_ms: int | None
-    needs_s16_slots: int
+    needs_s16_slots: int | None
 
 
 def _int(value: int, name: str) -> None:
@@ -239,7 +242,12 @@ def reconcile_series(
 
     # History part, independent of the window.
     h_status = HistoryStatus.UNKNOWN
-    unaccounted = old_unaccounted = h_runs = h_conflicted = 0
+    unaccounted: int | None = 0
+    old_unaccounted: int | None = 0
+    h_runs: int | None = 0
+    h_conflicted: int | None = 0
+    if facts is not None and history is None:  # stored, but the history was not read: unknown, not 0
+        unaccounted = old_unaccounted = h_runs = h_conflicted = None
     largest: tuple[tuple[int, int], ...] = ()
     if facts is not None and history is not None:
         unaccounted = history.raw_hole_slots - history.unavailable_in_holes
@@ -287,7 +295,7 @@ def reconcile_series(
             largest_hole_runs=largest,
             history_conflicted_slots=h_conflicted,
             unknown_before_ms=None if facts is None else facts.oldest_open_ms,
-            needs_s16_slots=tail + old_unaccounted,
+            needs_s16_slots=None if old_unaccounted is None else tail + old_unaccounted,
         )
 
     if target_open_ms is None:

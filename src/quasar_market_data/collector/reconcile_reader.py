@@ -81,8 +81,10 @@ def expected_target(inputs: ReconcileInputs, as_of_ms: int) -> int | None:
 
 
 def reconcile_blocking(
-    db: Path, inputs: ReconcileInputs, *, as_of_ms: int, target_open_ms: int | None
+    db: Path, inputs: ReconcileInputs, *, as_of_ms: int, target_open_ms: int | None, history: bool = True
 ) -> dict[str, SeriesReconcile]:
+    """Read every series in one snapshot. ``history=False`` reads the bounds and the window only (the pre-start read):
+    no series-wide statement runs, and the history fields of a stored series are ``None``."""
     rule = ExpectationRule(publication_delay_ms=inputs.publication_delay_ms)
     tf = inputs.timeframe.milliseconds
 
@@ -107,7 +109,9 @@ def reconcile_blocking(
         conn.execute("BEGIN")
         try:
             verify_schema(conn)
-            return {symbol: _read_series(conn, inputs, symbol, window, tf, classify) for symbol in inputs.symbols}
+            return {
+                symbol: _read_series(conn, inputs, symbol, window, tf, classify, history) for symbol in inputs.symbols
+            }
         finally:
             try:
                 conn.execute("ROLLBACK")
@@ -124,6 +128,7 @@ def _read_series(
     window: tuple[int, int] | None,
     tf: int,
     classify: Callable[[SeriesFacts | None, HistoryFacts | None], SeriesReconcile],
+    history: bool,
 ) -> SeriesReconcile:
     series = {"venue": inputs.venue, "symbol": symbol, "timeframe": inputs.timeframe.label}
     oldest, newest = conn.execute(BOUNDS_SQL, series).fetchone()
@@ -145,6 +150,8 @@ def _read_series(
         conflicts=frozenset(conflicts),
         unavailable=frozenset(unavailable),
     )
+    if not history:
+        return classify(facts, None)
 
     ws = oldest if window is None else window[0]
     hole_rows = conn.execute(HOLES_SQL, {**series, "tf": tf, "ws": ws}).fetchall()
@@ -154,7 +161,7 @@ def _read_series(
         UNAVAILABLE_IN_HOLES_SQL, {**series, "ws": ws, "oldest": oldest, "newest": newest}
     ).fetchone()
     conflicted = conn.execute(CONFLICTED_SQL, series).fetchone()[0]
-    history = HistoryFacts(
+    holes = HistoryFacts(
         raw_hole_slots=raw,
         raw_hole_slots_older_than_window=raw_old,
         hole_runs=runs,
@@ -163,13 +170,15 @@ def _read_series(
         unavailable_in_holes_older_than_window=in_holes_old,
         conflicted_slots=conflicted,
     )
-    return classify(facts, history)
+    return classify(facts, holes)
 
 
 async def reconcile(
-    db: Path, inputs: ReconcileInputs, *, as_of_ms: int, target_open_ms: int | None
+    db: Path, inputs: ReconcileInputs, *, as_of_ms: int, target_open_ms: int | None, history: bool = True
 ) -> dict[str, SeriesReconcile]:
     try:
-        return await asyncio.to_thread(reconcile_blocking, db, inputs, as_of_ms=as_of_ms, target_open_ms=target_open_ms)
+        return await asyncio.to_thread(
+            reconcile_blocking, db, inputs, as_of_ms=as_of_ms, target_open_ms=target_open_ms, history=history
+        )
     except Exception as error:
         raise ReconcileError(f"restart reconcile failed: {error}") from error

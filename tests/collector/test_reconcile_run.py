@@ -272,8 +272,8 @@ def test_old_gap_stays_visible_after_the_window_moves_past_it(db: Path, capsys: 
     seed(db, slots(T - 3000 * TF, T - 2000 * TF))
     run = invoke(db, capsys)
     pre = run.pre
-    assert pre["unreachable_tail"] == "1003" and pre["needs_s16"] == "1003"
-    assert pre["history"] == "contiguous_from_oldest" and pre["wanted_from"] == str(WS)
+    assert pre["unreachable_tail"] == "1003" and pre["needs_s16"] == "-"  # the history is read by the post-check
+    assert pre["history"] == "unknown" and pre["wanted_from"] == str(WS)
     assert run.limits[0] == 1000
     assert set(slots(T - 998 * TF, T)) <= stored(db)
     after = run.after
@@ -282,8 +282,9 @@ def test_old_gap_stays_visible_after_the_window_moves_past_it(db: Path, capsys: 
     assert after["needs_s16"] == "1001" and after["unknown_before"] == str(T - 3000 * TF)
 
     second = invoke(db, capsys)  # same database, a clock at the same instant
-    pre = second.pre
-    assert (pre["window"], pre["history"], pre["history_holes"], pre["needs_s16"]) == (
+    assert second.lines(f"reconcile symbol={SYMBOL} ") == []  # the window is fine; the history is not read yet
+    after = second.after  # the old hole is still seen, by the post-check of the second start
+    assert (after["window"], after["history"], after["history_holes"], after["needs_s16"]) == (
         "window_no_gaps",
         "holes",
         "1001",
@@ -451,7 +452,8 @@ def test_new_symbol_is_no_baseline_and_a_young_series_is_not_backfilled(
     seed(young, slots(T - 10 * TF, T - TF))
     run = invoke(young, capsys)
     assert run.limits[0] == 100
-    assert (run.pre["missing"], run.pre["history"]) == ("0", "contiguous_from_oldest")
+    assert (run.pre["missing"], run.pre["history"]) == ("0", "unknown")
+    assert run.after["history"] == "contiguous_from_oldest"
     assert run.pre["catch_up_limit"] == "100"  # the S14 request size: no larger request for a young series
 
 
@@ -566,7 +568,7 @@ def test_clock_behind_stored_data_is_flagged_and_the_window_is_still_classified(
     run = invoke(db, capsys, "--limit", "5")
     pre = run.pre
     assert (pre["clock_behind_stored"], pre["missing"], pre["window"]) == ("true", "1", "window_gaps")
-    assert (pre["history"], pre["history_holes"]) == ("holes", "1")
+    assert (pre["history"], pre["history_holes"]) == ("unknown", "-")  # read by the post-check, after round one
     assert pre["wanted_from"] == str(T - 5 * TF) and pre["catch_up_limit"] == "9"
     assert run.limits[0] == 9  # (F0 - (T - 5·tf))/tf + 1 + 2
 
@@ -795,6 +797,8 @@ def test_post_check_lines_are_exact(capsys: pytest.CaptureFixture[str]) -> None:
         f"  still_missing A {1000 * TF}..{1002 * TF} missing",
         f"  still_missing A {1010 * TF}..{1013 * TF} stale",
         f"  still_missing A {1013 * TF}..{1014 * TF} due",
+        f"  hole {500 * TF}..{505 * TF} (raw)",
+        f"  hole {600 * TF}..{602 * TF} (raw)",
         (
             "reconcile-after symbol=B window=window_no_gaps all_present=true clock_behind_stored=false"
             " history=contiguous_from_oldest missing=0 due=0 stale=0 conflicted=0 unavailable=0 absent_before=0"
@@ -807,3 +811,14 @@ def test_post_check_lines_are_exact(capsys: pytest.CaptureFixture[str]) -> None:
     ]
     cli._print_reconcile_after({"B": clean()}, {"B": clean()}, None)
     assert capsys.readouterr().out.splitlines()[-1].endswith(" clock_lead_slots_max=-")
+
+
+def test_the_pre_start_read_prints_an_unread_history_as_a_dash(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    seed(db, [*slots(T - 70 * TF, T - 65 * TF), *slots(T - 62 * TF, T - 60 * TF)])  # a window gap and an old hole
+    run = invoke(db, capsys, "--limit", "10")
+    pre = run.pre
+    assert pre["history"] == "unknown"
+    assert (pre["history_holes"], pre["holes_older_than_window"], pre["needs_s16"]) == ("-", "-", "-")
+    summary = run.line("reconcile summary ")
+    assert (summary["history_holes"], summary["needs_s16_slots"]) == ("-", "-")
+    assert run.lines("  hole ") == []  # the largest holes are reported by the post-check

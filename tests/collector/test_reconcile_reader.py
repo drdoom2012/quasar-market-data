@@ -534,3 +534,16 @@ def test_bounds_cost_does_not_grow_with_rows(tmp_path: Path) -> None:
     put(big, list(range(5_000)))
     small_steps, big_steps = _bounds_steps(small), _bounds_steps(big)
     assert big_steps < 2 * small_steps + 50, (small_steps, big_steps)
+
+
+def test_window_only_read_issues_no_history_statement(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    put(db, [*range(10), *range(20, 30), 40])
+    proxies = install_proxy(monkeypatch)
+    now = as_of(45)
+    inputs = make_inputs()
+    result = reconcile_blocking(db, inputs, as_of_ms=now, target_open_ms=expected_target(inputs, now), history=False)
+    issued = {statement.sql for statement in proxies[0].statements}
+    history = {reconcile_reader.HOLES_SQL, reconcile_reader.UNAVAILABLE_IN_HOLES_SQL, reconcile_reader.CONFLICTED_SQL}
+    assert issued & history == set()
+    assert reconcile_reader.BOUNDS_SQL in issued and reconcile_reader.CANDLES_SQL in issued
+    assert result[A].history is HistoryStatus.UNKNOWN and result[A].needs_s16_slots is None

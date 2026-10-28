@@ -152,7 +152,7 @@ def _timed_run(db: Path, inputs: ReconcileInputs, as_of_ms: int) -> tuple[float,
         start = perf_counter()
         result = reconcile_blocking(db, inputs, as_of_ms=as_of_ms, target_open_ms=expected_target(inputs, as_of_ms))
         elapsed_ms = (perf_counter() - start) * 1000
-    unaccounted = sum(series.history_unaccounted_holes for series in result.values())
+    unaccounted = sum(series.history_unaccounted_holes or 0 for series in result.values())  # a full read: never None
     return elapsed_ms, proxies, unaccounted
 
 

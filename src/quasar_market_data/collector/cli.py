@@ -36,7 +36,7 @@ import signal
 import sqlite3
 import sys
 from collections import Counter
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import AsyncExitStack
 from importlib.metadata import version
 from pathlib import Path
@@ -271,13 +271,19 @@ def _state_fields(r: SeriesReconcile) -> str:
     )
 
 
+def _total(counts: Iterable[int | None]) -> str:
+    """A sum, or ``-`` when any count is unknown (an unread history is never added as 0)."""
+    known = list(counts)
+    return "-" if any(count is None for count in known) else str(sum(count or 0 for count in known))
+
+
 def _summary_fields(results: Mapping[str, SeriesReconcile]) -> str:
     values = results.values()
     return (
         f"symbols={len(results)} window_gaps={sum(r.window is WindowStatus.WINDOW_GAPS for r in values)}"
         f" not_all_present={sum(not r.all_present for r in values)} due_slots={sum(r.due for r in values)}"
-        f" history_holes={sum(r.history_unaccounted_holes for r in values)}"
-        f" needs_s16_slots={sum(r.needs_s16_slots for r in values)}"
+        f" history_holes={_total(r.history_unaccounted_holes for r in values)}"
+        f" needs_s16_slots={_total(r.needs_s16_slots for r in values)}"
     )
 
 
@@ -289,8 +295,8 @@ def _print_reconcile(results: Mapping[str, SeriesReconcile], limit: int) -> None
             continue
         print(
             f"reconcile symbol={symbol} {_state_fields(r)} wanted_from={_ms(r.oldest_wanted_ms)}"
-            f" unreachable_tail={r.unreachable_tail_slots} history_holes={r.history_unaccounted_holes}"
-            f" holes_older_than_window={r.history_holes_older_than_window} needs_s16={r.needs_s16_slots}"
+            f" unreachable_tail={r.unreachable_tail_slots} history_holes={_ms(r.history_unaccounted_holes)}"
+            f" holes_older_than_window={_ms(r.history_holes_older_than_window)} needs_s16={_ms(r.needs_s16_slots)}"
             f" unknown_before={_ms(r.unknown_before_ms)} catch_up_limit={r.catch_up_limit_at_read}",
             flush=True,
         )
@@ -311,12 +317,15 @@ def _print_reconcile_after(
         absent_before = "-" if prior is None else str(prior.missing + prior.due + prior.stale)
         print(
             f"reconcile-after symbol={symbol} {_state_fields(r)} absent_before={absent_before}"
-            f" history_holes={r.history_unaccounted_holes} holes_older_than_window={r.history_holes_older_than_window}"
-            f" needs_s16={r.needs_s16_slots} unknown_before={_ms(r.unknown_before_ms)}",
+            f" history_holes={_ms(r.history_unaccounted_holes)}"
+            f" holes_older_than_window={_ms(r.history_holes_older_than_window)}"
+            f" needs_s16={_ms(r.needs_s16_slots)} unknown_before={_ms(r.unknown_before_ms)}",
             flush=True,
         )
         for run in r.absent_runs:
             print(f"  still_missing {symbol} {run.start_ms}..{run.end_ms} {run.state.value}", flush=True)
+        for start, end in r.largest_hole_runs:
+            print(f"  hole {start}..{end} (raw)", flush=True)
     print(f"reconcile-after summary {_summary_fields(after)} clock_lead_slots_max={_ms(lead_max)}", flush=True)
 
 
@@ -381,7 +390,7 @@ async def _reconcile_and_collect(
     except Exception as error:
         raise ReconcileError(f"restart reconcile failed: {error}") from error
     # Before any network call and before the writer opens (S15 Decision 9); a failure is a ReconcileError (exit 1).
-    before = await reconcile(db, inputs, as_of_ms=as_of, target_open_ms=target)
+    before = await reconcile(db, inputs, as_of_ms=as_of, target_open_ms=target, history=False)  # window only
     _print_reconcile(before, config.limit)
     if stop.is_set():  # stopped during the read: nothing was fetched or written
         return 0
