@@ -3,6 +3,7 @@ import random
 import re
 import sqlite3
 import threading
+import time
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -574,23 +575,70 @@ def test_on_snapshot_is_called_before_the_series_are_read_and_later_writes_are_n
     assert facts is not None and facts.newest_open_ms == slot(3)
 
 
+# Runs for minutes unless interrupted; returns the shape of HOLES_SQL (no holes) if it ever completes.
+SLOW_HOLES_SQL = (
+    "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 1000000000)"
+    " SELECT 0, 0, 0, NULL, NULL FROM c WHERE x = 1000000000"
+)
+
+
 def test_the_guard_interrupts_a_running_statement(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    put(db, [n for n in range(3_000) if n % 50])  # enough rows that the LAG walk outlasts one progress tick
+    put(db, [0, 1, 2, 5])
+    monkeypatch.setattr(reconcile_reader, "HOLES_SQL", SLOW_HOLES_SQL)
     guard = ReadGuard()
+    running = threading.Event()
 
     def before(sql: str, params: Any) -> None:
-        if sql == reconcile_reader.HOLES_SQL:
-            guard.interrupt()  # the statement then starts with the flag set and SQLite aborts it
+        if sql == SLOW_HOLES_SQL:
+            running.set()
 
     proxies = install_proxy(monkeypatch, before)
-    now = as_of(3_005)
+    now = as_of(8)
     inputs = make_inputs()
-    with pytest.raises(ReadInterrupted) as raised:
-        reconcile_blocking(db, inputs, as_of_ms=now, target_open_ms=expected_target(inputs, now), guard=guard)
-    assert isinstance(raised.value.__cause__, sqlite3.OperationalError)  # SQLite aborted it, not a check after it
-    sqls = [statement.sql for statement in proxies[0].statements]
-    assert sqls[-2:] == [reconcile_reader.HOLES_SQL, "ROLLBACK"]
-    assert proxies[0].closed
+    raised: list[BaseException] = []
+
+    def read() -> None:
+        try:
+            reconcile_blocking(db, inputs, as_of_ms=now, target_open_ms=expected_target(inputs, now), guard=guard)
+        except BaseException as error:  # noqa: BLE001 - handed to the test thread
+            raised.append(error)
+
+    worker = threading.Thread(target=read)
+    worker.start()
+    assert running.wait(5)
+    time.sleep(0.1)  # the statement is now running inside SQLite, holding no Python lock
+    guard.interrupt()
+    worker.join(5)
+    assert not worker.is_alive()
+    assert len(raised) == 1 and isinstance(raised[0], ReadInterrupted)
+    assert isinstance(raised[0].__cause__, sqlite3.OperationalError)  # SQLite aborted it, not a check after it
+    assert proxies[0].statements[-1].sql == "ROLLBACK" and proxies[0].closed
+
+
+def test_the_guard_costs_nothing_while_the_read_runs(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No Python callback runs inside SQLite: the read never has to win the GIL back from a busy event loop."""
+    put(db, [0, 1, 2, 5])
+    installed: list[object] = []
+    real_open = open_reader
+
+    def opener(path: Path) -> sqlite3.Connection:
+        conn = real_open(path)
+
+        class Spy:
+            def __getattr__(self, name: str) -> Any:
+                return getattr(conn, name)
+
+            def set_progress_handler(self, handler: Any, n: int) -> None:
+                installed.append(handler)
+                conn.set_progress_handler(handler, n)
+
+        return Spy()  # type: ignore[return-value]
+
+    monkeypatch.setattr(reconcile_reader, "open_reader", opener)
+    now = as_of(8)
+    inputs = make_inputs()
+    reconcile_blocking(db, inputs, as_of_ms=now, target_open_ms=expected_target(inputs, now), guard=ReadGuard())
+    assert [handler for handler in installed if handler is not None] == []
 
 
 def test_a_guard_set_between_statements_stops_the_read(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:

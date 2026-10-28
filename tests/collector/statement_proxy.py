@@ -55,8 +55,8 @@ class StatementProxy:
         record.seconds += perf_counter() - start
         return CursorProxy(cursor, record)
 
-    def set_progress_handler(self, handler: Callable[[], int] | None, n: int) -> None:
-        self._conn.set_progress_handler(handler, n)
+    def interrupt(self) -> None:
+        self._conn.interrupt()
 
     def close(self) -> None:
         self.closed = True

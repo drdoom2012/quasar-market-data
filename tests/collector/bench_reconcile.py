@@ -23,7 +23,12 @@ from typing import Any
 from unittest.mock import patch
 
 from quasar_market_data.collector import reconcile_reader
-from quasar_market_data.collector.reconcile_reader import ReconcileInputs, expected_target, reconcile_blocking
+from quasar_market_data.collector.reconcile_reader import (
+    ReadGuard,
+    ReconcileInputs,
+    expected_target,
+    reconcile_blocking,
+)
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
@@ -155,7 +160,12 @@ def _timed_run(
     with patch("quasar_market_data.collector.reconcile_reader.open_reader", opener):
         start = perf_counter()
         result = reconcile_blocking(
-            db, inputs, as_of_ms=as_of_ms, target_open_ms=expected_target(inputs, as_of_ms), history=history
+            db,
+            inputs,
+            as_of_ms=as_of_ms,
+            target_open_ms=expected_target(inputs, as_of_ms),
+            history=history,
+            guard=ReadGuard() if history else None,  # as the CLI runs them: only the post-check has a guard
         )
         elapsed_ms = (perf_counter() - start) * 1000
     unaccounted = sum(series.history_unaccounted_holes or 0 for series in result.values())  # a full read: never None

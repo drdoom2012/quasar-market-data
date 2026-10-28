@@ -4,8 +4,11 @@ Same discipline as ``api.coverage_reader`` (whose window selects are repeated he
 API stay independent): a read-only connection, ``BEGIN`` so that every symbol sees one snapshot, bound statements
 consumed one at a time. Only open times are read, never values. Nothing here writes, fetches or reads the clock.
 
-A read can be stopped by a ``ReadGuard``: the worker installs a SQLite progress handler that aborts the running
-statement once the guard is set, and checks the guard between statements, so no SQLite call ever crosses threads.
+A read can be stopped by a ``ReadGuard``: ``interrupt()`` calls ``sqlite3_interrupt`` on the attached connection
+(SQLite allows it from another thread; the guard's lock keeps it away from ``close``), which aborts the running
+statement, and the worker checks the guard between statements, which covers a statement that had not started yet. No
+Python callback runs inside SQLite (a progress handler would make every step wait for the GIL behind a busy event
+loop).
 ``on_snapshot`` is called once the read transaction holds its snapshot, before any series is read.
 """
 
@@ -75,21 +78,35 @@ class ReadInterrupted(ReconcileError):
 
 
 _SQLITE_INTERRUPT: Final = 9
-_GUARD_TICK_OPS: Final = 1000  # SQLite VM instructions between two looks at the guard inside one statement
 
 
 class ReadGuard:
-    """Asks a running read to stop. Thread-safe; setting it after the read has ended is harmless."""
+    """Asks a running read to stop. Thread-safe; setting it before, during or after the read is harmless."""
 
     def __init__(self) -> None:
-        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._interrupted = False
+        self._conn: sqlite3.Connection | None = None
+
+    def attach(self, conn: sqlite3.Connection) -> None:
+        with self._lock:
+            self._conn = conn
+
+    def detach(self) -> None:
+        """Called before the connection closes: ``interrupt`` never touches a closed connection."""
+        with self._lock:
+            self._conn = None
 
     def interrupt(self) -> None:
-        self._event.set()
+        with self._lock:
+            self._interrupted = True
+            if self._conn is not None:
+                self._conn.interrupt()
 
     @property
     def interrupted(self) -> bool:
-        return self._event.is_set()
+        with self._lock:
+            return self._interrupted
 
 
 def _check(guard: ReadGuard | None) -> None:
@@ -145,9 +162,9 @@ def reconcile_blocking(
     window = reconcile_window(as_of_ms, target_open_ms, tf, inputs.max_limit)
     _check(guard)
     conn = open_reader(db)
+    if guard is not None:
+        guard.attach(conn)
     try:
-        if guard is not None:
-            conn.set_progress_handler(lambda: guard.interrupted, _GUARD_TICK_OPS)
         conn.execute("BEGIN")
         try:
             verify_schema(conn)
@@ -166,12 +183,15 @@ def reconcile_blocking(
                 raise ReadInterrupted("the read was interrupted") from error
             raise
         finally:
-            conn.set_progress_handler(None, 0)  # the rollback must not be interrupted
+            if guard is not None:
+                guard.detach()  # from here on nothing can interrupt the rollback or race the close
             try:
                 conn.execute("ROLLBACK")
             except sqlite3.Error:
                 pass  # a broken connection must not mask the original error; it is closed below
     finally:
+        if guard is not None:
+            guard.detach()
         conn.close()
 
 
