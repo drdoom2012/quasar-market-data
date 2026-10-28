@@ -30,6 +30,7 @@ from tests.collector.fetch_fakes import (
 from tests.collector.manual_time import assert_no_leftover_tasks
 from tests.collector.test_collection_loop import GRACE, Harness
 from tests.collector.test_collection_loop import run as run_scenario
+from tests.storage.test_migrate import foreign_file, sha
 
 FIRST_TARGET = 1792676700000
 
@@ -341,3 +342,16 @@ def test_round_lines_list_conflicts_and_problems(capsys: pytest.CaptureFixture[s
     )
     assert lines[1] == "  A collected attempts=1 conflicts=5,7 problem=-"
     assert lines[2] == "  B gave_up attempts=6 conflicts=- problem=target not confirmed (pending=1, invalid=0)"
+
+
+def test_a_foreign_database_file_exits_1_untouched_and_opens_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db = tmp_path / "foreign.db"
+    foreign_file(db, "delete", "unknown_tables")
+    before = sha(db)
+    clock = FakeClock()
+    opened: list[FakeSource] = []
+    assert run_cli(db, FakeSource(clock, forming_rows()), clock, AdvancingSleep(clock), opened=opened) == 1
+    assert sha(db) == before and opened == []
+    assert "not a quasar-market-data database" in capsys.readouterr().err

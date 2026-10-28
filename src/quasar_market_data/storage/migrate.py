@@ -5,6 +5,10 @@ objects) or ours; the applied versions are exactly ``1..k`` and match the shippe
 checksum; the database is not newer than the code. Each pending migration runs in its own
 ``BEGIN IMMEDIATE`` transaction together with its ``schema_migrations`` row, so it applies completely or
 not at all. ``executescript`` is not used because it commits implicitly.
+
+The identity of an existing file is checked on a read-only connection (``refuse_foreign_file``) before the writer
+opens it, because ``open_writer`` sets WAL, which rewrites the file header of a foreign file. The gap between that
+check and the writer's open is accepted under the runner's assumption of a single migrating process.
 """
 
 import hashlib
@@ -14,10 +18,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib import resources
 from importlib.resources.abc import Traversable
+from pathlib import Path
 from typing import Final
 
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
-from quasar_market_data.storage.connection import StorageError
+from quasar_market_data.storage.connection import StorageError, open_reader
 from quasar_market_data.storage.schema import APPLICATION_ID
 
 _FILE_NAME: Final = re.compile(r"(\d{3})_([a-z0-9_]+)\.sql", re.ASCII)
@@ -118,6 +123,35 @@ def _apply(conn: sqlite3.Connection, migration: Migration, applied_at_ms: int, *
         raise
 
 
+_FOREIGN: Final = "not a quasar-market-data database (application_id or contents are foreign)"
+
+
+def _is_foreign(conn: sqlite3.Connection) -> bool:
+    """Neither fresh (``application_id`` 0 and no objects) nor ours."""
+    application_id: int = conn.execute("PRAGMA application_id").fetchone()[0]
+    if application_id == APPLICATION_ID:
+        return False
+    objects: int = conn.execute("SELECT count(*) FROM sqlite_master").fetchone()[0]
+    return application_id != 0 or objects > 0
+
+
+def refuse_foreign_file(path: Path) -> None:
+    """Raise ``MigrationError`` if ``path`` exists and is neither fresh nor ours; never writes to the file.
+
+    A missing path is left to ``open_writer``, which creates it. A file that is not SQLite raises
+    ``sqlite3.DatabaseError`` unchanged.
+    """
+    if not path.exists():
+        return
+    conn = open_reader(path)
+    try:
+        foreign = _is_foreign(conn)
+    finally:
+        conn.close()
+    if foreign:
+        raise MigrationError(f"{_FOREIGN}; the file was not modified")
+
+
 def migrate(conn: sqlite3.Connection, *, applied_at_ms: int, migrations: Sequence[Migration] | None = None) -> int:
     """Bring the database to the latest shipped version and return that version.
 
@@ -130,12 +164,10 @@ def migrate(conn: sqlite3.Connection, *, applied_at_ms: int, migrations: Sequenc
     shipped = load_migrations() if migrations is None else tuple(migrations)
     _ensure_contiguous(shipped)
 
-    application_id = conn.execute("PRAGMA application_id").fetchone()[0]
-    has_objects = conn.execute("SELECT count(*) FROM sqlite_master").fetchone()[0] > 0
-    fresh = application_id == 0 and not has_objects
-    if not fresh and application_id != APPLICATION_ID:
-        raise MigrationError("not a quasar-market-data database (application_id or contents are foreign)")
+    if _is_foreign(conn):
+        raise MigrationError(_FOREIGN)
 
+    fresh = conn.execute("PRAGMA application_id").fetchone()[0] == 0
     done = 0 if fresh else _applied(conn, shipped)
     for migration in shipped[done:]:
         _apply(conn, migration, applied_at_ms, claim_database=fresh and migration.version == 1)

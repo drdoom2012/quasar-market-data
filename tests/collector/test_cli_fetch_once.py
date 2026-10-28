@@ -23,6 +23,7 @@ from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import MigrationError, migrate
 from tests.collector.fetch_fakes import SYMBOL, FakeClock, FakeSource, closed_rows, forming_rows
 from tests.collector.test_candle_writer import AT
+from tests.storage.test_migrate import foreign_file, sha
 
 UNKNOWN_FRAGMENTS = ("unknown", "re-run")
 
@@ -437,3 +438,16 @@ def test_the_required_arguments_are_enforced() -> None:
     with pytest.raises(SystemExit) as raised:
         main(["fetch-once", "--symbol", SYMBOL])
     assert raised.value.code == 2
+
+
+def test_a_foreign_database_file_exits_1_untouched_and_opens_no_source(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db = tmp_path / "foreign.db"
+    foreign_file(db, "delete", "unknown_tables")
+    before = sha(db)
+    clock = FakeClock()
+    opened: list[FakeSource] = []
+    assert run_cli(db, FakeSource(clock, closed_rows()), clock, opened=opened) == 1
+    assert sha(db) == before and opened == []
+    assert "not a quasar-market-data database" in capsys.readouterr().err

@@ -75,7 +75,7 @@ from quasar_market_data.domain.reconcile import (
 )
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import StorageError, open_writer
-from quasar_market_data.storage.migrate import migrate
+from quasar_market_data.storage.migrate import migrate, refuse_foreign_file
 
 PROG = "quasar-collector"
 DEFAULT_LIMIT = 100
@@ -475,6 +475,7 @@ def _run_command(args: argparse.Namespace, open_source: OpenSource, clock: Clock
 
 
 def _migrate(db: Path, clock: Clock) -> None:
+    refuse_foreign_file(db)  # read-only, before open_writer switches the file to WAL
     conn = open_writer(db)
     try:
         migrate(conn, applied_at_ms=clock.wall_ms())

@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 
 from quasar_market_data.storage.connection import open_writer
-from quasar_market_data.storage.migrate import Migration, MigrationError, load_migrations, migrate
+from quasar_market_data.storage.migrate import (
+    Migration,
+    MigrationError,
+    load_migrations,
+    migrate,
+    refuse_foreign_file,
+)
 from quasar_market_data.storage.schema import APPLICATION_ID, SCHEMA_VERSION
 from tests.storage.conftest import schema_v1_sql
 from tests.typing_helpers import untyped
@@ -123,6 +129,65 @@ def test_database_with_unknown_tables_is_refused_untouched(conn: sqlite3.Connect
         migrate(conn, applied_at_ms=AT)
     assert inventory(conn) == before
     assert conn.execute("PRAGMA application_id").fetchone() == (0,)
+
+
+def sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def foreign_file(path: Path, journal_mode: str, kind: str) -> None:
+    """A SQLite file that is not ours, written by a plain connection (not ``open_writer``)."""
+    plain = sqlite3.connect(path)
+    plain.execute(f"PRAGMA journal_mode={journal_mode}")
+    if kind == "foreign_application_id":
+        plain.execute("PRAGMA application_id = 12345")
+    else:  # unknown_tables
+        plain.execute("CREATE TABLE t (a INTEGER)")
+        plain.execute("INSERT INTO t VALUES (1)")
+    plain.commit()
+    plain.close()
+
+
+@pytest.mark.parametrize("journal_mode", ["delete", "wal"])
+@pytest.mark.parametrize("kind", ["foreign_application_id", "unknown_tables"])
+def test_refuse_foreign_file_leaves_the_file_byte_for_byte_unchanged(
+    tmp_path: Path, journal_mode: str, kind: str
+) -> None:
+    path = tmp_path / "foreign.db"
+    foreign_file(path, journal_mode, kind)
+    before = sha(path)
+    with pytest.raises(MigrationError, match="not a quasar-market-data database"):
+        refuse_foreign_file(path)
+    assert sha(path) == before
+    check = sqlite3.connect(path)
+    try:
+        assert check.execute("PRAGMA journal_mode").fetchone()[0] == journal_mode
+    finally:
+        check.close()
+
+
+def test_refuse_foreign_file_accepts_missing_empty_fresh_and_ours(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.db"
+    refuse_foreign_file(missing)
+    assert not missing.exists()  # the check creates nothing
+    empty = tmp_path / "empty.db"
+    empty.write_bytes(b"")
+    refuse_foreign_file(empty)
+    ours = tmp_path / "ours.db"
+    conn = open_writer(ours)
+    try:
+        migrate(conn, applied_at_ms=AT)
+    finally:
+        conn.close()
+    refuse_foreign_file(ours)
+
+
+def test_refuse_foreign_file_lets_a_non_sqlite_file_fail_unchanged(tmp_path: Path) -> None:
+    path = tmp_path / "junk.db"
+    path.write_bytes(b"not a database" * 100)
+    with pytest.raises(sqlite3.DatabaseError):
+        refuse_foreign_file(path)
+    assert path.read_bytes() == b"not a database" * 100
 
 
 def test_own_application_id_without_a_migration_table_is_refused(conn: sqlite3.Connection) -> None:
