@@ -194,3 +194,66 @@ def test_read_present_is_a_primary_key_range_read(db: Path) -> None:
     assert "SEARCH" in details and "PRIMARY KEY" in details, details
     assert "SCAN" not in details and "TEMP B-TREE" not in details, details
     assert TFMS == 300_000
+
+
+# Today's statement before the horizon bound (S16): the horizon filter applied after the window function.
+UNBOUNDED_RUNS_SQL = (
+    "SELECT prev + :tf, open_time_ms FROM (SELECT open_time_ms, LAG(open_time_ms) OVER (ORDER BY open_time_ms) AS prev"
+    " FROM candles WHERE venue = :venue AND symbol = :symbol AND timeframe = :timeframe)"
+    " WHERE open_time_ms - prev > :tf AND open_time_ms > :hs ORDER BY open_time_ms DESC"
+)
+
+
+def _runs(db: Path, sql: str, horizon: int) -> list[tuple[int, int]]:
+    conn = open_reader(db)
+    try:
+        params = {"venue": VENUE, "symbol": A, "timeframe": TF.label, "tf": TFMS, "hs": slot(horizon)}
+        return [(row[0], row[1]) for row in conn.execute(sql, params).fetchall()]
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    "horizon",
+    [8, 12, 13, -5, 40, 21, 22],
+    ids=[
+        "inside_a_hole",
+        "on_a_stored_row",
+        "one_after_a_stored_row",
+        "before_oldest",
+        "after_newest",
+        "on_a_row_before_a_hole",
+        "first_slot_of_a_hole",
+    ],
+)
+def test_runs_equal_the_unbounded_scan_for_every_horizon_position(db: Path, horizon: int) -> None:
+    put(db, [0, 5, 6, 12, 20, 21, 30])
+    assert _runs(db, hole_reader.RUNS_SQL, horizon) == _runs(db, UNBOUNDED_RUNS_SQL, horizon)
+
+
+def _runs_steps(db: Path, horizon: int) -> int:
+    conn = open_reader(db)
+    count = 0
+
+    def tick() -> int:
+        nonlocal count
+        count += 1
+        return 0
+
+    conn.set_progress_handler(tick, 1)
+    try:
+        params = {"venue": VENUE, "symbol": A, "timeframe": TF.label, "tf": TFMS, "hs": slot(horizon)}
+        conn.execute(hole_reader.RUNS_SQL, params).fetchall()
+    finally:
+        conn.set_progress_handler(None, 1)
+        conn.close()
+    return count
+
+
+def test_hole_scan_cost_does_not_grow_with_history_older_than_the_horizon(tmp_path: Path) -> None:
+    short, long = tmp_path / "short.db", tmp_path / "long.db"
+    recent = [n for n in range(20_000, 20_200) if n % 37]  # the same recent rows, with holes, in both
+    put(short, [*range(19_900, 20_000), *recent])
+    put(long, [*range(20_000), *recent])
+    short_steps, long_steps = _runs_steps(short, 20_000), _runs_steps(long, 20_000)
+    assert long_steps < 2 * short_steps + 50, (short_steps, long_steps)

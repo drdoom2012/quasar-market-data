@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Final
 
 from quasar_market_data.collector.reconcile_reader import (
-    _PAIRS,
+    _SERIES,
     BOUNDS_SQL,
     CANDLES_SQL,
     CONFLICTS_SQL,
@@ -27,8 +27,16 @@ from quasar_market_data.storage.schema import verify_schema
 
 MAX_RUNS: Final = 20
 
+# The pairs start at the last stored row at or before the horizon (or at the horizon when none is), so a hole that
+# straddles the horizon keeps its stored left neighbour and nothing older is walked: a filter on the outer query would
+# be applied after the window function, which then walks the whole history.
+_RECENT_PAIRS: Final = (
+    "SELECT open_time_ms, LAG(open_time_ms) OVER (ORDER BY open_time_ms) AS prev FROM candles"
+    f" WHERE {_SERIES} AND open_time_ms >= COALESCE("
+    f"(SELECT MAX(open_time_ms) FROM candles WHERE {_SERIES} AND open_time_ms <= :hs), :hs)"
+)
 RUNS_SQL: Final = (
-    f"SELECT prev + :tf, open_time_ms FROM ({_PAIRS}) WHERE open_time_ms - prev > :tf AND open_time_ms > :hs"
+    f"SELECT prev + :tf, open_time_ms FROM ({_RECENT_PAIRS}) WHERE open_time_ms - prev > :tf AND open_time_ms > :hs"
     " ORDER BY open_time_ms DESC"
 )
 PRESENT_SQL: Final = f"{CANDLES_SQL} ORDER BY open_time_ms"
