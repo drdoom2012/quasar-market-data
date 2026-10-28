@@ -1,5 +1,6 @@
 import random
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -9,9 +10,11 @@ from quasar_market_data.api.candle_reader import CandlesPage, UnknownSeries, rea
 from quasar_market_data.api.params import MAX_WINDOW_SLOTS, CandlesRequest
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_reader, open_writer
+from quasar_market_data.storage.migrate import migrate
 from quasar_market_data.storage.schema import SchemaMismatchError
 from tests.api.probe import InterleavingConnection
 from tests.api.seed import (
+    AT,
     SYMBOL,
     VENUE,
     candle_values,
@@ -442,3 +445,44 @@ def test_the_cost_is_bounded(tmp_path: Path, stored: int) -> None:
     assert "LIMIT ?" in candle_read.sql
     assert candle_read.parameters[-1] == 6
     assert len(statements) == 9  # identical for 10 and 1000 stored candles
+
+
+def _seeded(path: Path, rows: int) -> Path:
+    conn = open_writer(path)
+    try:
+        migrate(conn, applied_at_ms=AT)
+        conn.execute("BEGIN")
+        for n in range(rows):
+            insert_candle(conn, slot(n))
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+    return path
+
+
+def _steps(path: Path, read: Callable[[sqlite3.Connection], object]) -> int:
+    conn = open_reader(path)
+    count = 0
+
+    def tick() -> int:
+        nonlocal count
+        count += 1
+        return 0
+
+    conn.set_progress_handler(tick, 1)
+    try:
+        read(conn)
+    finally:
+        conn.set_progress_handler(None, 1)
+        conn.close()
+    return count
+
+
+def test_series_bounds_cost_does_not_grow_with_rows(tmp_path: Path) -> None:
+    small, big = _seeded(tmp_path / "small.db", 20), _seeded(tmp_path / "big.db", 5_000)
+
+    def newest_ten(rows: int) -> Callable[[sqlite3.Connection], object]:
+        return lambda conn: read_candles_page(conn, request(slot(rows - 10), slot(rows)))
+
+    small_steps, big_steps = _steps(small, newest_ten(20)), _steps(big, newest_ten(5_000))
+    assert big_steps < 2 * small_steps + 50, (small_steps, big_steps)

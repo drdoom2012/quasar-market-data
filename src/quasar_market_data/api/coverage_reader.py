@@ -43,9 +43,11 @@ def _read(conn: sqlite3.Connection, request: CoverageRequest, as_of_ms: int, rul
     verify_schema(conn)
     series = (request.venue, request.symbol, request.timeframe.label)
 
+    # Two scalar subqueries: SQLite seeks the primary key for a lone MIN or MAX, but walks the series for both at once.
     oldest, newest = conn.execute(
-        "SELECT MIN(open_time_ms), MAX(open_time_ms) FROM candles WHERE venue = ? AND symbol = ? AND timeframe = ?",
-        series,
+        "SELECT (SELECT MIN(open_time_ms) FROM candles WHERE venue = ? AND symbol = ? AND timeframe = ?),"
+        " (SELECT MAX(open_time_ms) FROM candles WHERE venue = ? AND symbol = ? AND timeframe = ?)",
+        (*series, *series),
     ).fetchone()
     if oldest is None:
         raise UnknownSeries

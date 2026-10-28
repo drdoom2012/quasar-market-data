@@ -424,3 +424,29 @@ def test_the_history_statements_use_the_primary_key_and_no_table_scan(
             assert not any("USE TEMP B-TREE" in detail for detail in plan), plan
     raw.close()
     assert {reconcile_reader.HOLES_SQL, reconcile_reader.LARGEST_RUNS_SQL} <= seen
+
+
+def _bounds_steps(path: Path) -> int:
+    conn = open_reader(path)
+    count = 0
+
+    def tick() -> int:
+        nonlocal count
+        count += 1
+        return 0
+
+    conn.set_progress_handler(tick, 1)
+    try:
+        conn.execute(reconcile_reader.BOUNDS_SQL, {"venue": VENUE, "symbol": A, "timeframe": TF.label}).fetchall()
+    finally:
+        conn.set_progress_handler(None, 1)
+        conn.close()
+    return count
+
+
+def test_bounds_cost_does_not_grow_with_rows(tmp_path: Path) -> None:
+    small, big = tmp_path / "small.db", tmp_path / "big.db"
+    put(small, list(range(20)))
+    put(big, list(range(5_000)))
+    small_steps, big_steps = _bounds_steps(small), _bounds_steps(big)
+    assert big_steps < 2 * small_steps + 50, (small_steps, big_steps)

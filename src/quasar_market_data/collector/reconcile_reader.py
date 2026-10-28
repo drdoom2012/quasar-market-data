@@ -31,7 +31,11 @@ _PAIRS: Final = (
     f"SELECT open_time_ms, LAG(open_time_ms) OVER (ORDER BY open_time_ms) AS prev FROM candles WHERE {_SERIES}"
 )
 
-BOUNDS_SQL: Final = f"SELECT MIN(open_time_ms), MAX(open_time_ms) FROM candles WHERE {_SERIES}"
+# Two scalar subqueries: SQLite seeks the primary key for a lone MIN or MAX, but walks the series for both at once.
+BOUNDS_SQL: Final = (
+    f"SELECT (SELECT MIN(open_time_ms) FROM candles WHERE {_SERIES}),"
+    f" (SELECT MAX(open_time_ms) FROM candles WHERE {_SERIES})"
+)
 CANDLES_SQL: Final = f"SELECT open_time_ms FROM candles WHERE {_WINDOW}"
 CONFLICTS_SQL: Final = f"SELECT DISTINCT open_time_ms FROM candle_conflicts WHERE {_WINDOW}"
 UNAVAILABLE_SQL: Final = f"SELECT open_time_ms FROM unavailable_candles WHERE {_WINDOW}"
