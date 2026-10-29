@@ -19,19 +19,26 @@ from quasar_market_data.api.app import create_app
 from quasar_market_data.api.float_text import float_text
 from quasar_market_data.api.indicator_engine import compute_function
 from quasar_market_data.api.indicator_reader import IndicatorInputs
-from quasar_market_data.api.rule import DEFAULT_RULE
 from quasar_market_data.domain.indicator_series import SegmentPrices
 from quasar_market_data.domain.indicators import IndicatorSpec, parse_indicators
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
-from tests.api.seed import AT, candle_values, insert_candle, insert_conflict, insert_unavailable
+from tests.api.seed import (
+    AT,
+    SAMPLE_RULE,
+    SAMPLE_UNIVERSE,
+    candle_values,
+    insert_candle,
+    insert_conflict,
+    insert_unavailable,
+)
 from tests.indicator_data import generated_closes
 
 TF = 300_000
 S = 1792643400000
 SERIES = "venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m"
-DELAY = DEFAULT_RULE.publication_delay_ms
-LAG = DEFAULT_RULE.lag_threshold_ms
+DELAY = SAMPLE_RULE.publication_delay_ms
+LAG = SAMPLE_RULE.lag_threshold_ms
 MONTH_MS = 30 * 24 * 3600 * 1000
 
 _FIRST_SLOT = -5000  # slot number of the first generated close
@@ -89,6 +96,8 @@ def url(start: int, end: int | None = None, indicators: str = "rsi:period=14", s
 
 
 def client_for(path: Path, **kwargs: Any) -> TestClient:
+    kwargs.setdefault("rule", SAMPLE_RULE)
+    kwargs.setdefault("universe", SAMPLE_UNIVERSE)
     return TestClient(create_app(path, **kwargs), raise_server_exceptions=False)
 
 
@@ -515,7 +524,7 @@ def test_inputs_starting_after_a_read_range_are_refused() -> None:
     )
 
     with pytest.raises(ValueError, match="after the read range"):
-        indicator_results.indicator_results(inputs, [spec], as_of_ms=expected(9), rule=DEFAULT_RULE)
+        indicator_results.indicator_results(inputs, [spec], as_of_ms=expected(9), rule=SAMPLE_RULE)
 
 
 def test_flat_range_after_movement_reads_zero_only_when_the_whole_range_is_flat(tmp_path: Path) -> None:

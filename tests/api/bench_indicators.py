@@ -53,10 +53,11 @@ from quasar_market_data.api.app import _indicators_body, create_app
 from quasar_market_data.api.database import read_indicators
 from quasar_market_data.api.indicator_results import indicator_results
 from quasar_market_data.api.params import parse_indicators_request
-from quasar_market_data.api.rule import DEFAULT_RULE
 from quasar_market_data.domain.indicator_series import read_start_ms
 from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import migrate
+from tests.api.seed import SAMPLE_RULE, SAMPLE_UNIVERSE
+from tests.config_files import write_config
 from tests.indicator_data import generated_bars
 
 TF_MS = 300_000
@@ -232,10 +233,11 @@ def serve_level(db: Path, params: dict[str, str], level: int, repeat: int, log: 
     if not script.exists():
         raise BenchError(f"the console script {script} is not installed in this environment")
     port = free_port()
+    config = write_config(log.parent, database_path=str(db), host="127.0.0.1", port=port)
     env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
     with log.open("wb") as log_file:
         proc = subprocess.Popen(
-            [str(script), "serve", "--db", str(db), "--host", "127.0.0.1", "--port", str(port)],
+            [str(script), "serve", str(config)],
             stdout=subprocess.DEVNULL,
             stderr=log_file,
             env=env,
@@ -283,12 +285,12 @@ def run(
 
         end = BASE_MS + ROWS_PER_SERIES * TF_MS
         start = end - WINDOW_SLOTS * TF_MS
-        as_of_ms = end + DEFAULT_RULE.publication_delay_ms  # the window's last slot is the newest expected one
-        rule = DEFAULT_RULE
+        as_of_ms = end + SAMPLE_RULE.publication_delay_ms  # the window's last slot is the newest expected one
+        rule = SAMPLE_RULE
         query = f"venue={VENUE}&symbol={symbol_name(0)}&timeframe=5m&start={start}&end={end}&indicators={indicators}"
         request = parse_indicators_request(query.encode("ascii"))
         read_start = min(read_start_ms(start, spec.warmup_slots, TF_MS) for spec in request.indicators)
-        client = TestClient(create_app(db, now_ms=lambda: as_of_ms, rule=rule))
+        client = TestClient(create_app(db, now_ms=lambda: as_of_ms, rule=rule, universe=SAMPLE_UNIVERSE))
 
         times: dict[str, list[float]] = {phase: [] for phase in PHASES}
         body_bytes = 0

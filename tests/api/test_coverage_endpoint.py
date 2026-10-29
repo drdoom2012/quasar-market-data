@@ -8,17 +8,17 @@ from starlette.testclient import TestClient
 
 from quasar_market_data.api.app import create_app
 from quasar_market_data.api.params import MAX_WINDOW_SLOTS
-from quasar_market_data.api.rule import DEFAULT_RULE, MAX_LAG_THRESHOLD_MS
+from quasar_market_data.api.rule import MAX_LAG_THRESHOLD_MS
 from quasar_market_data.domain.timed_coverage import ExpectationRule
-from tests.api.seed import make_database, make_database_from_fixture
+from tests.api.seed import SAMPLE_RULE, SAMPLE_UNIVERSE, make_database, make_database_from_fixture
 
 TF = 300_000
 S = 1792643400000
 NEWEST = 1792673100000  # the newest candle of the fixture database
 AS_OF = 1792674030000
 SERIES = "venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m"
-DELAY = DEFAULT_RULE.publication_delay_ms
-LAG = DEFAULT_RULE.lag_threshold_ms
+DELAY = SAMPLE_RULE.publication_delay_ms
+LAG = SAMPLE_RULE.lag_threshold_ms
 
 
 def slot(n: int) -> int:
@@ -30,6 +30,8 @@ def query(start: int, end: int) -> str:
 
 
 def client_for(path: Path, **kwargs: Any) -> TestClient:
+    kwargs.setdefault("rule", SAMPLE_RULE)
+    kwargs.setdefault("universe", SAMPLE_UNIVERSE)
     return TestClient(create_app(path, **kwargs), raise_server_exceptions=False)
 
 
@@ -208,7 +210,7 @@ def test_a_window_of_10001_slots_is_400(tmp_path: Path) -> None:
 
 def test_create_app_refuses_an_out_of_bound_rule(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
-        create_app(tmp_path / "m.db", rule=ExpectationRule(0, MAX_LAG_THRESHOLD_MS + 1))
+        create_app(tmp_path / "m.db", rule=ExpectationRule(0, MAX_LAG_THRESHOLD_MS + 1), universe=SAMPLE_UNIVERSE)
 
 
 def test_request_errors(tmp_path: Path) -> None:

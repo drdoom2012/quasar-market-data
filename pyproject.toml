@@ -61,6 +61,21 @@ forbidden_modules = [
     "quasar_market_data.collector",
     "quasar_market_data.api",
     "quasar_market_data.storage",
+    "quasar_market_data.config",
+    "ccxt",
+    "fastapi",
+    "talib",
+    "sqlite3",
+]
+
+[[tool.importlinter.contracts]]
+name = "config depends only on domain and the standard library"
+type = "forbidden"
+source_modules = ["quasar_market_data.config"]
+forbidden_modules = [
+    "quasar_market_data.collector",
+    "quasar_market_data.api",
+    "quasar_market_data.storage",
     "ccxt",
     "fastapi",
     "talib",

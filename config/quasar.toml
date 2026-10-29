@@ -1,0 +1,39 @@
+# Quasar Market Data configuration, read by both quasar-collector and quasar-api.
+# Relative paths resolve against the directory of THIS file, not the working directory.
+# Changes take effect only after a restart of each process.
+
+[database]
+path = "../data/quasar.db"
+
+[rule]
+publication_delay_ms = 15000
+lag_threshold_ms = 60000
+
+[[venues]]
+id = "binance-usdm"
+timeframes = ["5m"]
+symbols = [
+    "BTC/USDT:USDT",
+    "ETH/USDT:USDT",
+    "SOL/USDT:USDT",
+    "BNB/USDT:USDT",
+    "XRP/USDT:USDT",
+    "DOGE/USDT:USDT",
+    "ADA/USDT:USDT",
+    "AVAX/USDT:USDT",
+    "LINK/USDT:USDT",
+    "LTC/USDT:USDT",
+]
+
+[collector]
+limit = 100
+max_concurrency = 4
+min_request_interval_ms = 100
+
+[collector.backfill]
+enabled = true
+days = 30
+
+[api]
+host = "127.0.0.1"
+port = 8000

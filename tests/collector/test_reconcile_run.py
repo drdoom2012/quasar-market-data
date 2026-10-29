@@ -24,7 +24,12 @@ from quasar_market_data.collector.candle_writer import CandleWriter, WriteReport
 from quasar_market_data.collector.kline_source import KlineSource
 from quasar_market_data.collector.reconcile_reader import ReconcileError
 from quasar_market_data.collector.reconcile_reader import reconcile as REAL_RECONCILE
-from quasar_market_data.domain.reconcile import HistoryStatus, SeriesReconcile, WindowStatus
+from quasar_market_data.domain.reconcile import (
+    HistoryStatus,
+    SeriesReconcile,
+    WindowStatus,
+    steady_state_limit_needed,
+)
 from quasar_market_data.domain.timed_coverage import GapRun, SlotState
 from quasar_market_data.domain.validation import require_valid
 from quasar_market_data.storage.connection import open_reader, open_writer
@@ -38,6 +43,7 @@ from tests.collector.fetch_fakes import (
     kline_row,
 )
 from tests.collector.statement_proxy import StatementProxy
+from tests.config_files import write_config
 
 TF = FIVE_MINUTES.milliseconds
 F0 = 1_792_677_000_000  # the slot of FakeClock's start (F0 + 36 s)
@@ -178,12 +184,13 @@ def stop_at_sleep(clock: FakeClock, n: int = 1, **kwargs: Any) -> AdvancingSleep
 def invoke(
     db: Path,
     capsys: pytest.CaptureFixture[str],
-    *extra: str,
+    *,
     clock: FakeClock | None = None,
     source: FakeSource | None = None,
     sleep: AdvancingSleep | None = None,
     symbols: Sequence[str] = (SYMBOL,),
     opened: list[FakeSource] | None = None,
+    **values: Any,
 ) -> Run:
     clock = clock or FakeClock()
     source = source or FakeSource(clock, [], honour_limit=True)
@@ -194,9 +201,14 @@ def invoke(
             opened.append(source)
         return source
 
-    argv = ["run", "--db", str(db), "--max-concurrency", "1", "--no-backfill", *extra]
-    for symbol in symbols:
-        argv += ["--symbol", symbol]
+    settings: dict[str, Any] = {
+        "database_path": db.name,
+        "symbols": tuple(symbols),
+        "max_concurrency": 1,
+        "backfill_enabled": False,
+        **values,
+    }
+    argv = ["run", str(write_config(db.parent, **settings))]
     code = cli.main(argv, open_source=open_source, clock=clock, sleep=sleep)
     captured = capsys.readouterr()
     assert_no_complete(captured.out + captured.err)
@@ -261,7 +273,7 @@ def test_restart_after_an_outage_recovers_the_reachable_gap_and_the_database_pro
     db: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     seed(db, slots(T - 70 * TF, T - 60 * TF))
-    run = invoke(db, capsys, "--limit", "10")
+    run = invoke(db, capsys, limit=10)
     assert run.code == 0
     assert run.pre["wanted_from"] == str(T - 59 * TF) and run.pre["catch_up_limit"] == "63"
     assert run.limits[0] == 63
@@ -300,7 +312,7 @@ def test_old_gap_stays_visible_after_the_window_moves_past_it(db: Path, capsys: 
 def test_partial_exchange_data_is_reported_not_claimed(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     seed(db, slots(T - 70 * TF, T - 60 * TF))
     clock = FakeClock()
-    run = invoke(db, capsys, "--limit", "10", clock=clock, source=Partial(clock, [], honour_limit=True))
+    run = invoke(db, capsys, limit=10, clock=clock, source=Partial(clock, [], honour_limit=True))
     assert run.code == 0 and run.limits[0] == 63
     after = run.after
     assert after["absent_before"] == "60" and after["missing"] == "31"
@@ -325,7 +337,7 @@ def test_a_write_report_is_not_evidence(
         return Liar()
 
     monkeypatch.setattr(AsyncCandleWriter, "open", classmethod(open_))  # the class cli uses
-    run = invoke(db, capsys, "--limit", "10")
+    run = invoke(db, capsys, limit=10)
     pre, after = run.pre, run.after
     assert "collected=1" in run.out  # the loop believed the write report
     assert (after["missing"], after["due"], after["stale"]) == (pre["missing"], pre["due"], pre["stale"])
@@ -342,9 +354,9 @@ def test_run_stopped_after_a_partial_catch_up_and_started_again_converges(
     shutil.copy(db, reference)
 
     clock = FakeClock()
-    assert invoke(db, capsys, "--limit", "10", clock=clock, source=Partial(clock, [], honour_limit=True)).code == 0
-    assert invoke(db, capsys, "--limit", "10").code == 0
-    assert invoke(reference, capsys, "--limit", "10").code == 0
+    assert invoke(db, capsys, limit=10, clock=clock, source=Partial(clock, [], honour_limit=True)).code == 0
+    assert invoke(db, capsys, limit=10).code == 0
+    assert invoke(reference, capsys, limit=10).code == 0
 
     assert table_rows(db, CANDLE_ROWS) == table_rows(reference, CANDLE_ROWS)
     assert table_rows(db, CONFLICT_ROWS) == table_rows(reference, CONFLICT_ROWS)
@@ -353,7 +365,7 @@ def test_run_stopped_after_a_partial_catch_up_and_started_again_converges(
 def test_second_start_adds_nothing(db: Path, writer_spy: WriterSpy, capsys: pytest.CaptureFixture[str]) -> None:
     seed(db, slots(T - 70 * TF, T - 60 * TF))
     conflict_at(db, T - 65 * TF)
-    assert invoke(db, capsys, "--limit", "10").code == 0
+    assert invoke(db, capsys, limit=10).code == 0
     full = "SELECT * FROM candles"
     conflicts = "SELECT * FROM candle_conflicts"
     before = (table_rows(db, full), table_rows(db, conflicts))
@@ -361,7 +373,7 @@ def test_second_start_adds_nothing(db: Path, writer_spy: WriterSpy, capsys: pyte
 
     clock = FakeClock()
     clock.advance(1_000)  # same slot, a different ingestion instant: a rewrite would show
-    assert invoke(db, capsys, "--limit", "10", clock=clock).code == 0
+    assert invoke(db, capsys, limit=10, clock=clock).code == 0
     assert (table_rows(db, full), table_rows(db, conflicts)) == before
     assert writer_spy.reports and all(report.inserted == 0 for report in writer_spy.reports)
 
@@ -409,7 +421,7 @@ def test_a_boundary_during_the_round_gives_no_false_still_missing(db: Path, caps
             clock.advance(TF)
 
     run = invoke(
-        db, capsys, "--limit", "10", clock=clock, source=FakeSource(clock, [], on_klines=on_klines, honour_limit=True)
+        db, capsys, limit=10, clock=clock, source=FakeSource(clock, [], on_klines=on_klines, honour_limit=True)
     )
     assert run.limits[0] == 63
     after = run.after
@@ -417,31 +429,44 @@ def test_a_boundary_during_the_round_gives_no_false_still_missing(db: Path, caps
     assert run.lines("  still_missing") == []
 
 
-def test_a_700_000_ms_publication_delay_collects_and_the_window_ends_before_the_pending_slots(
+def test_a_300_000_ms_publication_delay_collects_and_the_window_ends_before_the_pending_slots(
     db: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    target = F0 - 4 * TF
+    target = F0 - 2 * TF  # the newest slot with T + tf + 300 s <= F0 + 36 s
     seed(db, slots(F0 - 20 * TF, target - TF))
-    run = invoke(db, capsys, "--publication-delay-ms", "700000")
+    run = invoke(db, capsys, publication_delay_ms=300_000)
     assert run.code == 0
     assert f"round target={target} collected=1" in run.out
-    assert run.pre["wanted_from"] == str(target) and run.pre["stale"] == "1"  # expected at T + tf + 700 s
+    assert run.pre["wanted_from"] == str(target)
+    assert (run.pre["due"], run.pre["stale"]) == ("1", "0")  # expected at T + tf + 300 s = F0, 36 s ago: due
     after = run.after
     assert (after["window"], after["all_present"], after["missing"]) == ("window_no_gaps", "true", "0")
-    assert max(stored(db)) == target  # F0 - 3·tf .. F0 - tf came back pending and were not stored
+    assert max(stored(db)) == target  # F0 - tf came back pending and were not stored
+
+
+def test_the_configured_lag_threshold_turns_a_due_slot_into_a_stale_one(
+    db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = F0 - 2 * TF
+    seed(db, slots(F0 - 20 * TF, target - TF))
+    # the pending slot was expected 36 s ago: due under the committed 60 s, stale under 30 s
+    run = invoke(db, capsys, publication_delay_ms=300_000, lag_threshold_ms=30_000)
+    assert run.code == 0
+    assert (run.pre["due"], run.pre["stale"]) == ("0", "1")
 
 
 def test_a_delay_no_round_can_serve_is_a_usage_error(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    needed = steady_state_limit_needed(300_000, TF)
     clock = FakeClock()
     opened: list[FakeSource] = []
     with pytest.raises(SystemExit) as raised:
-        invoke(db, capsys, "--publication-delay-ms", "30000000", clock=clock, opened=opened)
+        invoke(db, capsys, publication_delay_ms=300_000, limit=needed - 1, clock=clock, opened=opened)
     assert raised.value.code == 2
-    assert "needs --limit >= 104" in capsys.readouterr().err
+    assert f"needs limit >= {needed}" in capsys.readouterr().err
     assert opened == [] and not db.exists()
 
-    run = invoke(db, capsys, "--publication-delay-ms", "30000000", "--limit", "104", opened=opened)
-    assert run.code == 0 and len(opened) == 1 and run.limits[0] == 104
+    run = invoke(db, capsys, publication_delay_ms=300_000, limit=needed, opened=opened)
+    assert run.code == 0 and len(opened) == 1 and run.limits[0] == needed
 
 
 def test_new_symbol_is_no_baseline_and_a_young_series_is_not_backfilled(
@@ -503,7 +528,8 @@ def test_a_non_sqlite_file_is_a_reconcile_error_not_a_traceback(
     monkeypatch.setattr(cli, "_migrate", lambda db, clock: None)  # the reconcile read itself refuses it as well
     run = invoke(db, capsys, opened=opened)
     assert run.code == 1 and "restart reconcile failed" in run.err
-    assert opened == [] and writer_spy.opened == 0 and run.out == ""
+    assert opened == [] and writer_spy.opened == 0
+    assert [line.split()[0] for line in run.out.splitlines()] == ["config"]  # nothing after the config line
 
 
 def test_post_check_failure_withholds_the_claim_and_keeps_collecting(
@@ -520,7 +546,7 @@ def test_post_check_failure_withholds_the_claim_and_keeps_collecting(
 
     monkeypatch.setattr(cli, "reconcile", second_fails)
     clock = FakeClock()
-    run = invoke(db, capsys, "--limit", "10", clock=clock, sleep=stop_at_sleep(clock, 2))
+    run = invoke(db, capsys, limit=10, clock=clock, sleep=stop_at_sleep(clock, 2))
     assert run.code == 0
     assert "reconcile-after status=unverified error=restart reconcile failed: disk gone" in run.err.splitlines()
     assert run.lines("reconcile-after") == []
@@ -556,7 +582,7 @@ def test_a_signal_during_the_post_check_stops_after_the_read(
     monkeypatch.setattr(cli, "reconcile", signalled)
     clock = FakeClock()
     sleep = AdvancingSleep(clock)
-    run = invoke(db, capsys, "--limit", "10", clock=clock, sleep=sleep)
+    run = invoke(db, capsys, limit=10, clock=clock, sleep=sleep)
     assert run.code == 0 and run.after["missing"] == "0"
     assert len(run.lines("round target=")) == 1 and sleep.calls == []
 
@@ -568,7 +594,7 @@ def test_clock_behind_stored_data_is_flagged_and_the_window_is_still_classified(
     db: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     seed(db, [o for o in slots(T - 20 * TF, T + 2 * TF) if o != T - 5 * TF])
-    run = invoke(db, capsys, "--limit", "5")
+    run = invoke(db, capsys, limit=5)
     pre = run.pre
     assert (pre["clock_behind_stored"], pre["missing"], pre["window"]) == ("true", "1", "window_gaps")
     assert (pre["history"], pre["history_holes"]) == ("unknown", "-")  # read by the post-check, after round one
@@ -666,7 +692,7 @@ def test_600_symbols_with_gaps_in_five_use_large_requests_only_for_those_five(
             signal.raise_signal(signal.SIGTERM)
 
     sleep = AdvancingSleep(clock, on_sleep=stop_before_round_two)
-    run = invoke(db, capsys, "--limit", "5", clock=clock, sleep=sleep, symbols=symbols)
+    run = invoke(db, capsys, limit=5, clock=clock, sleep=sleep, symbols=symbols)
     assert run.code == 0
     by_symbol = {symbol: limit for symbol, _, limit in run.source.kline_calls}
     assert len(run.source.kline_calls) == 600
@@ -818,7 +844,7 @@ def test_post_check_lines_are_exact(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_the_pre_start_read_prints_an_unread_history_as_a_dash(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     seed(db, [*slots(T - 70 * TF, T - 65 * TF), *slots(T - 62 * TF, T - 60 * TF)])  # a window gap and an old hole
-    run = invoke(db, capsys, "--limit", "10")
+    run = invoke(db, capsys, limit=10)
     pre = run.pre
     assert pre["history"] == "unknown"
     assert (pre["history_holes"], pre["holes_older_than_window"], pre["needs_s16"]) == ("-", "-", "-")
@@ -870,7 +896,7 @@ def test_round_two_does_not_wait_for_the_post_check(
     source = RoundTwoGate(clock, [], honour_limit=True)
     waits = hold_the_post_check_until(monkeypatch, source.reached)  # it can only finish once round two has started
     started = time.monotonic()
-    run = invoke(db, capsys, "--limit", "10", clock=clock, source=source, sleep=stop_at_sleep(clock, 2))
+    run = invoke(db, capsys, limit=10, clock=clock, source=source, sleep=stop_at_sleep(clock, 2))
     assert waits == [True]  # round two started while the post-check was still reading (a blocking one never lets it)
     assert time.monotonic() - started < 4
     assert run.code == 0 and len(run.lines("round target=")) == 2
@@ -892,7 +918,7 @@ def test_a_stop_during_the_post_check_exits_promptly_with_the_claim_withheld(
     monkeypatch.setattr(reconcile_reader.ReadGuard, "interrupt", interrupt)
     hold_the_post_check_until(monkeypatch, interrupted)  # still reading when the loop has stopped
     started = time.monotonic()
-    run = invoke(db, capsys, "--limit", "10")
+    run = invoke(db, capsys, limit=10)
     assert time.monotonic() - started < 3
     assert run.code == 0 and interrupted.is_set()
     assert run.lines("reconcile-after") == []

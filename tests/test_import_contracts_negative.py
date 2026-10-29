@@ -22,6 +22,7 @@ MIGRATE_CONTRACT = "only the collector migrates"
 CCXT_CONTRACT = "ccxt is imported only by the Binance adapter"
 NO_NETWORK_CONTRACT = "api reaches no network client"
 ENGINE_ONLY_CONTRACT = "talib and numpy are imported only by the indicator engine"
+CONFIG_CONTRACT = "config depends only on domain and the standard library"
 CONTRACT_NAMES = (
     DOMAIN_CONTRACT,
     INDEPENDENCE_CONTRACT,
@@ -30,6 +31,7 @@ CONTRACT_NAMES = (
     CCXT_CONTRACT,
     NO_NETWORK_CONTRACT,
     ENGINE_ONLY_CONTRACT,
+    CONFIG_CONTRACT,
 )
 
 
@@ -90,6 +92,21 @@ CASES = {
     ),
     "domain_importing_talib_fails_domain_is_pure": Case("domain/_probe.py", "import talib\n", DOMAIN_CONTRACT),
     "api_importing_the_engine_is_allowed": Case("api/_probe.py", f"import {PACKAGE}.api.indicator_engine\n", None),
+    "config_importing_collector_fails_config_contract": Case(
+        "config/_probe.py", f"import {PACKAGE}.collector\n", CONFIG_CONTRACT
+    ),
+    "config_importing_api_fails_config_contract": Case("config/_probe.py", f"import {PACKAGE}.api\n", CONFIG_CONTRACT),
+    "config_importing_storage_fails_config_contract": Case(
+        "config/_probe.py", f"import {PACKAGE}.storage\n", CONFIG_CONTRACT
+    ),
+    "config_importing_sqlite3_fails_config_contract": Case("config/_probe.py", "import sqlite3\n", CONFIG_CONTRACT),
+    "config_importing_fastapi_fails_config_contract": Case("config/_probe.py", "import fastapi\n", CONFIG_CONTRACT),
+    "domain_importing_config_fails_domain_is_pure": Case(
+        "domain/_probe.py", f"import {PACKAGE}.config\n", DOMAIN_CONTRACT
+    ),
+    "config_importing_domain_is_allowed": Case("config/_probe.py", f"import {PACKAGE}.domain\n", None),
+    "api_importing_config_is_allowed": Case("api/_probe.py", f"import {PACKAGE}.config\n", None),
+    "collector_importing_config_is_allowed": Case("collector/_probe.py", f"import {PACKAGE}.config\n", None),
     "storage_importing_sqlite3_is_allowed": Case("storage/_probe.py", "import sqlite3\n", None),
 }
 

@@ -19,6 +19,7 @@ from quasar_market_data.domain.closed_candles import DEFAULT_PUBLICATION_DELAY_M
 from quasar_market_data.domain.reconcile import attempt_limit, clock_lead_slots
 from quasar_market_data.domain.schedule import cycles_skipped, newest_expected_open_ms, next_wake_ms
 from quasar_market_data.domain.server_time import DEFAULT_TIME_TRUST, TimeTrustConfig
+from quasar_market_data.domain.timed_coverage import DEFAULT_LAG_THRESHOLD_MS
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
 from quasar_market_data.domain.validation import ValidatedCandle
@@ -170,6 +171,7 @@ class LoopConfig:
     timeframe: Timeframe
     limit: int
     publication_delay_ms: int = DEFAULT_PUBLICATION_DELAY_MS
+    lag_threshold_ms: int = DEFAULT_LAG_THRESHOLD_MS
     time_trust: TimeTrustConfig = DEFAULT_TIME_TRUST
     max_concurrency: int = 4
     retry: RetryPolicy = RetryPolicy()

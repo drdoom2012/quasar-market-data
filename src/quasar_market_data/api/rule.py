@@ -1,4 +1,5 @@
-"""The configured expectation rule and the bounds the API puts on it (contract 6.1.5).
+"""The bounds the API puts on the configured expectation rule (contract 6.1.5). The rule itself has no runtime
+default: it comes from the configuration file.
 
 The domain's ``ExpectationRule`` only requires non-negative ``int`` values; a very large lag threshold would
 keep every slot ``due`` and never ``stale``. The API therefore bounds both values. Type and sign rules stay
@@ -7,13 +8,10 @@ in the domain: the single checks build a rule to reuse them, then compare agains
 
 from typing import Final
 
-from quasar_market_data.domain.closed_candles import DEFAULT_PUBLICATION_DELAY_MS
-from quasar_market_data.domain.timed_coverage import DEFAULT_LAG_THRESHOLD_MS, ExpectationRule
+from quasar_market_data.domain.timed_coverage import ExpectationRule
 
 MAX_PUBLICATION_DELAY_MS: Final = 300_000
 MAX_LAG_THRESHOLD_MS: Final = 900_000
-
-DEFAULT_RULE: Final = ExpectationRule(DEFAULT_PUBLICATION_DELAY_MS, DEFAULT_LAG_THRESHOLD_MS)
 
 
 def check_publication_delay(value: int) -> int:

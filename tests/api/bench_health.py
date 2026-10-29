@@ -30,8 +30,10 @@ from starlette.testclient import TestClient
 
 from quasar_market_data.api.app import create_app
 from quasar_market_data.api.health_reader import StoredSeries, read_stored_series
+from quasar_market_data.config.settings import Instrument
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
+from tests.api.seed import SAMPLE_RULE
 
 BASE_MS = 1_700_000_100_000
 TF_MS = 300_000
@@ -100,9 +102,13 @@ def _timed_reads(path: Path, reads: int) -> tuple[list[float], list[tuple[Stored
     return times, results
 
 
-def _handler_ms(path: Path, reads: int) -> list[float]:
-    """The whole ``GET /health/ingest`` handler in process (routing, thread pool, read, freshness, JSON)."""
-    client = TestClient(create_app(path, now_ms=lambda: BASE_MS + 10 * TF_MS))
+def _handler_ms(path: Path, series: int, reads: int) -> list[float]:
+    """The whole ``GET /health/ingest`` handler in process (routing, thread pool, read, freshness, JSON).
+
+    The universe is the generated stored triples (S20): every configured instrument is stored, none is missing.
+    """
+    universe = tuple(Instrument(VENUE, symbol_name(i), "5m") for i in range(series))
+    client = TestClient(create_app(path, rule=SAMPLE_RULE, universe=universe, now_ms=lambda: BASE_MS + 10 * TF_MS))
     times: list[float] = []
     for _ in range(reads):
         start = perf_counter()
@@ -198,7 +204,7 @@ def run(profile: str, work_dir: Path, *, keep: bool) -> dict[str, Any]:
         steps = steps_per_series(db, series)
         baseline_steps = steps_per_series(tiny, BASELINE[0])
         times, _quiet = _timed_reads(db, READS)
-        handler = _handler_ms(db, READS)
+        handler = _handler_ms(db, series, READS)
 
         commits, differing, busy_times = _reads_with_commits(db, series, rows, READS)
         h3 = commits == READS and differing == 0

@@ -7,16 +7,16 @@ import pytest
 from starlette.testclient import TestClient
 
 from quasar_market_data.api.app import HEALTH_BEHIND_MAX, create_app
-from quasar_market_data.api.rule import DEFAULT_RULE
 from quasar_market_data.domain.freshness import Freshness, SeriesFreshness, series_freshness
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_reader, open_writer
-from tests.api.seed import SYMBOL, VENUE, insert_candle, make_database
+from tests.api.seed import SAMPLE_RULE, SAMPLE_UNIVERSE, SYMBOL, VENUE, insert_candle, make_database
+from tests.api.test_health_universe import s17_fields
 
 TF = 300_000
 S = 1792643400000
-DELAY = DEFAULT_RULE.publication_delay_ms
-LAG = DEFAULT_RULE.lag_threshold_ms
+DELAY = SAMPLE_RULE.publication_delay_ms
+LAG = SAMPLE_RULE.lag_threshold_ms
 PATHS = ["/health", "/health/ready", "/health/ingest"]
 
 
@@ -30,6 +30,8 @@ def x_of(newest: int) -> int:
 
 
 def client_for(path: Path, now: int | Callable[[], int] = 0, **kwargs: Any) -> TestClient:
+    kwargs.setdefault("rule", SAMPLE_RULE)
+    kwargs.setdefault("universe", SAMPLE_UNIVERSE)
     now_ms = now if callable(now) else (lambda: now)
     return TestClient(create_app(path, now_ms=now_ms, **kwargs), raise_server_exceptions=False)
 
@@ -159,7 +161,7 @@ def ingest(path: Path, as_of: int, **kwargs: Any) -> dict[str, Any]:
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["content-type"] == "application/json; charset=utf-8"
     body: dict[str, Any] = response.json()
-    return body
+    return s17_fields(body)
 
 
 def test_ingest_no_series_is_200_no_series_and_means_only_zero_stored_series(tmp_path: Path) -> None:
@@ -250,7 +252,7 @@ def test_ingest_boundaries_of_the_lag_threshold(tmp_path: Path, offset: int, sta
 
 def test_ingest_due_with_lag_slots_above_one_under_a_900000_threshold(tmp_path: Path) -> None:
     path = make_series(tmp_path / "market.db", {SYMBOL: slot(10)})
-    rule = type(DEFAULT_RULE)(DELAY, 900_000)
+    rule = type(SAMPLE_RULE)(DELAY, 900_000)
 
     body = ingest(path, x_of(slot(10)) + 900_000, rule=rule)
 
@@ -288,7 +290,7 @@ def test_ingest_truncated_exactly_above_the_cap(tmp_path: Path, count: int, trun
 
 
 def test_ingest_stale_sorts_before_due_across_timeframes(tmp_path: Path) -> None:
-    rule = type(DEFAULT_RULE)(DELAY, 900_000)
+    rule = type(SAMPLE_RULE)(DELAY, 900_000)
     minute, hour = Timeframe("1m"), Timeframe("1h")
     # a 1h series that is stale with a single slot of lag ...
     n_hour = hour.align_down(slot(100))

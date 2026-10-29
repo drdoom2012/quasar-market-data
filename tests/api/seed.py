@@ -8,6 +8,8 @@ from pathlib import Path
 
 from quasar_market_data.collector.binance_klines import parse_klines
 from quasar_market_data.collector.candle_writer import CandleWriter
+from quasar_market_data.config.settings import Instrument
+from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.validation import require_valid
 from quasar_market_data.storage.connection import open_writer
@@ -19,6 +21,8 @@ TIMEFRAME = "5m"
 AT = 1_792_677_000_000
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "binance" / "btcusdt_5m_closed_raw.json"
 _TF_MS = 300_000
+SAMPLE_RULE = ExpectationRule(15_000, 60_000)
+SAMPLE_UNIVERSE: tuple[Instrument, ...] = (Instrument(VENUE, SYMBOL, TIMEFRAME),)
 
 
 def candle_values(open_time_ms: int) -> tuple[str, str, str, str, str, str | None]:

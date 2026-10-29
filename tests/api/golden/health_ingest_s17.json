@@ -1,0 +1,416 @@
+{
+  "as_of_ms": 1792943420000,
+  "rule": {
+    "publication_delay_ms": 15000,
+    "lag_threshold_ms": 60000
+  },
+  "scope": "stored_series",
+  "status": "behind",
+  "series_count": 58,
+  "current": 1,
+  "due": 1,
+  "stale": 56,
+  "behind": [
+    {
+      "venue": "binance-usdm",
+      "symbol": "G054/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792908000000,
+      "lag_slots": 117,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G051/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792908300000,
+      "lag_slots": 116,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G052/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792908300000,
+      "lag_slots": 116,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G053/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792908300000,
+      "lag_slots": 116,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G048/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792908600000,
+      "lag_slots": 115,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G049/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792908600000,
+      "lag_slots": 115,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G050/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792908600000,
+      "lag_slots": 115,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G045/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792908900000,
+      "lag_slots": 114,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G046/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792908900000,
+      "lag_slots": 114,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G047/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792908900000,
+      "lag_slots": 114,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G042/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792909200000,
+      "lag_slots": 113,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G043/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792909200000,
+      "lag_slots": 113,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G044/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792909200000,
+      "lag_slots": 113,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G039/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792909500000,
+      "lag_slots": 112,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G040/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792909500000,
+      "lag_slots": 112,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G041/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792909500000,
+      "lag_slots": 112,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G036/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792909800000,
+      "lag_slots": 111,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G037/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792909800000,
+      "lag_slots": 111,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G038/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792909800000,
+      "lag_slots": 111,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G033/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792910100000,
+      "lag_slots": 110,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G034/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792910100000,
+      "lag_slots": 110,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G035/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792910100000,
+      "lag_slots": 110,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G030/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792910400000,
+      "lag_slots": 109,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G031/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792910400000,
+      "lag_slots": 109,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G032/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792910400000,
+      "lag_slots": 109,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G027/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792910700000,
+      "lag_slots": 108,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G028/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792910700000,
+      "lag_slots": 108,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G029/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792910700000,
+      "lag_slots": 108,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G024/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911000000,
+      "lag_slots": 107,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G025/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911000000,
+      "lag_slots": 107,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G026/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911000000,
+      "lag_slots": 107,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G021/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911300000,
+      "lag_slots": 106,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G022/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911300000,
+      "lag_slots": 106,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G023/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911300000,
+      "lag_slots": 106,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G018/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911600000,
+      "lag_slots": 105,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G019/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911600000,
+      "lag_slots": 105,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G020/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911600000,
+      "lag_slots": 105,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G015/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911900000,
+      "lag_slots": 104,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G016/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911900000,
+      "lag_slots": 104,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G017/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792911900000,
+      "lag_slots": 104,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G012/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792912200000,
+      "lag_slots": 103,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G013/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792912200000,
+      "lag_slots": 103,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G014/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792912200000,
+      "lag_slots": 103,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G009/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792912500000,
+      "lag_slots": 102,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G010/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792912500000,
+      "lag_slots": 102,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G011/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792912500000,
+      "lag_slots": 102,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G006/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792912800000,
+      "lag_slots": 101,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G007/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792912800000,
+      "lag_slots": 101,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G008/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792912800000,
+      "lag_slots": 101,
+      "state": "stale"
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "G003/USDT:USDT",
+      "timeframe": "5m",
+      "newest_open_time_ms": 1792913100000,
+      "lag_slots": 100,
+      "state": "stale"
+    }
+  ],
+  "truncated": true
+}

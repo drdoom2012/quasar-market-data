@@ -26,7 +26,7 @@ from starlette.testclient import TestClient
 
 from quasar_market_data.api.app import create_app
 from quasar_market_data.storage.connection import open_reader
-from tests.api.seed import make_database
+from tests.api.seed import SAMPLE_RULE, SAMPLE_UNIVERSE, make_database
 
 API_DIR = Path(__file__).resolve().parents[2] / "src" / "quasar_market_data" / "api"
 FORBIDDEN_MODULES = frozenset({"urllib.request", "http.client", "importlib", "ctypes", "subprocess"})
@@ -149,6 +149,8 @@ def _exercise(client: TestClient) -> None:
     assert client.get(f"/v1/candles?{Q.replace(str(S), str(S + 100 * TF))}").status_code == 200  # beyond stored
     assert client.get(f"/v1/candles?{Q}&end={S + 8 * TF}").status_code == 200  # a gap window
     assert client.get(f"/v1/coverage?{Q}&end={S + 8 * TF}").status_code == 200  # a coverage window
+    assert client.get("/v1/instruments").status_code == 200  # the configured universe
+    assert client.get("/health/ingest").status_code == 200  # the S17 fields and the universe block
 
 
 def test_every_statement_the_api_issues_is_read_only(tmp_path: Path) -> None:
@@ -165,7 +167,12 @@ def test_every_statement_the_api_issues_is_read_only(tmp_path: Path) -> None:
         conn.set_trace_callback(log.append)  # only appends to a list; it never touches a connection
         return conn
 
-    _exercise(TestClient(create_app(path, open_connection=traced), raise_server_exceptions=False))
+    _exercise(
+        TestClient(
+            create_app(path, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE, open_connection=traced),
+            raise_server_exceptions=False,
+        )
+    )
 
     assert log
     allowed = ("BEGIN", "SELECT", "PRAGMA", "ROLLBACK")
@@ -180,7 +187,7 @@ def test_the_main_database_file_is_unchanged_by_requests(tmp_path: Path) -> None
     path = make_database(tmp_path / "market.db", candles=[S, S + TF, S + 5 * TF], conflicts=[S + TF])
     before = hashlib.sha256(path.read_bytes()).hexdigest()
 
-    _exercise(TestClient(create_app(path), raise_server_exceptions=False))
+    _exercise(TestClient(create_app(path, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE), raise_server_exceptions=False))
 
     assert (
         hashlib.sha256(path.read_bytes()).hexdigest() == before
@@ -205,7 +212,9 @@ def test_a_write_through_the_apps_default_connection_fails(tmp_path: Path, monke
 
     monkeypatch.setattr("quasar_market_data.api.database.read_candles_page", writes)
 
-    response = TestClient(create_app(path), raise_server_exceptions=False).get(f"/v1/candles?{Q}")
+    response = TestClient(
+        create_app(path, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE), raise_server_exceptions=False
+    ).get(f"/v1/candles?{Q}")
 
     assert attempts
     assert "readonly" in attempts[0].lower()

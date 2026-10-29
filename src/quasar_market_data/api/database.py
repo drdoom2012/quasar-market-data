@@ -8,7 +8,7 @@ become ``503``; programming errors propagate and end as ``500`` (contract sectio
 import logging
 import os
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Final, Literal
 
@@ -17,7 +17,9 @@ from quasar_market_data.api.coverage_reader import CoverageReport, read_coverage
 from quasar_market_data.api.errors import ApiError, NotReadyReason, not_ready, unknown_series
 from quasar_market_data.api.health_reader import StoredSeries, check_ready, read_stored_series
 from quasar_market_data.api.indicator_reader import IndicatorInputs, read_indicator_inputs
+from quasar_market_data.api.instrument_reader import InstrumentNewest, read_instrument_newest
 from quasar_market_data.api.params import CandlesRequest, CoverageRequest, IndicatorsRequest
+from quasar_market_data.config.settings import Instrument
 from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.storage.connection import StorageError, open_reader
 from quasar_market_data.storage.schema import EmptyDatabaseError, SchemaMismatchError
@@ -81,6 +83,12 @@ def read_ready(db_path: Path, *, open_connection: ConnectionFactory = open_reade
 
 def read_ingest(db_path: Path, *, open_connection: ConnectionFactory = open_reader) -> tuple[StoredSeries, ...]:
     return _with_reader(db_path, open_connection, read_stored_series, None)
+
+
+def read_instruments(
+    db_path: Path, universe: Sequence[Instrument], *, open_connection: ConnectionFactory = open_reader
+) -> tuple[InstrumentNewest, ...]:
+    return _with_reader(db_path, open_connection, lambda conn: read_instrument_newest(conn, universe), None)
 
 
 def _with_reader[T](

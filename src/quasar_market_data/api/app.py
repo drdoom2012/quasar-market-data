@@ -1,5 +1,5 @@
-"""The HTTP application: ``GET /v1/candles``, ``GET /v1/coverage``, ``GET /v1/indicators``, health and the one error
-body (contract api-v1 sections 1, 2, 5, 6.1, 6.2 and 6.3).
+"""The HTTP application: ``GET /v1/candles``, ``GET /v1/coverage``, ``GET /v1/indicators``, ``GET /v1/instruments``,
+health and the one error body (contract api-v1 sections 1, 2, 5, 6.1, 6.2, 6.3 and 6.4).
 
 The handler parses the raw query string by hand so the contract's strictness holds (``400``, not FastAPI's ``422``;
 repeated, unknown and empty parameters are visible). Documentation endpoints and redirects are off, so an unknown
@@ -28,6 +28,7 @@ from quasar_market_data.api.database import (
     read_coverage,
     read_indicators,
     read_ingest,
+    read_instruments,
     read_ready,
 )
 from quasar_market_data.api.errors import ApiError, internal_error, method_not_allowed, not_found
@@ -35,6 +36,7 @@ from quasar_market_data.api.float_text import float_text
 from quasar_market_data.api.health_reader import StoredSeries
 from quasar_market_data.api.indicator_reader import IndicatorInputs
 from quasar_market_data.api.indicator_results import indicator_results
+from quasar_market_data.api.instrument_reader import InstrumentNewest
 from quasar_market_data.api.params import (
     indicators_window_end,
     parse_candles_request,
@@ -42,7 +44,8 @@ from quasar_market_data.api.params import (
     parse_indicators_request,
     require_no_query,
 )
-from quasar_market_data.api.rule import DEFAULT_RULE, checked_rule
+from quasar_market_data.api.rule import checked_rule
+from quasar_market_data.config.settings import Instrument
 from quasar_market_data.domain.freshness import Freshness, series_freshness
 from quasar_market_data.domain.indicator_series import IndicatorPoint, IndicatorSeries, read_start_ms
 from quasar_market_data.domain.indicators import IndicatorSpec
@@ -56,6 +59,7 @@ logger = logging.getLogger(__name__)
 _MEDIA_TYPE = "application/json; charset=utf-8"
 
 HEALTH_BEHIND_MAX: Final = 50  # contract 6.2.3: at most this many non-current series are listed
+HEALTH_MISSING_MAX: Final = 50  # contract 6.2.3: at most this many missing configured instruments are listed
 
 
 def system_now_ms() -> int:
@@ -66,10 +70,12 @@ def system_now_ms() -> int:
 def create_app(
     db_path: Path,
     *,
+    rule: ExpectationRule,
+    universe: Sequence[Instrument],
     open_connection: ConnectionFactory = open_reader,
     now_ms: Callable[[], int] = system_now_ms,
-    rule: ExpectationRule = DEFAULT_RULE,
 ) -> FastAPI:
+    universe = tuple(sorted(universe))  # the configured instruments, held for the endpoints that report them
     rule = checked_rule(rule.publication_delay_ms, rule.lag_threshold_ms)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, redirect_slashes=False)
 
@@ -102,6 +108,12 @@ def create_app(
         series = await run_in_threadpool(indicator_results, inputs, parsed.indicators, as_of_ms=as_of_ms, rule=rule)
         return await run_in_threadpool(_indicators_response, inputs, parsed.indicators, series, as_of_ms, rule)
 
+    @app.get("/v1/instruments")
+    async def instruments(request: Request) -> Response:
+        require_no_query(request.scope["query_string"])
+        found = await run_in_threadpool(read_instruments, db_path, universe, open_connection=open_connection)
+        return _json(200, {"instruments": [_instrument_body(item) for item in found]})
+
     @app.get("/health")
     async def liveness(request: Request) -> Response:
         require_no_query(request.scope["query_string"])
@@ -118,7 +130,7 @@ def create_app(
         require_no_query(request.scope["query_string"])
         as_of_ms = ensure_timestamp_ms(now_ms(), "as_of_ms")  # a wrong host clock is a 500, not a 503
         stored = await run_in_threadpool(read_ingest, db_path, open_connection=open_connection)
-        return _json(200, _ingest_body(stored, as_of_ms, rule))
+        return _json(200, _ingest_body(stored, as_of_ms, rule, universe))
 
     @app.exception_handler(ApiError)
     async def api_error(request: Request, exc: ApiError) -> Response:
@@ -301,7 +313,14 @@ def _point_body(outputs: Sequence[str], point: IndicatorPoint) -> dict[str, obje
     return {"open_time_ms": point.open_time_ms, "values": values, "reason": point.reason}
 
 
-def _ingest_body(stored: Sequence[StoredSeries], as_of_ms: int, rule: ExpectationRule) -> dict[str, object]:
+def _ingest_body(
+    stored: Sequence[StoredSeries], as_of_ms: int, rule: ExpectationRule, universe: Sequence[Instrument]
+) -> dict[str, object]:
+    """The S17 fields over every stored series, then ``universe``; both come from the one ``stored`` snapshot."""
+    configured = {(item.venue, item.symbol, item.timeframe) for item in universe}
+    stored_triples = {(series.venue, series.symbol, series.timeframe) for series in stored}
+    missing = [item for item in universe if (item.venue, item.symbol, item.timeframe) not in stored_triples]
+    configured_stored = len(configured & stored_triples)
     counts = dict.fromkeys(Freshness, 0)
     non_current: list[tuple[StoredSeries, Freshness, int]] = []
     for series in stored:
@@ -343,8 +362,29 @@ def _ingest_body(stored: Sequence[StoredSeries], as_of_ms: int, rule: Expectatio
                 "newest_open_time_ms": series.newest_open_time_ms,
                 "lag_slots": lag_slots,
                 "state": state.value,
+                "configured": (series.venue, series.symbol, series.timeframe) in configured,
             }
             for series, state, lag_slots in non_current[:HEALTH_BEHIND_MAX]
         ],
         "truncated": len(non_current) > HEALTH_BEHIND_MAX,
+        "universe": {
+            "configured_count": len(configured),
+            "configured_stored": configured_stored,
+            "unconfigured_stored": len(stored) - configured_stored,
+            "missing_count": len(missing),
+            "missing": [
+                {"venue": item.venue, "symbol": item.symbol, "timeframe": item.timeframe}
+                for item in missing[:HEALTH_MISSING_MAX]
+            ],
+            "missing_truncated": len(missing) > HEALTH_MISSING_MAX,
+        },
+    }
+
+
+def _instrument_body(item: InstrumentNewest) -> dict[str, object]:
+    return {
+        "venue": item.instrument.venue,
+        "symbol": item.instrument.symbol,
+        "timeframe": item.instrument.timeframe,
+        "newest_open_time_ms": item.newest_open_time_ms,
     }

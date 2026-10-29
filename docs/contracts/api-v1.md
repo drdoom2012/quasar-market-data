@@ -227,7 +227,7 @@ Each is specified in its own section of this document and approved before its sl
 | Endpoint | Slice | Intent |
 |---|---|---|
 | `GET /v1/coverage` | S12 | Specified in section 6.1 below. |
-| `GET /v1/instruments` | S20 | The configured universe and, per instrument, the newest stored candle. |
+| `GET /v1/instruments` | S20 | The configured universe and, per instrument, the newest stored candle. Specified in section 6.4 below. |
 | `GET /v1/indicators` | S18 | Specified in section 6.3 below (indicators computed on demand from stored closed candles; no value across a gap, a conflicted or unavailable slot, or before warm-up; says why). |
 | Health | S17 | Specified in section 6.2 below (`/health`, `/health/ready`, `/health/ingest`). |
 
@@ -313,7 +313,7 @@ Hence `slots = present + conflicted + unavailable + missing + not_yet_expected +
 
 `400 invalid_parameter`, `404 unknown_series`, `503 not_ready`, `500 internal_error`, in the order of section 2. A server clock outside the valid time range (section 1) is `500`, never a count; the clock is checked after parameter validation and before the database is opened, so a bad clock together with an unreadable database answers `500`, not `503`.
 
-The rule is configured when the API starts: `quasar-api serve --publication-delay-ms` (default 15 000, ADR-0001 P-3; `0` to `300 000`) and `--lag-threshold-ms` (default 60 000; `0` to `900 000`). A value outside the bounds, or not a non-negative integer, is refused at start-up (exit status 2) and the process does not bind. The bounds exist because an unbounded threshold would keep every slot `due` and never `stale`.
+The rule comes from the `[rule]` table of the configuration file (`config/quasar.toml`, section 6.4), which both the API and the Collector read: `rule.publication_delay_ms` (ADR-0001 P-3; `0` to `300 000`) and `rule.lag_threshold_ms` (`0` to `900 000`). The bounds are the same as before S20. A value outside the bounds, or not a non-negative integer, stops the process at start-up with exit status 2 and the process does not bind. (Before S20 the rule was set by the switches `--publication-delay-ms` and `--lag-threshold-ms`; they are removed.) The bounds exist because an unbounded threshold would keep every slot `due` and never `stale`.
 
 ## 6.2 Health: `GET /health`, `GET /health/ready`, `GET /health/ingest`
 
@@ -341,20 +341,34 @@ Information, never a gate: `200` whenever the database is readable, `503 not_rea
   "series_count": 10, "current": 10, "due": 0, "stale": 0,
   "behind": [
     { "venue": "binance-usdm", "symbol": "BTC/USDT:USDT", "timeframe": "5m",
-      "newest_open_time_ms": 1792676400000, "lag_slots": 1, "state": "due" }
+      "newest_open_time_ms": 1792676400000, "lag_slots": 1, "state": "due", "configured": true }
   ],
-  "truncated": false
+  "truncated": false,
+  "universe": {
+    "configured_count": 10, "configured_stored": 9, "unconfigured_stored": 1,
+    "missing_count": 1,
+    "missing": [ { "venue": "binance-usdm", "symbol": "LTC/USDT:USDT", "timeframe": "5m" } ],
+    "missing_truncated": false
+  }
 }
 ```
 
-- **`scope` is always `"stored_series"`.** Every count and status describes the series that exist in the database (at least one row in `candles`), never the instruments that should exist. An instrument whose ingestion never started, or whose first write never succeeded, is invisible here and cannot be told from one that is not configured. A consumer that needs "every expected symbol is present" compares its own list with the listed counts, or asks `/v1/coverage` per symbol (`404 unknown_series` for a never-stored one).
+- **`scope` is always `"stored_series"`.** Every count and status describes the series that exist in the database (at least one row in `candles`), never the instruments that should exist. An instrument whose ingestion never started, or whose first write never succeeded, is invisible in these fields. A consumer that needs "every expected symbol is present" compares its own list with the listed counts, or asks `/v1/coverage` per symbol (`404 unknown_series` for a never-stored one). Since S20 the separate `universe` block lists configured instruments that have no stored series; `scope` and the counts are unchanged.
 - **`status`** (closed list): `no_series` only when the read found zero stored series; `behind` when `stale > 0`; `catching_up` when `due > 0` and `stale == 0`; `current` otherwise. **`no_series` does not mean the Collector is healthy, idle, broken, not started or not initialised**: a freshly migrated database, a Collector that crashed before its first write and a database with only other tables give the same body. A consumer that needs "data exists" tests `series_count > 0`.
 - **Per series** (the rule of S11, decision 1, unchanged; `x` is the instant the slot after the newest stored one is expected, `L` the lag threshold): `current` when the newest stored slot is the newest expected one or newer (a host clock behind the stored data is `current` with `lag_slots` 0); `due` when `x <= as_of <= x + L`; `stale` when `as_of > x + L`. `lag_slots` is the number of expected slots after the newest stored one: `1 + (as_of - x) // timeframe`. A `due` series has `1 <= lag_slots <= 1 + L // timeframe`, which is exactly `1` only when `L` is below one timeframe (the default `60 000` against `300 000`); a `stale` series has `lag_slots >= 1`. Read `state` and `lag_slots` together.
-- **`behind`** lists the non-current series: `stale` before `due`, then `lag_slots` descending, then `(venue, symbol, timeframe)`; at most 50 entries, `truncated` is `true` when more exist (the counts are always complete).
+- **`behind`** lists the non-current series: `stale` before `due`, then `lag_slots` descending, then `(venue, symbol, timeframe)`; at most 50 entries, `truncated` is `true` when more exist (the counts are always complete). Since S20 each entry also carries `configured`, a boolean: whether that stored series is in the configuration file (section 6.4). A consumer can ignore a retired series (`configured: false`) without the endpoint hiding it; the series keeps its `state`, and keeps `status` at `behind` while it is stale.
+- **`universe`** (added by S20; the information about the configured instruments, apart from everything above; an additive amendment, section 6.2 compatibility). The fields above, `scope` included, are computed exactly as before over **all stored series**, configured or not, with the same rules, order and limits; a request before and a request after S20 on the same database give the same values for them.
+  - `configured_count`: the configured `(venue, symbol, timeframe)` triples in the file.
+  - `configured_stored`: configured triples with at least one row in `candles` in the read transaction.
+  - `unconfigured_stored`: stored series that are not in the file (retired or foreign).
+  - Always `series_count == configured_stored + unconfigured_stored` and `configured_count == configured_stored + missing_count`. `series_count` counts every stored series; `configured_stored` only the configured ones; do not mix them up.
+  - `missing`: configured triples with no row in `candles`, ordered by `(venue, symbol, timeframe)`, at most 50 entries (a constant of its own, equal to the limit of `behind` today); `missing_count` is complete; `missing_truncated` is `true` when more exist.
+  - **What `missing` means and does not mean.** Zero rows for a configured series at the snapshot. It does not say why (never started, first write failed, a symbol the exchange does not serve, a Collector running on another file or database) and it does not judge time: a configured series with any row is never missing, however stale. It never changes `status`, any HTTP status or the order of checks of section 6.2. All configured instruments missing gives `status: no_series`, `series_count: 0` and `missing_count == configured_count`.
+  - One read transaction serves both the fields above and `universe`. The API holds the universe in memory from the file it read at start; a change of the file takes effect after a restart.
 - **What it cannot tell.** It reads only the newest stored candle per series. A series with holes behind its newest candle is `current` (`/v1/coverage` reports holes). A stopped Collector, an exchange outage, a halted or delisted symbol and a wrong publication delay all show as `stale`; the endpoint does not know the cause or whether the Collector runs. A retired symbol stays a stored series and keeps `status` at `behind`. A mismatch between the API's rule and the Collector's delay shifts `current`/`due` by the difference.
 - The answer reflects one read transaction, like every other endpoint.
 - A series that cannot be judged (a timeframe label this software does not know, or an open time not aligned to its timeframe; the Collector cannot write either, a hand-edited row can) makes the whole answer `500 internal_error`, never a made-up status.
-- **A round longer than the lag threshold shows up as `stale`.** The Collector serves its symbols one after another through one rate limiter, so with a large universe the last symbols of a round can be written more than `lag_threshold_ms` after their slot was expected; those series are `stale`, and `status` is `behind`, for part of every cycle. This is not a fault of the Collector. Set `--lag-threshold-ms` above the Collector's round duration for the universe, and alert on `behind` that persists for more than one cycle, not on a single answer. (The size of the effect depends on the Collector's request spacing and was not measured.)
+- **A round longer than the lag threshold shows up as `stale`.** The Collector serves its symbols one after another through one rate limiter, so with a large universe the last symbols of a round can be written more than `lag_threshold_ms` after their slot was expected; those series are `stale`, and `status` is `behind`, for part of every cycle. This is not a fault of the Collector. Set `rule.lag_threshold_ms` in `config/quasar.toml` above the Collector's round duration for the universe, and alert on `behind` that persists for more than one cycle, not on a single answer. (The size of the effect depends on the Collector's request spacing and was not measured.)
 - **`behind` is ordered by state, then by `lag_slots`**, which counts slots of each series' own timeframe: across timeframes it is not an ordering by elapsed time (v1 serves `5m` only).
 - **Latency under a lock.** `/health/ready` and `/health/ingest` wait for a database lock up to SQLite's busy timeout (5 s) before answering `503 database_unreadable`; a probe whose own timeout is shorter sees a timeout instead of the `503`. `/health` does not touch the database and answers at once.
 
@@ -460,6 +474,33 @@ A series that stopped therefore answers `latest.reason` `due` or `stale`, never 
 
 `400 invalid_parameter`, `404 unknown_series`, `503 not_ready`, `500 internal_error`, in the order of section 2 with these additions: parameters (every `indicators` error included) → the host clock (outside the valid range is `500`, as in section 6.1.5, checked before the database is opened) → the window of a defaulted `end` (`400`) → the database (`503`) → the series (`404`). A data-quality situation (gaps, conflicts, staleness, warm-up) is never an error: it is `200` with reasons. A window entirely before the oldest stored candle is `200` with every point `missing`.
 
+## 6.4 `GET /v1/instruments`
+
+- **Status:** PROPOSED for S20, needs the user's approval (decisions U1 to U7, section 9). Design: `docs/superpowers/specs/2026-10-28-s20-universe-config-design.md` (5.1, 5.4).
+- **What it answers:** the configured universe, and for each configured instrument the open time of its newest stored candle. It reads stored rows only; it never contacts an exchange and never writes.
+- **The universe** is defined by the configuration file `config/quasar.toml`, read by the Collector and the API (one file, one place). The API reads it once at start and holds it in memory; a change of the file takes effect after a restart of the process.
+
+### 6.4.1 Request
+
+No parameter. Any query parameter, known or not, is `400 invalid_parameter` (section 1, Parameters; as for the health paths, section 6.2). Order of checks: the query (`400`) → the database (`503 not_ready`, section 2). There is no `404` and no series lookup.
+
+### 6.4.2 Response `200`
+
+```json
+{
+  "instruments": [
+    { "venue": "binance-usdm", "symbol": "BTC/USDT:USDT", "timeframe": "5m", "newest_open_time_ms": 1792673100000 },
+    { "venue": "binance-usdm", "symbol": "LTC/USDT:USDT", "timeframe": "5m", "newest_open_time_ms": null }
+  ]
+}
+```
+
+- One entry per configured `(venue, symbol, timeframe)`, **ordered by that triple** (so the answer is deterministic whatever the order in the file).
+- `newest_open_time_ms` is the open time of the newest stored candle of that series, or `null` when nothing is stored (not yet ingested, or the first write never succeeded). `null` is not an error and says nothing about why.
+- **Only configured instruments are listed.** A stored series that is not in the file (retired or foreign) is not listed; its candles stay stored and `/v1/candles`, `/v1/coverage` and `/v1/indicators` keep serving them (INV-067).
+- **Unpaginated:** the size is bounded by the file (target 300 to 600 entries), not by data.
+- Section 1 conventions apply (`GET` only, `Cache-Control: no-store`, UTF-8 JSON). All reads run in one read transaction (section 5.6) and take the newest candle per configured series by primary key, never a scan. A database that cannot be read is `503 not_ready` with the reason and headers of section 2, never an empty list.
+
 ## 7. Out of scope for v1
 
 Authentication, rate limiting, CORS, write endpoints, streaming, candle revision history, exposing rejected conflict values, a configurable page limit, timeframes other than `5m`, venues other than `binance-usdm`, and any trading functionality.
@@ -485,6 +526,8 @@ Authentication, rate limiting, CORS, write endpoints, streaming, candle revision
 | `due` bounds `lag_slots` by `1 + L // timeframe` | S17 plan decision 5, `tests/domain/test_freshness.py` |
 | `/v1/indicators`: per-point values or reasons, segments that never cross a non-present slot, `warmup_slots`, `latest` is the window's last point, float64 values reproducible only for the same build | S18 design (`docs/superpowers/specs/2026-10-28-s18-indicators-design.md`), decisions I1–I6 |
 | S19 indicators: `ema`, `macd`, `atr`, `adx`, `bbands`, the `macd` parameter constraint, high/low inputs, the `2016 + 1500` read bound | S19 design (`docs/superpowers/specs/2026-10-28-s19-indicators-design.md`), decisions J1–J7 |
+| `/v1/instruments`: the configured universe from the versioned file, ordered by triple, `newest_open_time_ms` or `null`, configured instruments only | S20 design (`docs/superpowers/specs/2026-10-28-s20-universe-config-design.md`), decisions U4, U6, INV-066, INV-067 |
+| `/health/ingest` `universe` block and `configured` on `behind` entries; the S17 fields keep their meaning; the two equalities | S20 design, decisions U5, U6, INV-066, INV-067 |
 
 ## 9. Decisions (answered by the user on 2026-10-23: all as recommended)
 
@@ -555,3 +598,17 @@ S19 decisions (approved by the user on 2026-10-28: all as proposed):
 | J5 | ADX outputs? | `adx` with `plus_di` and `minus_di`. | ADX only: smaller body, but Core cannot tell trend direction without a second indicator name. |
 | J6 | Flat markets (ADX/DI 0/0)? | Characterize TA-Lib's value, extend F-20; the F-20 decision applies to all indicators. | Decide F-20 now inside S19: widens S19 into a contract change of S18's reasons. |
 | J7 | Event-loop cost of a bigger body? | Build and encode the `/v1/indicators` body in the thread pool. | Leave it (F-21): a 5 MB body built on the loop stalls `/health` for roughly 100 ms (estimate, unmeasured). |
+
+S20 decisions (PROPOSED, awaiting the user's approval at HARD STOP 1; design `docs/superpowers/specs/2026-10-28-s20-universe-config-design.md`, section 6 step 1):
+
+| # | Question | Proposal | Alternative that is not proposed, and its cost |
+|---|---|---|---|
+| U1 | Where is the universe and every operational value defined? | One TOML file, `config/quasar.toml`, committed and versioned, read by both the Collector and the API; every key required, unknown keys an error. | Switches at start (today): nothing records which universe ran, and the API cannot know which instruments should exist (F-18). A channel from the Collector to the API: breaks independence. |
+| U2 | Is the file reloaded while a process runs? | No: a change takes effect after a restart. | Hot reload: more states to test and two processes that can disagree mid-run. |
+| U3 | What does a relative path in the file mean? | A relative `database.path` resolves against the directory of the configuration file, never against the working directory; an absolute path is used as it is. | Resolve against the working directory: the same file means a different database depending on where the process was started. |
+| U4 | Shape and order of `GET /v1/instruments`? | Section 6.4: no parameter, `{"instruments":[{"venue","symbol","timeframe","newest_open_time_ms"}]}`, one entry per configured triple, ordered by `(venue, symbol, timeframe)`, `null` when nothing is stored, configured instruments only, unpaginated. | Also list stored but unconfigured series: hides which instruments are intended. Paginate: complexity for a list bounded by the file. |
+| U5 | How does `/health/ingest` show configured instruments with no stored series? | A separate `universe` block (section 6.2.3) with `configured_count`, `configured_stored`, `unconfigured_stored`, `missing_count`, `missing` (at most 50), `missing_truncated`, and the two equalities; `missing` never changes `status` or any HTTP status. | Fold missing instruments into `series_count`, `status` or `behind`: rewrites the meaning of the S17 fields. |
+| U6 | What happens to the S17 fields and to a series removed from the file? | The S17 fields (`scope`, `status`, `series_count`, `current`, `due`, `stale`, `behind`, `truncated`) keep their meaning and are computed over all stored series; a retired series stays in them, appears in `behind` while stale with `configured: false`, and is counted in `unconfigured_stored`. Nothing is excluded or deleted. | Exclude retired series from the statistics: rewrites the S17 fields; it would need its own contract change and approval. |
+| U7 | Which values does version 1 accept? | Exactly one venue, `binance-usdm`, and `timeframes == ["5m"]`; anything else is refused at start as not supported yet (S22), so the file shape does not change when a venue is added. | Accept any venue or timeframe now: untested combinations. |
+
+The file format, the audit of the runtime settings (design 5.7: which values are in the file and which stay in code) and the removal of the switches (`--symbol`, `--limit`, `--publication-delay-ms`, `--max-concurrency`, `--min-request-interval-ms`, `--backfill-days`, `--no-backfill`, `--db` for the Collector; `--publication-delay-ms`, `--lag-threshold-ms`, `--host`, `--port`, `--db` for the API; `fetch-once` keeps its switches) are operational, and are part of the same approval so that nothing is decided twice.

@@ -92,7 +92,7 @@ Each slice ends green and demonstrable, is written test-first, and adds only wha
 **Indicators and operations**
 - **S18 One indicator (RSI) end to end** — refuses to compute across gaps or with insufficient warm-up.
 - **S19 EMA, MACD, ATR, ADX, Bollinger Bands.**
-- **S20 `/v1/instruments` and universe config.**
+- **S20 `/v1/instruments` and universe config.** — implemented (plan `2026-10-29-s20-universe-config.md`)
 - **S21 Docker Compose** — two services, shared local volume, connection-level read-only for the API.
 - **S22 Second venue (Bybit)** — generalize the adapter interface from two real examples.
 - **S23 Soak test and WAL inspection.**

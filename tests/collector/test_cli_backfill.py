@@ -4,6 +4,7 @@ import asyncio
 import re
 import signal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,19 +16,21 @@ from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.domain.backfill import Attribution
 from tests.collector.backfill_fakes import Env
 from tests.collector.test_backfill_run import HybridSource, drive_forever_step
+from tests.config_files import write_config
 
+SYMBOL = "BTC/USDT:USDT"
 FORBIDDEN = re.compile(r"\b(done|filled|complete|completed|unavailable)\b")
 
 
 def run_cli(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    *extra: str,
     source_setup: object = None,
     stop_after_slice: bool = True,
+    **values: Any,
 ) -> tuple[int, HybridSource, Env]:
-    env = Env(tmp_path)
-    env.store([env.slot(0), env.slot(1), env.slot(12)])  # a hole of ten slots (2..11)
+    env = Env(tmp_path, symbols=(SYMBOL,))
+    env.store([env.slot(0), env.slot(1), env.slot(12)], symbol=SYMBOL)  # a hole of ten slots (2..11)
     source = HybridSource(env.t)
     if callable(source_setup):
         source_setup(source)
@@ -45,7 +48,8 @@ def run_cli(
         asyncio.ensure_future(drive_forever_step(env.t))  # simulated time moves on its own inside the CLI's loop
         return source
 
-    argv = ["run", "--db", str(env.db), "--symbol", "A", "--max-concurrency", "1", *extra]
+    config = write_config(env.db.parent, database_path=env.db.name, symbols=(SYMBOL,), max_concurrency=1, **values)
+    argv = ["run", str(config)]
     code = main(argv, open_source=open_source, clock=env.t, sleep=env.t.sleep)
     return code, source, env
 
@@ -53,25 +57,15 @@ def run_cli(
 def test_run_backfills_after_the_first_round(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code, source, env = run_cli(tmp_path, monkeypatch, "--backfill-days", "1")
+    code, source, env = run_cli(tmp_path, monkeypatch, backfill_days=1)
     out = capsys.readouterr().out
     assert code == 0
-    (line,) = [line for line in out.splitlines() if line.startswith("backfill symbol=A")]
+    (line,) = [line for line in out.splitlines() if line.startswith(f"backfill symbol={SYMBOL} ")]
     assert "status=progress" in line and "attribution=ok" in line
     assert re.search(r"served_all=[1-9]", line) and re.search(r"recovered=[1-9]\d*", line)
-    assert {env.slot(i) for i in range(2, 12)} <= set(env.stored())
+    assert {env.slot(i) for i in range(2, 12)} <= set(env.stored(SYMBOL))
     assert source.page_requests >= 1
     assert not FORBIDDEN.search(line)
-
-
-def test_backfill_days_is_validated() -> None:
-    parser = cli._parser()
-    base = ["run", "--db", "x.db", "--symbol", "A"]
-    assert parser.parse_args(base).backfill_days == 30
-    for bad in ("0", "366"):
-        with pytest.raises(SystemExit) as info:
-            parser.parse_args([*base, "--backfill-days", bad])
-        assert info.value.code == 2
 
 
 def test_no_backfill_disables_it(
@@ -81,12 +75,13 @@ def test_no_backfill_disables_it(
         source.on_round = lambda n: signal.raise_signal(signal.SIGTERM) if n == 2 else None
 
     code, source, env = run_cli(
-        tmp_path, monkeypatch, "--no-backfill", source_setup=stop_on_second_round, stop_after_slice=False
+        tmp_path, monkeypatch, source_setup=stop_on_second_round, stop_after_slice=False, backfill_enabled=False
     )
     out = capsys.readouterr().out
-    assert code == 0 and "backfill" not in out
+    body = "\n".join(line for line in out.splitlines() if not line.startswith("config "))
+    assert code == 0 and "backfill" not in body
     assert source.page_requests == 0  # the source never saw a range
-    assert not {env.slot(i) for i in range(2, 12)} & set(env.stored())
+    assert not {env.slot(i) for i in range(2, 12)} & set(env.stored(SYMBOL))
 
 
 def test_a_backoff_is_reported_and_exit_stays_zero(
@@ -95,7 +90,7 @@ def test_a_backoff_is_reported_and_exit_stays_zero(
     def failing(source: HybridSource) -> None:
         source.page_error = SourceError("exchange down")
 
-    code, _, _ = run_cli(tmp_path, monkeypatch, "--backfill-days", "1", source_setup=failing)
+    code, _, _ = run_cli(tmp_path, monkeypatch, source_setup=failing, backfill_days=1)
     out = capsys.readouterr().out
     assert code == 0
     assert "status=backoff" in out

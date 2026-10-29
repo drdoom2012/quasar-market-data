@@ -120,6 +120,7 @@ class ReconcileInputs:
     venue: str
     timeframe: Timeframe
     publication_delay_ms: int
+    lag_threshold_ms: int
     default_limit: int
     max_limit: int
 
@@ -141,7 +142,7 @@ def reconcile_blocking(
 ) -> dict[str, SeriesReconcile]:
     """Read every series in one snapshot. ``history=False`` reads the bounds and the window only (the pre-start read):
     no series-wide statement runs, and the history fields of a stored series are ``None``."""
-    rule = ExpectationRule(publication_delay_ms=inputs.publication_delay_ms)
+    rule = ExpectationRule(inputs.publication_delay_ms, inputs.lag_threshold_ms)
     tf = inputs.timeframe.milliseconds
 
     def classify(facts: SeriesFacts | None, history: HistoryFacts | None) -> SeriesReconcile:

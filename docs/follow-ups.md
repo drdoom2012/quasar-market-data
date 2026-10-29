@@ -150,6 +150,7 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 
 ### F-18. Stored series versus the configured universe
 
+- **Status: closed by S20 (2026-10-29).** The API reads the universe from `config/quasar.toml`; `/health/ingest` has a separate `universe` block listing configured instruments with no stored series, and `GET /v1/instruments` lists the configured universe with the newest stored candle. The S17 fields are unchanged. Different files for the two processes are only visible by the hash in the start line. The original finding follows.
 - **What:** `/health/ingest` judges only series that exist in the database, so an instrument whose ingestion never
   started is invisible. Comparing the configured universe with the stored series needs a universe on the API side
   (S20, `/v1/instruments`); S17 deliberately adds no Collector-to-API channel.

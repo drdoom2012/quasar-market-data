@@ -1,24 +1,17 @@
 import pytest
 
 from quasar_market_data.api.rule import (
-    DEFAULT_RULE,
     MAX_LAG_THRESHOLD_MS,
     MAX_PUBLICATION_DELAY_MS,
     check_lag_threshold,
     check_publication_delay,
     checked_rule,
 )
-
-
-def test_defaults_are_inside_the_bounds() -> None:
-    assert DEFAULT_RULE.publication_delay_ms == 15_000
-    assert DEFAULT_RULE.lag_threshold_ms == 60_000
-    assert check_publication_delay(DEFAULT_RULE.publication_delay_ms) == 15_000
-    assert check_lag_threshold(DEFAULT_RULE.lag_threshold_ms) == 60_000
-    assert checked_rule(15_000, 60_000) == DEFAULT_RULE
+from quasar_market_data.domain.timed_coverage import ExpectationRule
 
 
 def test_the_bounds_themselves_are_accepted() -> None:
+    assert checked_rule(15_000, 60_000) == ExpectationRule(15_000, 60_000)
     assert MAX_PUBLICATION_DELAY_MS == 300_000
     assert MAX_LAG_THRESHOLD_MS == 900_000
     assert check_publication_delay(0) == 0

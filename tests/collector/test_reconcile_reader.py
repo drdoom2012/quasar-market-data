@@ -61,6 +61,7 @@ def make_inputs(*symbols: str, max_limit: int = 1000, delay: int = DELAY) -> Rec
         venue=VENUE,
         timeframe=TF,
         publication_delay_ms=delay,
+        lag_threshold_ms=60_000,
         default_limit=100,
         max_limit=max_limit,
     )

@@ -17,7 +17,7 @@ from quasar_market_data.api.candle_reader import CandlesPage
 from quasar_market_data.api.database import read_candles
 from quasar_market_data.api.params import CandlesRequest
 from quasar_market_data.storage.connection import open_writer
-from tests.api.seed import insert_candle, make_database, make_database_from_fixture
+from tests.api.seed import SAMPLE_RULE, SAMPLE_UNIVERSE, insert_candle, make_database, make_database_from_fixture
 
 TF = 300_000
 S = 1792643400000
@@ -29,6 +29,8 @@ def slot(n: int) -> int:
 
 
 def client_for(path: Path, **kwargs: Any) -> TestClient:
+    kwargs.setdefault("rule", SAMPLE_RULE)
+    kwargs.setdefault("universe", SAMPLE_UNIVERSE)
     return TestClient(create_app(path, **kwargs), raise_server_exceptions=False)
 
 
@@ -334,7 +336,7 @@ def test_response_is_compact_utf8_json(db: Path) -> None:
 
 
 def test_the_allow_header_of_another_route_is_echoed_whatever_its_case(db: Path) -> None:
-    app = create_app(db)
+    app = create_app(db, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE)
 
     @app.get("/two-methods")
     async def two_methods() -> None:

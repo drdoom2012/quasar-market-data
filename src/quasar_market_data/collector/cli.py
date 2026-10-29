@@ -23,10 +23,11 @@ oldest absent slot of the window, and after round one reads the database again t
   restarting re-fetches idempotently), even if everything after it was clean, and it outranks a fatal error;
 * ``1`` a fatal error with nothing in doubt, a failure before the loop started, or a failing writer ``close``
   after an otherwise clean stop;
-* ``2`` usage error.
+* ``2`` usage error, which includes a configuration file that cannot be read or is invalid.
 
-Between rounds ``run`` backfills holes of the stored history (S16; ``--no-backfill`` disables it, ``--backfill-days``
-bounds how far back it looks). Backfill never writes ``unavailable_candles`` and never says a history is complete: a
+``run [CONFIG]`` takes no other argument: everything it needs comes from the configuration file (default
+``config/quasar.toml``, S20), whose path, hash and database are the first line it prints. Between rounds ``run``
+backfills holes of the stored history (S16; ``collector.backfill`` enables it and bounds how far back it looks). Backfill never writes ``unavailable_candles`` and never says a history is complete: a
 slot the exchange does not serve stays missing. Exit codes are unchanged.
 """
 
@@ -71,13 +72,13 @@ from quasar_market_data.collector.reconcile_reader import (
     expected_target,
     reconcile,
 )
+from quasar_market_data.config.settings import DEFAULT_CONFIG_PATH, ConfigError, Settings, load_settings
 from quasar_market_data.domain.closed_candles import DEFAULT_PUBLICATION_DELAY_MS
 from quasar_market_data.domain.reconcile import (
     REACH_MARGIN_SLOTS,
     HistoryStatus,
     SeriesReconcile,
     WindowStatus,
-    steady_state_limit_needed,
 )
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import StorageError, open_writer
@@ -89,9 +90,6 @@ EXIT_FINDINGS = 3
 EXIT_FAILED = 1
 EXIT_UNKNOWN_OUTCOME = 4
 EXIT_INTERRUPTED = 130
-DEFAULT_CONCURRENCY = 4
-DEFAULT_REQUEST_INTERVAL_MS = 100
-DEFAULT_BACKFILL_DAYS = 30
 POST_CHECK_GRACE_MS = 2_000  # how long shutdown waits for a running post-check before interrupting it
 
 type OpenSource = Callable[[], Awaitable[KlineSource]]
@@ -115,20 +113,6 @@ def _delay(text: str) -> int:
     return value
 
 
-def _positive(text: str) -> int:
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be >= 1")
-    return value
-
-
-def _backfill_days(text: str) -> int:
-    value = int(text)
-    if not 1 <= value <= 365:
-        raise argparse.ArgumentTypeError("must be in 1..365")
-    return value
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=PROG)
     parser.add_argument("--version", action="version", version=f"{PROG} {version('quasar-market-data')}")
@@ -140,27 +124,16 @@ def _parser() -> argparse.ArgumentParser:
     fetch.add_argument(
         "--publication-delay-ms", type=_delay, default=DEFAULT_PUBLICATION_DELAY_MS, help="publication delay (ADR-0001)"
     )
-    run = commands.add_parser("run", help="collect the newest closed 5m candles of several symbols until stopped")
-    run.add_argument("--db", required=True, type=Path, help="SQLite database file (its directory must exist)")
-    run.add_argument("--symbol", required=True, action="append", help="CCXT unified symbol; repeat for more symbols")
-    run.add_argument("--limit", type=_limit, default=DEFAULT_LIMIT, help=f"rows to request (1..{MAX_LIMIT})")
-    run.add_argument(
-        "--publication-delay-ms", type=_delay, default=DEFAULT_PUBLICATION_DELAY_MS, help="publication delay (ADR-0001)"
-    )
-    run.add_argument("--max-concurrency", type=_positive, default=DEFAULT_CONCURRENCY, help="symbols collected at once")
-    run.add_argument(
-        "--min-request-interval-ms",
-        type=_delay,
-        default=DEFAULT_REQUEST_INTERVAL_MS,
-        help="minimum spacing of adapter calls (not of network requests)",
+    run = commands.add_parser(
+        "run", help="collect the newest closed 5m candles of the configured symbols until stopped"
     )
     run.add_argument(
-        "--backfill-days",
-        type=_backfill_days,
-        default=DEFAULT_BACKFILL_DAYS,
-        help="how far back idle-time backfill looks for holes (1..365 days)",
+        "config",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help=f"configuration file (default {DEFAULT_CONFIG_PATH})",
     )
-    run.add_argument("--no-backfill", action="store_true", help="do not backfill holes in the idle time between rounds")
     return parser
 
 
@@ -408,6 +381,7 @@ async def _reconcile_and_collect(
         venue=VENUE_BINANCE_USDM,
         timeframe=config.timeframe,
         publication_delay_ms=config.publication_delay_ms,
+        lag_threshold_ms=config.lag_threshold_ms,
         default_limit=config.limit,
         max_limit=MAX_LIMIT,
     )
@@ -513,22 +487,24 @@ async def _reconcile_and_collect(
     return code
 
 
-def _run_command(args: argparse.Namespace, open_source: OpenSource, clock: Clock, sleep: Sleep) -> int:
-    db: Path = args.db
-    if not db.parent.is_dir():
-        _error(f"error: database directory {db.parent} does not exist; nothing was written")
-        return EXIT_FAILED
+def _run_command(settings: Settings, open_source: OpenSource, clock: Clock, sleep: Sleep) -> int:
+    venue, collector = settings.venues[0], settings.collector
     config = LoopConfig(
-        symbols=tuple(args.symbol),
-        timeframe=Timeframe("5m"),
-        limit=args.limit,
-        publication_delay_ms=args.publication_delay_ms,
-        max_concurrency=args.max_concurrency,
+        symbols=venue.symbols,
+        timeframe=Timeframe(venue.timeframes[0]),
+        limit=collector.limit,
+        publication_delay_ms=settings.rule.publication_delay_ms,
+        lag_threshold_ms=settings.rule.lag_threshold_ms,
+        max_concurrency=collector.max_concurrency,
     )
     try:
-        _migrate(db, clock)
-        backfill = None if args.no_backfill else BackfillConfig(args.backfill_days)
-        return asyncio.run(_run_loop(config, db, args.min_request_interval_ms, open_source, clock, sleep, backfill))
+        _migrate(settings.database_path, clock)
+        backfill = BackfillConfig(collector.backfill.days) if collector.backfill.enabled else None
+        return asyncio.run(
+            _run_loop(
+                config, settings.database_path, collector.min_request_interval_ms, open_source, clock, sleep, backfill
+            )
+        )
     except (SourceError, StorageError, sqlite3.Error) as error:  # raised before the loop started
         _error(f"error: {error}")
         return EXIT_FAILED
@@ -581,15 +557,12 @@ def main(
         parser.print_usage()
         return 0
     if args.command == "run":
-        if len(set(args.symbol)) != len(args.symbol):
-            parser.error("--symbol must not be repeated with the same value")
-        needed = steady_state_limit_needed(args.publication_delay_ms, Timeframe("5m").milliseconds)
-        if needed > args.limit:
-            parser.error(
-                f"--publication-delay-ms {args.publication_delay_ms} needs --limit >= {needed}:"
-                " with fewer rows no round can reach the newest expected candle"
-            )
-        return _run_command(args, open_source, clock or SystemClock(), sleep)
+        try:
+            loaded = load_settings(args.config)
+        except ConfigError as error:
+            parser.error(f"config {args.config}: {error}")
+        print(loaded.start_line(), flush=True)
+        return _run_command(loaded.settings, open_source, clock or SystemClock(), sleep)
     try:
         return _fetch_once(args, open_source, clock or SystemClock())
     except KeyboardInterrupt:

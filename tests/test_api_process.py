@@ -24,6 +24,7 @@ import pytest
 
 from quasar_market_data.storage.connection import open_writer
 from tests.api.seed import insert_candle, make_database
+from tests.config_files import write_config
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="shuts the server down with SIGINT")
 
@@ -89,11 +90,12 @@ def launch(tmp_path: Path, db: Path, attempt: int) -> tuple["subprocess.Popen[by
     script = Path(sys.executable).parent / "quasar-api"
     assert script.exists(), f"the console script {script} is not installed in this environment"
     port = free_port()
+    config = write_config(tmp_path, database_path=str(db), host="127.0.0.1", port=port)
     log = tmp_path / f"api-{attempt}.log"
     env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
     with log.open("wb") as log_file:
         proc = subprocess.Popen(
-            [str(script), "serve", "--db", str(db), "--host", "127.0.0.1", "--port", str(port)],
+            [str(script), "serve", str(config)],
             stdout=subprocess.DEVNULL,
             stderr=log_file,
             env=env,

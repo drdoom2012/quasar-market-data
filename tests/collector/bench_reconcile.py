@@ -221,6 +221,7 @@ def _measure(profile: str, db: Path, symbols: int, rows_per_symbol: int) -> dict
         venue=VENUE,
         timeframe=TF,
         publication_delay_ms=10_000,
+        lag_threshold_ms=60_000,
         default_limit=100,
         max_limit=1000,
     )
