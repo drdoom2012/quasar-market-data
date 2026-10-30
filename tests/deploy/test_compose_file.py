@@ -72,6 +72,20 @@ def test_restart_limits_and_log_rotation(prod: dict[str, Any]) -> None:
     assert total <= GIB
 
 
+@pytest.mark.parametrize("service", SERVICES)
+def test_memory_limit_is_a_hard_cap_without_extra_swap(prod: dict[str, Any], service: str) -> None:
+    # Without memswap_limit Docker allows swap equal to mem_limit, which doubles the cap on the 2 GB VPS.
+    definition = prod["services"][service]
+    assert int(definition["memswap_limit"]) == int(definition["mem_limit"])
+
+
+def test_an_init_process_forwards_sigterm_to_the_collector_from_the_first_instant(prod: dict[str, Any]) -> None:
+    # Python as PID 1 ignores SIGTERM until it installs its handler (start-up, migration); docker-init forwards it.
+    # Not the api: uvicorn re-raises SIGTERM after shutdown, so under init a graceful stop would exit 143, not 0.
+    assert prod["services"]["collector"]["init"] is True
+    assert "init" not in prod["services"]["api"]
+
+
 def test_collector_stop_grace_outlasts_its_shutdown_grace(prod: dict[str, Any]) -> None:
     # Docker's default 10 s would SIGKILL the Collector inside its own 10 s shutdown grace plus the 2 s post-check.
     assert prod["services"]["collector"]["stop_grace_period"] == "30s"

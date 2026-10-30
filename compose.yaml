@@ -46,10 +46,14 @@ services:
     # symbols (ETH, BNB, ADA and LINK never backfilled, docs/follow-ups.md F-22), steady rounds, and 40 worst-case
     # /v1/indicators requests, 32 of them concurrent. memory.peak includes page cache. Re-measure on the VPS.
     mem_limit: 384m
+    memswap_limit: 384m # equal to mem_limit: no swap on top of the limit
+    # docker-init as PID 1 forwards SIGTERM even before the Collector installs its handler (start-up, migration).
+    init: true
     # Longer than the Collector's own shutdown grace (10 s) plus the post-check grace (2 s) and closing the writer;
     # Docker's default 10 s would SIGKILL it mid-shutdown on every stop, down or upgrade.
     stop_grace_period: 30s
     logging: *logging
+    # PID 1 is docker-init, whose command line carries the Collector's and which exits with it.
     # Proves only that the main process exists. A dead main process already stops the container (and the restart
     # policy starts it again), and Docker does not restart an unhealthy container. A stuck or idle Collector stays
     # healthy: watch /health/ingest and the round lines in the log for ingestion (spec 5.4, F-16).
@@ -69,4 +73,7 @@ services:
       - quasar-data:/app/data
       - ./config/quasar.compose.toml:/app/config/quasar.compose.toml:ro
     mem_limit: 576m
+    memswap_limit: 576m
+    # No init: uvicorn re-raises SIGTERM after its graceful shutdown, which exits 143 when it is not PID 1; as PID 1
+    # it exits 0, so the exit code still tells a graceful stop from a kill. The API is read-only.
     logging: *logging
