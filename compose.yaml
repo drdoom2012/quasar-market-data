@@ -1,0 +1,72 @@
+# Production Compose project (S21). Two services share one SQLite WAL volume; the Collector is the only writer.
+#
+# Deploy on the VPS (images come from GHCR; nothing is built there):
+#   docker compose pull && docker compose up -d
+# Reach the API from your machine over SSH (the API has no published port and no route out):
+#   ssh -L 8000:172.31.250.10:8000 <vps>     then   curl localhost:8000/health
+# Local build instead of GHCR images:  docker compose -f compose.yaml -f compose.build.yaml up -d
+#
+# The volume stays writable for both services: a WAL reader needs the shared-memory file. The API is read-only at
+# the SQLite connection (mode=ro plus query_only), not by the mount (INV-014).
+
+name: quasar
+
+networks:
+  # No egress: Docker installs DROP rules for traffic leaving or entering this bridge from outside its subnet.
+  # A published port does not work on an internal network, so the host reaches the API by its fixed address.
+  internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+  egress: {}
+
+volumes:
+  quasar-data: {}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  collector:
+    image: ghcr.io/drdoom2012/quasar-market-data-collector:v0.1.0
+    restart: unless-stopped
+    networks:
+      internal: {}
+      egress: {}
+    volumes:
+      - quasar-data:/app/data
+      - ./config/quasar.compose.toml:/app/config/quasar.compose.toml:ro
+    # Memory limits: about twice the measured peak, rounded up to 64 MiB (plan Task 3 step 5). Measured 2026-10-30
+    # on OrbStack engine 29.8.2, linux/amd64 emulated on arm64, cgroup v2, one run: cgroup memory.peak 174 MiB
+    # (collector) and 260 MiB (api); docker stats sampled max 135 and 217 MiB. Phases: backfill of 6 of the 10
+    # symbols (ETH, BNB, ADA and LINK never backfilled, docs/follow-ups.md F-22), steady rounds, and 40 worst-case
+    # /v1/indicators requests, 32 of them concurrent. memory.peak includes page cache. Re-measure on the VPS.
+    mem_limit: 384m
+    # Longer than the Collector's own shutdown grace (10 s) plus the post-check grace (2 s) and closing the writer;
+    # Docker's default 10 s would SIGKILL it mid-shutdown on every stop, down or upgrade.
+    stop_grace_period: 30s
+    logging: *logging
+    # Proves only that the main process exists. A dead main process already stops the container (and the restart
+    # policy starts it again), and Docker does not restart an unhealthy container. A stuck or idle Collector stays
+    # healthy: watch /health/ingest and the round lines in the log for ingestion (spec 5.4, F-16).
+    healthcheck:
+      test: ["CMD", "grep", "-qa", "quasar-collector", "/proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  api:
+    image: ghcr.io/drdoom2012/quasar-market-data-api:v0.1.0
+    restart: unless-stopped
+    networks:
+      internal:
+        ipv4_address: 172.31.250.10
+    volumes:
+      - quasar-data:/app/data
+      - ./config/quasar.compose.toml:/app/config/quasar.compose.toml:ro
+    mem_limit: 576m
+    logging: *logging

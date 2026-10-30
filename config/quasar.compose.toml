@@ -1,0 +1,44 @@
+# Container copy of config/quasar.toml, read by both Compose services at /app/config/quasar.compose.toml (S21).
+# It must stay identical to quasar.toml except [api].host (tests/config/test_compose_config.py guards this).
+# Inside the api container the only non-loopback interface is the internal Compose network, so 0.0.0.0 binds
+# the API to that network and nothing else.
+#
+# Quasar Market Data configuration, read by both quasar-collector and quasar-api.
+# Relative paths resolve against the directory of THIS file, not the working directory.
+# Changes take effect only after a restart of each process.
+
+[database]
+path = "../data/quasar.db"
+
+[rule]
+publication_delay_ms = 15000
+lag_threshold_ms = 60000
+
+[[venues]]
+id = "binance-usdm"
+timeframes = ["5m"]
+symbols = [
+    "BTC/USDT:USDT",
+    "ETH/USDT:USDT",
+    "SOL/USDT:USDT",
+    "BNB/USDT:USDT",
+    "XRP/USDT:USDT",
+    "DOGE/USDT:USDT",
+    "ADA/USDT:USDT",
+    "AVAX/USDT:USDT",
+    "LINK/USDT:USDT",
+    "LTC/USDT:USDT",
+]
+
+[collector]
+limit = 100
+max_concurrency = 4
+min_request_interval_ms = 100
+
+[collector.backfill]
+enabled = true
+days = 30
+
+[api]
+host = "0.0.0.0"
+port = 8000

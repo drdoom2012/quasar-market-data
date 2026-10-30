@@ -128,6 +128,9 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
   endpoint, heartbeat or status table; a stopped Collector shows only as `stale` series in `/health/ingest`, which
   cannot name the cause. A heartbeat needs a schema change (the user's decision). Process supervision (restart policy,
   container health) belongs to S21.
+- **S21 (2026-10-29):** `compose.yaml` adds `restart: unless-stopped` and a healthcheck that only checks that the
+  Collector's main process exists. Neither is a health signal of ingestion: a dead main process already stops the
+  container, Docker does not restart an unhealthy container, and a stuck or idle Collector stays `healthy`. Still open.
 
 ### F-17. The `/health/ingest` read cost: accepted at 600 series, the rest unmeasured
 
@@ -178,3 +181,12 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 - **Where:** `tests/api/bench_indicators.py` (`make bench-indicators`).
 - **Measured (S19, README):** the worst-case request (2016 slots, ten items over six indicators, read range 3516 slots, body about 2.4 MB) in process, and against a separate `quasar-api serve` process at 1, 2, 4 and 8 concurrent requests, with the body build and encoding in the thread pool (J7, implemented in S19): request latency, `GET /health` latency probed every 10 ms (and probes above 100 ms), each server's CPU time and its lifetime peak RSS (one server per level, reaped with `os.wait4`). The S18 on-event-loop figure (27-41 ms of body build) is kept in the README only as a reference; the benchmark has no switch to turn J7 off, so it does not measure the gain.
 - **Not measured:** memory of one request (the peak covers the whole life of the server, start-up included), a cold disk, other machines or platforms, more than 8 concurrent requests, several series or symbols requested at once, a long-running server (leaks, fragmentation). The `/health` probe shares a Python process with the client that decodes the 2.4 MB bodies, so its latency is an upper estimate of the server's. There is no pass/fail criterion and no rate limit (contract 5.6, accepted risk).
+
+## From S21 (Docker Compose deployment)
+
+### F-22. Four symbols never backfilled in the containerized memory run, and the memory limits are measured once
+
+- **Where:** the S21 memory measurement (plan Task 3 step 5, comment at `mem_limit` in `compose.yaml`).
+- **What (observed once, 2026-10-29/30, OrbStack engine 29.8.2, linux/amd64 emulated on arm64):** BTC, SOL, DOGE, LTC, XRP and AVAX each backfilled to 30 days (8867 rows) and then logged `status=no_targets`; ETH, BNB, ADA and LINK never logged a `backfill symbol=` line and kept only the rows of the live rounds. `/health/ingest` reported all 10 series `current`, so the live path was not affected. **Cause (found 2026-10-30, not fixed):** `Backfiller._run` (`src/quasar_market_data/collector/backfill.py:151-159`) computes `index = (self._cursor + step) % n` but reassigns `self._cursor = index + 1` inside the loop, so the stride grows (0, 2, 5, 9, 4, ...) and with 10 symbols indices 1, 3, 6 and 8 are never visited, in any window; only 1, 2, 4 and 8 symbols avoid it. Reproduced by a simulation of the arithmetic, by a native arm64 run without Docker (same order: BTC SOL DOGE LTC XRP BTC AVAX DOGE XRP) and on the stock-engine VM. The S16 tests use at most two symbols, where it does not show. The live rounds and `/health/ingest` are unaffected, so the failure is silent: the four symbols never get history or interior holes repaired. The fix is a `src/` change and needs approval.
+- **Memory limits:** `mem_limit` 384m (collector) and 576m (api) are about twice the cgroup `memory.peak` of that one emulated run (174 and 260 MiB), which includes page cache and did not cover the backfill of the four symbols above. Re-measure on the VPS after the first deployment.
+- **H1 condition 7 on the VPS:** the stock-engine isolation was proven on a local VM (design Appendix B.1). The VPS run (B.2) is part of the release check before the first `docker compose pull` (plan Task 6 step 7).

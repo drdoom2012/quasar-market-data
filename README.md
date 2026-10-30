@@ -16,8 +16,10 @@ Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned in `.python-ver
 | `make bench-indicators` | the worst-case `GET /v1/indicators` request on a generated database, in process and against a served process with 1, 2, 4 and 8 concurrent requests and a `/health` probe (informative, no criterion; not part of `make check`) |
 | `make bench-health` | `/health/ingest` read benchmark on a generated database (`PROFILE=smoke`, `medium` or `target`; not part of `make check`; S17 HARD STOP 2) |
 | `make live` | live check of `fetch-once` against Binance USDT-M public endpoints (uses the network; not part of `make check`) |
+| `make images` | build the `collector` and `api` images for `linux/amd64` with local tags (needs Docker; not part of `make check`) |
+| `make compose-test` | `make images`, then the `compose`-marked tests: images, the Compose file, and the isolation test against the running production project (needs a stock Linux Docker Engine, not OrbStack or Docker Desktop; not part of `make check`) |
 
-CI is configured to run `make check` on pull requests and pushes to `main` (not yet observed running). Making it an authoritative gate also needs a required status check on `main`, which is a repository setting not made here.
+CI is configured to run `make check` on pull requests and pushes to `main` (not yet observed running). Making it an authoritative gate also needs a required status check on `main`, which is a repository setting not made here. `images.yml` (S21) runs `make compose-test` on pull requests and pushes, and pushes the images to GHCR on pushes only (not yet observed running).
 
 ## Local hook
 
@@ -142,6 +144,32 @@ Stopping: no new attempt starts, and attempts already running get a 10 s grace t
 | `4` | a write's outcome was unknown or cancelled at some point (the batch may or may not be stored; start the command again, writes are idempotent), even if later rounds were clean; takes priority over `1` |
 | `1` | a fatal error with nothing in doubt, a failure before the loop started (directory, schema, source), or a failing writer close after an otherwise clean stop |
 | `2` | usage error |
+
+## Deployment (S21)
+
+Two images, `ghcr.io/drdoom2012/quasar-market-data-collector` and `ghcr.io/drdoom2012/quasar-market-data-api` (`linux/amd64`, user `10001`), run as two services of `compose.yaml`. They share the volume `quasar-data` (mounted at `/app/data`, writable for both, because a WAL reader needs the shared-memory file) and read `config/quasar.compose.toml`, mounted read-only at `/app/config/`. That file must stay identical to `config/quasar.toml` except `[api].host = "0.0.0.0"` (`tests/config/test_compose_config.py`). The API stays read-only at the SQLite connection (INV-014); the Collector is the only writer.
+
+**Network.** The `api` service is attached only to the network `internal` (`internal: true`, subnet `172.31.250.0/24`, fixed address `172.31.250.10`): it has no route out and no published port (a published port does not work on an internal network). Only the VPS itself reaches it; from your machine use an SSH tunnel:
+
+```sh
+ssh -L 8000:172.31.250.10:8000 <vps>     # then: curl localhost:8000/health
+```
+
+The `collector` is on `internal` and on `egress` (it needs the exchange). `make compose-test` checks this against the running project (INV-069); it proves network isolation of the deployment, not that API handlers never try to fetch exchange data (INV-013).
+
+**Release rule.** `compose.yaml` pins `v<project.version>` (today `v0.1.0`). That tag exists in GHCR only after the git tag `v<project.version>` was pushed and its `images.yml` run succeeded; a push to `main` publishes only `main` and `sha-<commit>`. Before the first `docker compose pull`, check: both `images.yml` jobs green for the tag (`gh run list --workflow images.yml`), `docker buildx imagetools inspect ghcr.io/drdoom2012/quasar-market-data-<name>:v<version>` lists `linux/amd64` for both images, and `git show v<version>:compose.yaml` pins that tag. The H1 network checks on the VPS (S21 design Appendix B.2) also run before the first deployment.
+
+**First start on the VPS.** Copy `compose.yaml` and `config/quasar.compose.toml` from the tagged commit (keeping `config/` next to `compose.yaml`), `docker login ghcr.io` with a read-only token if the packages are private, then `docker compose pull && docker compose up -d`. **Upgrade:** bump `project.version` and both image tags in `compose.yaml` in one commit, push it, tag that commit `v<version>` and push the tag, wait for the green `images.yml` run, then `docker compose pull && docker compose up -d` on the VPS. Nothing is built on the VPS.
+
+**Health.** Both services restart unless stopped. The Collector's healthcheck only checks that its main process exists: a dead main process already stops the container (and the restart policy starts it again), Docker does not restart an unhealthy container, and a stuck or idle Collector stays `healthy`. Ingestion shows in `/health/ingest` (series go `due`, then `stale`) and in the Collector's `round` lines (`docker compose logs collector`); neither names the cause (F-16). Logs rotate (`json-file`, 10 MB x 3 per service); memory limits are set in `compose.yaml` with the measurement they come from.
+
+**Backup.** The database is live WAL: copy it with SQLite's backup API, never by copying files while the Collector runs (the main file and its `-wal` file cannot be copied atomically). The images have no `sqlite3` command-line tool:
+
+```bash
+docker compose exec collector python -c "import sqlite3; s = sqlite3.connect('/app/data/quasar.db'); d = sqlite3.connect('/app/data/backup.db'); s.backup(d); d.close(); s.close()"
+docker compose cp collector:/app/data/backup.db ./quasar-backup.db
+docker compose exec collector rm /app/data/backup.db
+```
 
 ## Tool scope
 

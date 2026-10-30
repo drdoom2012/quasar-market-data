@@ -1,0 +1,15 @@
+# Local build override (S21): swaps the GHCR images for images built from this checkout and changes nothing else
+# (tests/deploy/test_compose_file.py::test_build_override_changes_only_the_image).
+services:
+  collector:
+    image: quasar-market-data-collector:local
+    build:
+      context: .
+      target: collector
+      platforms: [linux/amd64]
+  api:
+    image: quasar-market-data-api:local
+    build:
+      context: .
+      target: api
+      platforms: [linux/amd64]

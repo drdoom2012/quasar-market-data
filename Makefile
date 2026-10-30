@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck imports check live bench bench-health bench-indicators
+.PHONY: test lint typecheck imports check live bench bench-health bench-indicators images compose-test
 
 test:
 	uv run pytest
@@ -32,3 +32,13 @@ bench-health:
 # The largest /v1/indicators request on a generated database in a fresh temp dir; informative, not part of `check`.
 bench-indicators:
 	uv run python -m tests.api.bench_indicators
+
+# Builds the collector and api images (linux/amd64) with local tags; needs Docker, not part of `check`.
+images:
+	docker build --platform linux/amd64 --target collector -t quasar-market-data-collector:local .
+	docker build --platform linux/amd64 --target api -t quasar-market-data-api:local .
+
+# Images, the Compose file and the isolation test against the running production project (S21); not part of `check`.
+# The isolation tests need a stock Linux Docker Engine (not OrbStack or Docker Desktop).
+compose-test: images
+	uv run pytest -m compose tests/deploy -v

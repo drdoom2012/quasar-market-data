@@ -1,0 +1,21 @@
+# Keep local state, caches and non-runtime files out of the build context (S21).
+# README.md stays: pyproject.toml names it as the package readme and the build needs it.
+.git
+.github
+.venv
+data
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.import_linter_cache
+*.egg-info
+dist
+.superpowers
+.claude
+spikes
+tests
+docs
+scripts
+config

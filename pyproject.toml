@@ -34,8 +34,11 @@ packages = ["src/quasar_market_data"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers -m 'not live'"
-markers = ["live: tests that hit a live exchange (excluded by default)"]
+addopts = "--strict-markers -m 'not live and not compose'"
+markers = [
+    "live: tests that hit a live exchange (excluded by default)",
+    "compose: tests that need a Docker engine (excluded by default)",
+]
 
 [tool.ruff]
 line-length = 120
