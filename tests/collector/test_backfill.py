@@ -17,6 +17,8 @@ from quasar_market_data.collector.backfill import (
     PAGE_BUDGET_MS,
     RESCAN_CYCLES,
     UNPROVEN_RETRY_CYCLES,
+    BackfillConfig,
+    Backfiller,
     SliceReport,
     SliceStatus,
 )
@@ -444,6 +446,45 @@ def test_no_targets_means_only_that_the_reader_found_no_hole(tmp_path: Path) -> 
         assert env.source.requests == []
 
     go(tmp_path, body)
+
+
+TEN = tuple(f"S{i}" for i in range(10))  # ten symbols, like the shipped config: the old stride never visited 1, 3, 6, 8
+
+
+def _no_holes(env: Env) -> None:
+    for symbol in env.symbols:
+        env.store([env.slot(i) for i in range(5)], symbol=symbol)
+
+
+def test_one_window_visits_every_symbol_once_in_order(tmp_path: Path) -> None:
+    async def body(env: Env) -> None:
+        _no_holes(env)
+        await env.backfiller().run_idle(env.window())
+        assert [s.symbol for s in env.slices] == list(TEN)
+
+    go(tmp_path, body, symbols=TEN)
+
+
+def test_the_next_window_resumes_after_the_last_visited_symbol(tmp_path: Path) -> None:
+    async def body(env: Env) -> None:
+        _no_holes(env)
+
+        def stop_after_three(report: SliceReport) -> None:
+            env.slices.append(report)
+            if len(env.slices) == 3:
+                env.stop.set()
+
+        bf = Backfiller(
+            BackfillConfig(env.days), env.loop_config, env.db, env.t, env.t.sleep, stop_after_three, lambda c, o: None
+        )
+        await bf.run_idle(env.window())
+        assert [s.symbol for s in env.slices] == ["S0", "S1", "S2"]
+        env.stop.clear()
+        env.slices.clear()
+        await bf.run_idle(env.window())
+        assert [s.symbol for s in env.slices] == ["S3", "S4", "S5"]
+
+    go(tmp_path, body, symbols=TEN)
 
 
 def _many_targets(env: Env) -> None:

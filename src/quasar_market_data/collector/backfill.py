@@ -148,10 +148,11 @@ class Backfiller:
 
     async def _run(self, window: IdleWindow) -> None:
         symbols = self._loop.symbols
+        first = self._cursor  # the steps count from where this window started, not from the moving cursor
         for step in range(len(symbols)):
             if not self._room(window):
                 return
-            index = (self._cursor + step) % len(symbols)
+            index = (first + step) % len(symbols)
             symbol = symbols[index]
             if self._backoff_until.get(symbol, 0) >= self._cycle:
                 continue
