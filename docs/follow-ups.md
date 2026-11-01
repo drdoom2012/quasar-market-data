@@ -165,6 +165,16 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 - **What:** each failed once in about eight full runs during S17 with `nothing is waiting: the simulation is stuck`,
   and passed on every rerun, alone and in the full suite, with and without the S17 changes. They take about 7 s of
   real time each. Not investigated; the pre-commit hook runs the full suite, so a rerun is the workaround.
+- **Status (2026-11-01): fixed.** The GitHub workflow (Linux) failed on `test_a_slow_backfill_does_not_skip_a_cycle`,
+  `test_a_stalled_source_does_not_delay_a_round`, `test_unknown_write_outcome_during_backfill_marks_the_symbol_uncertain`
+  and `test_cli_backfill.py::test_no_backfill_disables_it` (exit `4` instead of `0`); all four failed every time in a
+  clean `python:3.12-bookworm` container, before and after the S21 commits. **Cause:** `ManualTime.settle()` granted a
+  fixed number of event-loop hops, but the code under test reads and writes SQLite on worker threads
+  (`asyncio.to_thread`, `AsyncCandleWriter`). On a slower thread hand-off the simulation saw "nothing is waiting", or
+  simulated time ran past the shutdown grace while a write was still in flight (the exit `4`). **Fix:** `settle()`
+  also waits, in real time, for every job handed to an executor (`tests/collector/manual_time.py`; a test that blocks a
+  thread on purpose passes `wait_for_threads=False`). Pinned by `tests/collector/test_manual_time.py`; the suite
+  passes in the Linux container and on macOS, six repeated Linux runs of the affected files were green.
 
 ## From S18 (`GET /v1/indicators`)
 

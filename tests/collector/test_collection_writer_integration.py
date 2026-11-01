@@ -55,7 +55,7 @@ def config() -> LoopConfig:
 
 def test_a_cancelled_blocked_write_stays_uncertain_and_close_waits_for_it() -> None:
     async def scenario() -> None:
-        t = ManualTime()
+        t = ManualTime(wait_for_threads=False)  # the worker thread is blocked on purpose; settle must not wait for it
         source = ScriptedSource(t)
         blocking = BlockingWriter()
         writer = AsyncCandleWriter(ThreadPoolExecutor(max_workers=1), cast(CandleWriter, blocking))

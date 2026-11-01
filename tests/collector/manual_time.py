@@ -3,14 +3,46 @@
 ``ManualTime`` is both the ``Clock`` and the ``Sleep`` of a test. ``sleep(ms)`` registers a waiter and awaits
 it; ``advance`` moves time and wakes the waiters whose deadline has passed. Tests that need concurrent waiters
 use this; ``fetch_fakes.advancing_sleep`` is only for tests with a single waiter.
+
+``settle`` also waits, in real time, for every job handed to a worker thread (``asyncio.to_thread`` and
+``loop.run_in_executor``: the SQLite reads and writes of the code under test). Without that, simulated time runs
+ahead of work that needs real time, and a slower machine sees "nothing is waiting" or an expired grace (F-19).
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 NS_PER_MS = 1_000_000
 YIELDS = 100  # event-loop hops granted after every wake-up so awakened tasks run until they block again
 MAX_WAIT_YIELDS = 1_000
+
+
+class _ThreadJobs:
+    """The jobs a loop has handed to an executor and that have not completed."""
+
+    def __init__(self) -> None:
+        self.pending = 0
+
+
+def _thread_jobs(loop: asyncio.AbstractEventLoop) -> _ThreadJobs:
+    """Count the executor jobs of ``loop`` from now on (once per loop; a job started before the first call is not counted)."""
+    existing: _ThreadJobs | None = getattr(loop, "_manual_time_jobs", None)
+    if existing is not None:
+        return existing
+    jobs = _ThreadJobs()
+    original: Callable[..., Any] = loop.run_in_executor
+
+    def run_in_executor(executor: Any, func: Callable[..., Any], *args: Any) -> "asyncio.Future[Any]":
+        future: asyncio.Future[Any] = original(executor, func, *args)
+        jobs.pending += 1
+        future.add_done_callback(lambda _: setattr(jobs, "pending", jobs.pending - 1))
+        return future
+
+    loop.run_in_executor = run_in_executor  # type: ignore[assignment]
+    loop._manual_time_jobs = jobs  # type: ignore[attr-defined]
+    return jobs
 
 
 @dataclass(order=True)
@@ -21,11 +53,22 @@ class _Waiter:
 
 
 class ManualTime:
-    def __init__(self, wall_start_ms: int = 1_792_677_036_000, mono_start_ns: int = 18_053_000_000_000) -> None:
+    def __init__(
+        self,
+        wall_start_ms: int = 1_792_677_036_000,
+        mono_start_ns: int = 18_053_000_000_000,
+        *,
+        wait_for_threads: bool = True,
+    ) -> None:
+        self._wait_for_threads = wait_for_threads  # False: a test that blocks a worker thread on purpose
         self._mono_ns = mono_start_ns
         self._wall_ms = wall_start_ms
         self._waiters: list[_Waiter] = []
         self._seq = 0
+        try:
+            _thread_jobs(asyncio.get_running_loop())  # count worker-thread jobs from the start, when a loop runs
+        except RuntimeError:
+            pass  # created outside a loop: counting starts at the first sleep or settle
 
     def monotonic_ns(self) -> int:
         return self._mono_ns
@@ -39,6 +82,7 @@ class ManualTime:
         return sorted(w.deadline_ns for w in self._waiters)
 
     async def sleep(self, ms: int) -> None:
+        _thread_jobs(asyncio.get_running_loop())  # from the first sleep on, settle can see worker-thread jobs
         waiter = _Waiter(self._mono_ns + ms * NS_PER_MS, self._seq, asyncio.get_running_loop().create_future())
         self._seq += 1
         self._waiters.append(waiter)
@@ -49,8 +93,13 @@ class ManualTime:
                 self._waiters.remove(waiter)
 
     async def settle(self) -> None:
-        for _ in range(YIELDS):
-            await asyncio.sleep(0)
+        jobs = _thread_jobs(asyncio.get_running_loop())
+        while True:
+            for _ in range(YIELDS):
+                await asyncio.sleep(0)
+            if jobs.pending == 0 or not self._wait_for_threads:
+                return
+            await asyncio.sleep(0.001)  # real time: a worker thread is still running
 
     async def until_waiting(self, count: int) -> None:
         for _ in range(MAX_WAIT_YIELDS):
