@@ -15,6 +15,11 @@ from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown
 from quasar_market_data.collector.clock import Clock, Sleep
 from quasar_market_data.collector.fetch_once import MAX_LIMIT, CandleSink, FetchOnceConfig, fetch_once
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
+from quasar_market_data.collector.shared_server_time import (
+    DEFAULT_REFRESH_AFTER_MS,
+    ServerTimeProvider,
+    SharedServerTime,
+)
 from quasar_market_data.domain.closed_candles import DEFAULT_PUBLICATION_DELAY_MS
 from quasar_market_data.domain.reconcile import attempt_limit, clock_lead_slots
 from quasar_market_data.domain.schedule import cycles_skipped, newest_expected_open_ms, next_wake_ms
@@ -116,6 +121,8 @@ async def collect_symbol(
     stop: asyncio.Event,
     limit_for_attempt: Callable[[], int] | None = None,
     observe_forming: Callable[[int, int], None] | None = None,
+    *,
+    server_time: ServerTimeProvider | None = None,
 ) -> SymbolResult:
     attempts = 0
     inserted = 0
@@ -132,7 +139,7 @@ async def collect_symbol(
         attempts += 1
         try:
             attempt_config = config if limit_for_attempt is None else replace(config, limit=limit_for_attempt())
-            report = await fetch_once(source, sink, attempt_config, clock)
+            report = await fetch_once(source, sink, attempt_config, clock, server_time=server_time)
         except (SourceError, KlineParseError, CandleWriteOutcomeUnknown) as error:
             problem = str(error) or type(error).__name__
             if target_open_ms is None:
@@ -283,6 +290,8 @@ async def run_collection_loop(
             raise ValueError(f"first_round_wanted_from[{symbol!r}] {oldest} is not aligned to the timeframe")
     watches = {symbol: _WriteWatch(sink) for symbol in config.symbols}  # one per symbol for the whole run
     semaphore = asyncio.Semaphore(config.max_concurrency)
+    refresh_after_ms = min(DEFAULT_REFRESH_AFTER_MS, config.time_trust.max_age_ms // 2)  # far from the age gate
+    server_time = SharedServerTime(clock, config.time_trust, refresh_after_ms) if refresh_after_ms >= 1 else None
     fatal: list[Exception] = []
     round_lead: int | None = None  # reset at every round start; updated by every successful fetch of the round
 
@@ -325,6 +334,7 @@ async def run_collection_loop(
                     stop,
                     limit_for_attempt,
                     observe,
+                    server_time=server_time,
                 )
             except Exception as error:  # noqa: BLE001 - only fatal classes reach here; CancelledError is not an Exception
                 fatal.append(error)

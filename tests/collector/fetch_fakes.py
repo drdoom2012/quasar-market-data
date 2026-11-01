@@ -55,6 +55,10 @@ class FakeClock:
         self._mono_ns += ms * NS_PER_MS
         self._wall_ms += ms
 
+    def advance_wall(self, ms: int) -> None:
+        """Move only the wall clock: a clock step against the monotonic one."""
+        self._wall_ms += ms
+
     def monotonic_ns(self) -> int:
         return self._mono_ns
 
@@ -132,6 +136,25 @@ class FakeSource:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class FakeProvider:
+    """A ``ServerTimeProvider`` that answers from the clock: ``None`` for the first ``none_first`` calls, then a live
+    observation (the server time equals the wall clock)."""
+
+    def __init__(self, clock: FakeClock, none_first: int = 0) -> None:
+        self.clock = clock
+        self.none_first = none_first
+        self.calls = 0
+        self.sources: list[object] = []
+
+    async def observation(self, source: object) -> ServerTimeObservation | None:
+        self.calls += 1
+        self.sources.append(source)
+        if self.calls <= self.none_first:
+            return None
+        mono, wall = self.clock.monotonic_ns(), self.clock.wall_ms()
+        return ServerTimeObservation(wall, mono, mono, wall)
 
 
 class AdvancingSleep:

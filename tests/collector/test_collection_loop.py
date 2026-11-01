@@ -918,10 +918,100 @@ def test_600_symbol_first_round_keeps_the_spacing_and_the_concurrency_bound() ->
         assert gaps and min(gaps) >= 100 * NS_PER_MS
         assert peak == 4  # the semaphore, not the limiter, bounds the attempts in flight
         assert sum(1 for _, limit in h.source.limits if limit > 100) == 5
-        assert h.t.monotonic_ns() - start_ns >= (2 * 600 - 1) * 100 * NS_PER_MS
+        grants = 600 + h.source.time_calls  # one klines call per symbol plus the shared server-time refreshes
+        assert 1 <= h.source.time_calls <= 16  # a refresh about every 5 s of a round of about 60 s
+        assert h.t.monotonic_ns() - start_ns >= (grants - 1) * 100 * NS_PER_MS
         h.stop.set()
         await h.t.advance(0)
         h.task.cancel()
         await asyncio.gather(h.task, return_exceptions=True)
+
+    run(scenario)
+
+
+# --- one server-time observation per refresh age, not per symbol (plan 2026-11-01-shared-server-time) ---------
+
+
+def test_a_round_of_many_symbols_observes_server_time_once() -> None:
+    async def scenario() -> None:
+        h = Harness(tuple(f"S{i}" for i in range(20)), max_concurrency=4)
+        h.start()
+        await h.t.settle()
+        assert len(h.rounds) == 1
+        assert all(r.outcome is SymbolOutcome.COLLECTED for r in h.rounds[0].results)
+        assert h.source.time_calls == 1
+        h.stop.set()
+        await h.task
+
+    run(scenario)
+
+
+def test_a_later_round_observes_again() -> None:
+    async def scenario() -> None:
+        h = Harness(("A", "B"))
+        h.start()
+        await h.until_rounds(1)
+        await h.advance_to_next_boundary()
+        await h.until_rounds(2)
+        assert h.source.time_calls == 2  # 300 s later the observation is past the refresh age
+        h.stop.set()
+        await h.task
+
+    run(scenario)
+
+
+def test_a_rejected_observation_is_not_reused_by_the_retry() -> None:
+    async def scenario() -> None:
+        h = Harness(("A",))
+        h.source.time_rtts = [2_500]  # above max_rtt_ms (2000): the first observation is rejected by the gate
+        h.start()
+        await h.t.settle()
+        await h.t.advance(2_500)
+        await h.t.settle()
+        await h.t.advance(1_000)  # the retry wait
+        await h.until_rounds(1)
+        result = h.rounds[0].results[0]
+        assert result.outcome is SymbolOutcome.COLLECTED and result.attempts == 2
+        assert h.source.time_calls == 2  # the retry refreshed instead of reusing the rejected observation
+        h.stop.set()
+        await h.task
+
+    run(scenario)
+
+
+def test_a_failing_time_endpoint_fails_closed_once_the_observation_is_too_old() -> None:
+    async def scenario() -> None:
+        h = Harness(("A",), retry=RetryPolicy(max_attempts=1))
+        h.start()
+        await h.until_rounds(1)
+        assert h.rounds[0].results[0].outcome is SymbolOutcome.COLLECTED
+        written = len(h.sink.calls)
+        h.source.time_error = SourceError("down")
+        await h.advance_to_next_boundary()
+        await h.until_rounds(2)
+        result = h.rounds[1].results[0]
+        assert result.outcome is SymbolOutcome.GAVE_UP
+        assert result.last_problem == "time untrusted: AGE_TOO_LARGE"  # the old observation, judged by its age
+        assert len(h.sink.calls) == written  # nothing was stored on the strength of it
+        h.stop.set()
+        await h.task
+
+    run(scenario)
+
+
+def test_a_symbol_served_late_in_a_long_round_gets_a_fresh_observation_not_an_old_one() -> None:
+    async def scenario() -> None:
+        h = Harness(("A", "B", "C"), max_concurrency=1)
+        h.source.delays = [4_000, 4_000, 4_000]  # each klines call takes 4 s: B starts 4 s after A, C 8 s after A
+        h.start()
+        await h.t.settle()
+        for _ in range(3):
+            await h.t.advance(4_000)
+            await h.t.settle()
+        await h.until_rounds(1)
+        assert all(r.outcome is SymbolOutcome.COLLECTED for r in h.rounds[0].results)
+        assert h.source.time_calls == 2  # A and B share one (4 s old); C starts at 8 s, past the 5 s refresh age
+        h.stop.set()
+        await h.task
 
     run(scenario)

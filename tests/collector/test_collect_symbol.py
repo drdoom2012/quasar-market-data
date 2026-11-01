@@ -28,6 +28,7 @@ from tests.collector.fetch_fakes import (
     AdvancingSleep,
     ControlledSink,
     FakeClock,
+    FakeProvider,
     FakeSource,
     closed_rows,
     forming_rows,
@@ -372,3 +373,29 @@ def test_retry_policy_validation_and_delays() -> None:
         with pytest.raises(ValueError):
             RetryPolicy(**kwargs)
     assert replace(policy, max_attempts=1).max_attempts == 1
+
+
+def test_collect_symbol_forwards_the_provider_to_every_attempt(db: Path) -> None:
+    clock = FakeClock()
+    source, provider = FakeSource(clock, closed_rows()), FakeProvider(clock, none_first=1)
+
+    async def scenario() -> SymbolResult:
+        writer = await AsyncCandleWriter.open(db)
+        try:
+            return await collect_symbol(
+                source,
+                writer,
+                cfg(),
+                TARGET,
+                RETRY,
+                clock,
+                AdvancingSleep(clock),
+                asyncio.Event(),
+                server_time=provider,
+            )
+        finally:
+            await writer.close()
+
+    result = asyncio.run(scenario())
+    assert result.outcome is SymbolOutcome.COLLECTED and result.attempts == 2
+    assert provider.calls == 2 and source.time_calls == 0

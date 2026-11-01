@@ -36,10 +36,19 @@ class ScriptedSource:
         self.windows: dict[str, list[int]] = {}  # eligible rows per klines call, consumed in order (default 3)
         self.delays: list[int] = []  # ms of manual time each klines call takes, consumed in order
         self.closed = False
+        self.time_calls = 0
+        self.time_rtts: list[int] = []  # ms of manual time each server-time call takes, consumed in order
+        self.time_error: BaseException | None = None
 
     async def fetch_server_time(self) -> ServerTimeObservation:
+        self.time_calls += 1
+        sent_ns = self.t.monotonic_ns()
+        if self.time_rtts:
+            await self.t.sleep(self.time_rtts.pop(0))
+        if self.time_error is not None:
+            raise self.time_error
         now_ns, now_ms = self.t.monotonic_ns(), self.t.wall_ms()
-        return ServerTimeObservation(now_ms + self.skew_ms, now_ns, now_ns, now_ms)
+        return ServerTimeObservation(now_ms + self.skew_ms, sent_ns, now_ns, now_ms)
 
     def rows(self, rows: int, tf_ms: int) -> list[list[Any]]:
         bound = self.t.wall_ms() + self.skew_ms - PRECISION_MARGIN_MS - DELAY_MS

@@ -193,7 +193,9 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 
 ## From the 2026-11-01 code review
 
-### F-23. Server time is observed once per symbol per round (2 adapter calls per symbol), which matters at 1000 symbols
+### F-23. Server time was observed once per symbol per round (2 adapter calls per symbol), which matters at 1000 symbols
+
+- **Status (2026-11-01):** fixed for the collection loop by `SharedServerTime` (plan `2026-11-01-shared-server-time.md`, INV-070): one observation per about 5 s is shared by all symbols and retries, so a round needs about N adapter calls plus a few time requests. Still open: backfill pages observe server time once per page, and the real round duration at 100 to 1000 symbols is not measured (run a live round with the target universe). The original finding follows.
 
 - **Where:** `src/quasar_market_data/collector/fetch_once.py` (one `fetch_server_time` and one `fetch_klines` per symbol per attempt), `rate_limiter.py`.
 - **What (arithmetic from the code, not measured):** one round needs at least 2 grants per symbol. At 1000 symbols and `min_request_interval_ms = 100` that is about 2000 grants, about 200 s of a 300 s cycle before any retry or backfill, and `/health/ingest` shows the last symbols as `stale` for part of every cycle (contract 6.2.3, "A round longer than the lag threshold"). Sharing one server-time observation across the symbols of a round would halve the grants; it changes the ADR-0001 P-4 freshness argument (`max_age_ms`) and was not done.

@@ -1,6 +1,7 @@
 """Fetch the most recent klines of one symbol once and store only candles confirmed closed (ADR-0001).
 
-Order of work: observe server time (the source stamps the send and the answer at the network call), evaluate the conservative lower bound at the instant the klines request
+Order of work: observe server time (the source stamps the send and the answer at the network call; the collection
+loop passes a ``ServerTimeProvider`` that shares one observation across symbols, INV-070), evaluate the conservative lower bound at the instant the klines request
 is sent, fetch the raw rows, parse them all-or-nothing, (for a backfill page) judge the page against its request, select the closed candles, write only those.
 
 Eligibility is judged at the send time of the klines request, not after the response: the response is a
@@ -21,6 +22,7 @@ from quasar_market_data.collector.binance_klines import parse_klines
 from quasar_market_data.collector.candle_writer import WriteReport
 from quasar_market_data.collector.clock import Clock
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
+from quasar_market_data.collector.shared_server_time import ServerTimeProvider
 from quasar_market_data.domain.backfill import PageOutcome, PagePlan, judge_page
 from quasar_market_data.domain.closed_candles import (
     DEFAULT_PUBLICATION_DELAY_MS,
@@ -75,11 +77,23 @@ class FetchOnceReport:
     page: PageOutcome | None = None
 
 
-async def fetch_once(source: KlineSource, writer: CandleSink, config: FetchOnceConfig, clock: Clock) -> FetchOnceReport:
-    try:
-        observation = await source.fetch_server_time()
-    except SourceError:
-        observation = None  # a failed time request means no observation, not a failed run
+async def fetch_once(
+    source: KlineSource,
+    writer: CandleSink,
+    config: FetchOnceConfig,
+    clock: Clock,
+    *,
+    server_time: ServerTimeProvider | None = None,
+) -> FetchOnceReport:
+    """With a ``server_time`` provider the observation may be shared with other calls; without one every call asks
+    ``source`` itself. Either way ``None`` is "no observation" and the gate below judges whatever it is given."""
+    if server_time is not None:
+        observation = await server_time.observation(source)
+    else:
+        try:
+            observation = await source.fetch_server_time()
+        except SourceError:
+            observation = None  # a failed time request means no observation, not a failed run
 
     request_ns, request_wall_ms = clock.monotonic_ns(), clock.wall_ms()
     trust = server_lower_bound(observation, request_ns, request_wall_ms, None, config.time_trust)

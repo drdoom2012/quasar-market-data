@@ -16,6 +16,7 @@ from quasar_market_data.collector.fetch_once import (
 )
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
+from quasar_market_data.collector.shared_server_time import ServerTimeProvider
 from quasar_market_data.domain.backfill import PageKind, PagePlan, PageViolation
 from quasar_market_data.domain.server_time import TimeRejection
 from quasar_market_data.storage.connection import open_writer
@@ -27,6 +28,7 @@ from tests.collector.fetch_fakes import (
     AdvancingSleep,
     ControlledSink,
     FakeClock,
+    FakeProvider,
     FakeSource,
     closed_rows,
     forming_rows,
@@ -49,11 +51,17 @@ def config(limit: int = 100) -> FetchOnceConfig:
     return FetchOnceConfig(symbol=SYMBOL, timeframe=FIVE_MINUTES, limit=limit)
 
 
-def run(source: FakeSource, db: Path, clock: FakeClock, cfg: FetchOnceConfig | None = None) -> FetchOnceReport:
+def run(
+    source: FakeSource,
+    db: Path,
+    clock: FakeClock,
+    cfg: FetchOnceConfig | None = None,
+    server_time: ServerTimeProvider | None = None,
+) -> FetchOnceReport:
     async def scenario() -> FetchOnceReport:
         writer = await AsyncCandleWriter.open(db)
         try:
-            return await fetch_once(source, writer, cfg or config(), clock)
+            return await fetch_once(source, writer, cfg or config(), clock, server_time=server_time)
         finally:
             await writer.close()
 
@@ -344,3 +352,26 @@ def test_time_spent_waiting_for_the_rate_limiter_is_not_round_trip_time(db: Path
     report = asyncio.run(scenario())
     assert report.selection.untrusted_reason is None
     assert len(report.selection.eligible) >= 1
+
+
+def test_fetch_once_uses_the_provider_instead_of_asking_the_source(db: Path) -> None:
+    clock = FakeClock()
+    source, provider = FakeSource(clock, closed_rows()), FakeProvider(clock)
+    report = run(source, db, clock, server_time=provider)
+    assert source.time_calls == 0 and provider.calls == 1 and provider.sources == [source]
+    assert report.selection.untrusted_reason is None and len(report.selection.eligible) > 0
+
+
+def test_a_provider_returning_none_is_no_observation(db: Path) -> None:
+    clock = FakeClock()
+    report = run(FakeSource(clock, closed_rows()), db, clock, server_time=FakeProvider(clock, none_first=1))
+    assert report.selection.untrusted_reason is TimeRejection.NO_OBSERVATION
+    assert report.write is None and stored_open_times(db) == []
+
+
+def test_without_a_provider_every_call_asks_the_source(db: Path) -> None:
+    clock = FakeClock()
+    source = FakeSource(clock, closed_rows())
+    run(source, db, clock)
+    run(source, db, clock)
+    assert source.time_calls == 2

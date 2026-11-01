@@ -124,6 +124,8 @@ If the pre-start read fails, `run` exits `1` before any network call. Known limi
 
 Binance request weights were not read: a 1000-row request is spaced only by `collector.min_request_interval_ms`.
 
+A round observes the exchange server time about once per 5 seconds (never more than half of `max_age_ms`; a short age keeps the clock-rate error of the observation small) and shares that observation across all symbols and retries, instead of asking once per symbol; an observation the time-trust gate rejects is never reused, and a failed refresh falls back to the previous observation only for as long as the gate accepts its age (INV-070). Backfill pages still observe server time once per page.
+
 `collector.min_request_interval_ms` spaces the *calls to the exchange adapter*; the CCXT client throttles on its own, and Binance's weight limits are not checked, so confirm the setting before running many symbols.
 
 **Backfill (S16).** After a round (and after the S15 post-check in round one) `run` spends the idle time before the next boundary on holes inside the last `collector.backfill.days` days (1..365; `collector.backfill.enabled = false` disables it). Holes are re-derived from the stored candles every cycle (the 20 newest interior runs and the stretch before the oldest stored candle), newest first, as paged klines with `startTime`/`endTime`/`limit`. Every page goes through `fetch_once`: it is judged against its request first (rows outside the range, misaligned, repeated or too many reject the whole page and store nothing), then the closed-candle selection decides what is stored. One line per symbol and window:
