@@ -21,6 +21,7 @@ from quasar_market_data.collector.collection_loop import (
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.config.settings import DEFAULT_CONFIG_PATH, load_settings
 from quasar_market_data.domain.reconcile import steady_state_limit_needed
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from tests.collector.fetch_fakes import (
     FIVE_MINUTES,
     SYMBOL,
@@ -172,9 +173,9 @@ def test_the_request_spacing_is_applied(db: Path) -> None:
     starts: list[int] = []
 
     class Timed(FakeSource):
-        async def fetch_server_time_ms(self) -> int:
+        async def fetch_server_time(self) -> ServerTimeObservation:
             starts.append(clock.monotonic_ns())
-            return await super().fetch_server_time_ms()
+            return await super().fetch_server_time()
 
     source = Timed(clock, forming_rows(), rtt_ms=0, on_klines=lambda: starts.append(clock.monotonic_ns()))
     sleep = stop_on_sleep(clock, 2)  # call 1 is the limiter's wait, call 2 the wait for the next boundary

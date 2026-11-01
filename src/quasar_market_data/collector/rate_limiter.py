@@ -16,6 +16,7 @@ from collections.abc import Sequence
 
 from quasar_market_data.collector.clock import Clock, Sleep
 from quasar_market_data.collector.kline_source import KlineSource
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 
 _NS_PER_MS = 1_000_000
@@ -52,9 +53,9 @@ class RateLimitedSource:
         self._inner = inner
         self._limiter = limiter
 
-    async def fetch_server_time_ms(self) -> int:
+    async def fetch_server_time(self) -> ServerTimeObservation:
         await self._limiter.acquire()
-        return await self._inner.fetch_server_time_ms()
+        return await self._inner.fetch_server_time()
 
     async def fetch_klines(
         self,

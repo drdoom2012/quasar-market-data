@@ -7,12 +7,14 @@ import pytest
 from quasar_market_data.collector.deadline_source import DeadlineSource
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 from tests.collector.manual_time import NS_PER_MS, ManualTime, assert_no_leftover_tasks
 
 TF = Timeframe("5m")
 SYMBOL = "BTC/USDT:USDT"
 TIMEOUT_MS = 5_000
+OBSERVATION = ServerTimeObservation(1_792_677_035_725, 1, 2, 1_792_677_036_000)
 
 
 def run(scenario: Callable[[], Coroutine[None, None, None]]) -> None:
@@ -45,9 +47,9 @@ class Inner:
         finally:
             self.ended += 1
 
-    async def fetch_server_time_ms(self) -> int:
+    async def fetch_server_time(self) -> ServerTimeObservation:
         await self._wait()
-        return 42
+        return OBSERVATION
 
     async def fetch_klines(
         self,
@@ -91,7 +93,7 @@ def test_a_slow_call_is_cancelled_at_the_timeout_with_a_source_error() -> None:
         with pytest.raises(SourceError, match="timed out"):
             await task
         assert inner.cancelled == 1
-        server = asyncio.ensure_future(source.fetch_server_time_ms())
+        server = asyncio.ensure_future(source.fetch_server_time())
         await t.until_waiting(1)
         await t.advance(TIMEOUT_MS)
         with pytest.raises(SourceError, match="timed out"):
@@ -191,7 +193,7 @@ def test_a_call_that_finishes_in_time_is_not_disturbed() -> None:
         t = ManualTime()
         inner = Inner(hang=False)
         source = wrap(inner, t)
-        assert await source.fetch_server_time_ms() == 42
+        assert await source.fetch_server_time() is OBSERVATION
         assert await source.fetch_klines(SYMBOL, TF, 10) == [["row"]]
         assert inner.cancelled == 0
         await source.close()

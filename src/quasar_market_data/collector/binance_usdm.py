@@ -17,7 +17,9 @@ from urllib.parse import urlsplit
 import ccxt
 import ccxt.async_support as ccxt_async
 
+from quasar_market_data.collector.clock import Clock, SystemClock
 from quasar_market_data.collector.kline_source import SourceError
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
 
@@ -72,11 +74,12 @@ def _market_id(markets: object, symbol: str) -> str:
 
 
 class BinanceUsdmSource:
-    def __init__(self, exchange: Any) -> None:
+    def __init__(self, exchange: Any, clock: Clock) -> None:
         self._exchange = exchange
+        self._clock = clock
 
     @classmethod
-    async def open(cls, exchange: Any | None = None) -> "BinanceUsdmSource":
+    async def open(cls, exchange: Any | None = None, clock: Clock | None = None) -> "BinanceUsdmSource":
         client = ccxt_async.binanceusdm() if exchange is None else exchange
         try:
             try:
@@ -94,20 +97,23 @@ class BinanceUsdmSource:
         except BaseException:
             await client.close()
             raise
-        return cls(client)
+        return cls(client, SystemClock() if clock is None else clock)
 
-    async def fetch_server_time_ms(self) -> int:
+    async def fetch_server_time(self) -> ServerTimeObservation:
+        sent_ns = self._clock.monotonic_ns()  # the send: after any queue in front of this call, never before it
         try:
             response = await self._exchange.fapiPublicGetTime()
         except ccxt.BaseError as error:
             raise SourceError(f"server time request failed: {error}") from error
+        received_ns, received_wall_ms = self._clock.monotonic_ns(), self._clock.wall_ms()
         server_time = response.get("serverTime") if isinstance(response, dict) else None
         if type(server_time) is not int:
             raise SourceError(f"serverTime must be an int, got {type(server_time).__name__}")
         try:
-            return ensure_timestamp_ms(server_time, "serverTime")
+            ensure_timestamp_ms(server_time, "serverTime")
         except ValueError as error:
             raise SourceError(f"serverTime {server_time} is outside the accepted range") from error
+        return ServerTimeObservation(server_time, sent_ns, received_ns, received_wall_ms)
 
     async def fetch_klines(
         self,

@@ -141,3 +141,31 @@ def test_a_clock_step_is_shown_in_the_round_line_and_prints_no_suspension(
     cli._print_round(round_report(clock_step_ms=3_600_000, skipped_rounds=12))
     captured = capsys.readouterr()
     assert "clock_step_ms=3600000" in captured.out and "suspended" not in captured.out + captured.err
+
+
+def test_a_failure_reason_goes_to_stderr_and_the_stdout_line_keeps_its_format(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cli._print_slice(
+        SliceReport(
+            "A",
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            Attribution.READBACK_FAILED,
+            SliceStatus.BACKOFF,
+            "OperationalError: database is locked",
+        )
+    )
+    captured = capsys.readouterr()
+    assert "reason" not in captured.out and captured.out.startswith("backfill symbol=A ")
+    assert captured.err == "warning: backfill symbol=A status=backoff reason=OperationalError: database is locked\n"

@@ -11,6 +11,7 @@ import pytest
 
 from quasar_market_data.collector.binance_klines import parse_klines
 from quasar_market_data.collector.binance_usdm import SUPPORTED_TIMEFRAMES, BinanceUsdmSource
+from quasar_market_data.collector.clock import Clock
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.domain.timeframe import Timeframe
 
@@ -73,8 +74,8 @@ class FakeExchange:
         return sum(1 for call_name, _ in self.calls if call_name == name)
 
 
-def open_source(exchange: FakeExchange) -> BinanceUsdmSource:
-    return run(BinanceUsdmSource.open(exchange))
+def open_source(exchange: FakeExchange, clock: Clock | None = None) -> BinanceUsdmSource:
+    return run(BinanceUsdmSource.open(exchange, clock))
 
 
 def test_klines_request_carries_the_market_id_interval_and_limit() -> None:
@@ -190,7 +191,28 @@ def test_the_exact_usdm_endpoint_is_accepted() -> None:
 
 
 def test_server_time_is_returned_when_it_is_an_exact_int() -> None:
-    assert run(open_source(FakeExchange()).fetch_server_time_ms()) == 1792677035725
+    assert run(open_source(FakeExchange()).fetch_server_time()).server_time_ms == 1792677035725
+
+
+class SteppingClock:
+    """Every monotonic reading is 1 s after the previous one; the wall clock is fixed."""
+
+    def __init__(self) -> None:
+        self._mono_ns = 5_000_000_000
+
+    def monotonic_ns(self) -> int:
+        self._mono_ns += 1_000_000_000
+        return self._mono_ns
+
+    def wall_ms(self) -> int:
+        return 1792677036000
+
+
+def test_server_time_is_stamped_at_the_network_call_with_the_send_before_the_answer() -> None:
+    observation = run(open_source(FakeExchange(), SteppingClock()).fetch_server_time())
+    assert observation.send_monotonic_ns == 6_000_000_000  # the first reading of the call, nothing earlier
+    assert observation.receive_monotonic_ns == 7_000_000_000
+    assert observation.receive_wall_ms == 1792677036000
 
 
 @pytest.mark.parametrize("response", [{}, {"serverTime": "123"}, {"serverTime": 123.0}, {"serverTime": True}, None, []])
@@ -198,7 +220,7 @@ def test_server_time_must_be_an_exact_int(response: object) -> None:
     exchange = FakeExchange()
     exchange.time_response = response
     with pytest.raises(SourceError):
-        run(open_source(exchange).fetch_server_time_ms())
+        run(open_source(exchange).fetch_server_time())
 
 
 @pytest.mark.parametrize(
@@ -210,14 +232,14 @@ def test_server_time_out_of_range_is_a_source_error(server_time: int) -> None:
     exchange = FakeExchange()
     exchange.time_response = {"serverTime": server_time}
     with pytest.raises(SourceError, match="serverTime"):
-        run(open_source(exchange).fetch_server_time_ms())
+        run(open_source(exchange).fetch_server_time())
 
 
 @pytest.mark.parametrize("server_time", [946_684_800_000, 4_102_444_800_000])
 def test_server_time_at_the_range_bounds_is_accepted(server_time: int) -> None:
     exchange = FakeExchange()
     exchange.time_response = {"serverTime": server_time}
-    assert run(open_source(exchange).fetch_server_time_ms()) == server_time
+    assert run(open_source(exchange).fetch_server_time()).server_time_ms == server_time
 
 
 @pytest.mark.parametrize("response", [{"rows": []}, None, "[]"], ids=["dict", "none", "str"])
@@ -237,7 +259,7 @@ def test_ccxt_errors_become_source_errors(error: ccxt.BaseError) -> None:
         run(source.fetch_klines(SYMBOL, FIVE_MINUTES, 10))
     assert klines.value.__cause__ is error
     with pytest.raises(SourceError) as server_time:
-        run(source.fetch_server_time_ms())
+        run(source.fetch_server_time())
     assert server_time.value.__cause__ is error
 
 

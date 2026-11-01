@@ -257,3 +257,14 @@ def test_hole_scan_cost_does_not_grow_with_history_older_than_the_horizon(tmp_pa
     put(long, [*range(20_000), *recent])
     short_steps, long_steps = _runs_steps(short, 20_000), _runs_steps(long, 20_000)
     assert long_steps < 2 * short_steps + 50, (short_steps, long_steps)
+
+
+def test_a_read_failure_names_the_kind_of_error_so_a_bug_is_not_mistaken_for_storage(
+    db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(*args: Any) -> Any:
+        raise ValueError("slot 3 is not aligned")
+
+    monkeypatch.setattr(hole_reader, "_read_holes", broken)
+    with pytest.raises(HoleReadError, match=r"ValueError: slot 3 is not aligned"):
+        holes(db)

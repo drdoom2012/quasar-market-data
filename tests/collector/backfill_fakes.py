@@ -13,6 +13,7 @@ from quasar_market_data.collector.binance_klines import VENUE_BINANCE_USDM, pars
 from quasar_market_data.collector.candle_writer import CandleWriter, WriteReport
 from quasar_market_data.collector.collection_loop import IdleWindow, LoopConfig
 from quasar_market_data.collector.fetch_once import CandleSink
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.validation import ValidatedCandle, require_valid
 from quasar_market_data.storage.connection import open_writer
@@ -42,6 +43,7 @@ class RangeSource:
 
     def __init__(self, t: ManualTime, series: dict[str, set[int]] | None = None, *, skew_ms: int = 1_000) -> None:
         self.t = t
+        self.clock: Any = t  # stamps the server-time observation; a test may swap in a clock of its own
         self.series = series if series is not None else {}
         self.requests: list[Request] = []
         self.time_calls = 0
@@ -57,14 +59,14 @@ class RangeSource:
     def server_ms(self) -> int:
         return self._server_base + (self.t.monotonic_ns() - self._mono_base) // NS_PER_MS
 
-    async def fetch_server_time_ms(self) -> int:
+    async def fetch_server_time(self) -> ServerTimeObservation:
         self.time_calls += 1
         if self.time_error is not None:
             raise self.time_error
-        value = self.server_ms()
+        value, sent_ns = self.server_ms(), self.clock.monotonic_ns()
         self.t._mono_ns += self.rtt_ms * NS_PER_MS
         self.t._wall_ms += self.rtt_ms
-        return value
+        return ServerTimeObservation(value, sent_ns, self.clock.monotonic_ns(), self.clock.wall_ms())
 
     async def fetch_klines(
         self,

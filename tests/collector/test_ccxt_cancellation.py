@@ -11,6 +11,7 @@ import ccxt.async_support as ccxt_async
 import pytest
 
 from quasar_market_data.collector.binance_usdm import BinanceUsdmSource
+from quasar_market_data.collector.clock import SystemClock
 from quasar_market_data.domain.timeframe import Timeframe
 from tests.collector.test_binance_usdm import SYMBOL, usdm_markets
 
@@ -74,7 +75,7 @@ def test_cancelling_a_stalled_klines_request_returns_promptly_and_the_client_sta
         answering, ok_url = await serve(hang=False)
         try:
             client = client_for(hang_url)
-            source = BinanceUsdmSource(client)
+            source = BinanceUsdmSource(client, SystemClock())
             task = asyncio.create_task(source.fetch_klines(SYMBOL, Timeframe("5m"), 10))
             await asyncio.sleep(0.05)
             started = time.monotonic()
@@ -102,7 +103,7 @@ def test_a_cancelled_request_keeps_its_ccxt_throttle_turn() -> None:
         try:
             client = client_for(url, interval_ms=interval_ms)
             assert client.throttler.config["refillRate"] == 1 / interval_ms  # fails loudly if CCXT renames it
-            source = BinanceUsdmSource(client)
+            source = BinanceUsdmSource(client, SystemClock())
             started = time.monotonic()
             tasks: list[Awaitable[object]] = []
             made = [asyncio.ensure_future(source.fetch_klines(SYMBOL, Timeframe("5m"), 10)) for _ in range(4)]

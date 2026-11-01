@@ -564,6 +564,46 @@ def only_last(env: Env) -> SliceReport:
     return env.slices[-1]
 
 
+# --- the cause of a failure is reported, never dropped ---------------------------------------------------------
+
+
+def test_a_failed_hole_read_reports_its_cause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def body(env: Env) -> None:
+        hole(env, 2, 11)
+
+        async def broken(*args: Any, **kwargs: Any) -> Any:
+            raise HoleReadError("reading holes failed: OperationalError: database is locked")
+
+        monkeypatch.setattr("quasar_market_data.collector.backfill.read_holes", broken)
+        await env.backfiller().run_idle(env.window())
+        report = only(env)
+        assert report.status is SliceStatus.BACKOFF and report.attribution is Attribution.READBACK_FAILED
+        assert report.reason is not None and "database is locked" in report.reason
+
+    go(tmp_path, body)
+
+
+def test_a_source_error_while_walking_is_reported_with_its_message(tmp_path: Path) -> None:
+    async def body(env: Env) -> None:
+        hole(env, 2, 11)
+        env.source.errors[SYMBOL] = SourceError("unknown symbol 'A'")
+        await env.backfiller().run_idle(env.window())
+        report = only(env)
+        assert report.status is SliceStatus.BACKOFF
+        assert report.reason is not None and "SourceError" in report.reason and "unknown symbol 'A'" in report.reason
+
+    go(tmp_path, body)
+
+
+def test_a_slice_without_a_failure_has_no_reason(tmp_path: Path) -> None:
+    async def body(env: Env) -> None:
+        hole(env, 2, 11)
+        await env.backfiller().run_idle(env.window())
+        assert only(env).status is SliceStatus.PROGRESS and only(env).reason is None
+
+    go(tmp_path, body)
+
+
 # --- untrusted time and wall-clock steps -----------------------------------------------------------------------
 
 
@@ -600,7 +640,9 @@ def test_untrusted_clock_divergence_stores_nothing(tmp_path: Path) -> None:
     async def body(env: Env) -> None:
         hole(env, 2, 11)
         before = env.counts()
-        await env.backfiller(clock=Jumpy(env.t)).run_idle(env.window())
+        jumpy = Jumpy(env.t)
+        env.source.clock = jumpy  # the source stamps the observation with the same clock the use case reads
+        await env.backfiller(clock=jumpy).run_idle(env.window())
         assert only(env).status is SliceStatus.TIME_UNTRUSTED and env.counts() == before
 
     go(tmp_path, body)

@@ -15,6 +15,7 @@ from quasar_market_data.collector.fetch_once import (
     fetch_once,
 )
 from quasar_market_data.collector.kline_source import SourceError
+from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
 from quasar_market_data.domain.backfill import PageKind, PagePlan, PageViolation
 from quasar_market_data.domain.server_time import TimeRejection
 from quasar_market_data.storage.connection import open_writer
@@ -23,6 +24,7 @@ from tests.collector.fetch_fakes import (
     FIVE_MINUTES,
     ROW0_END_MS,
     SYMBOL,
+    AdvancingSleep,
     ControlledSink,
     FakeClock,
     FakeSource,
@@ -322,3 +324,23 @@ def test_without_a_page_fetch_once_reports_no_page_outcome(db: Path) -> None:
     report = run(source, db, clock)
     assert report.page is None
     assert source.kline_ranges == [(None, None)]
+
+
+def test_time_spent_waiting_for_the_rate_limiter_is_not_round_trip_time(db: Path) -> None:
+    """ADR-0001 P-4 measures RTT from the send of the request. A queue in front of the limiter (many symbols, high
+    concurrency) delays the send, not the exchange's answer, and must not make time untrusted."""
+    clock = FakeClock()
+    limiter = RateLimiter(3000, clock, AdvancingSleep(clock))  # a wait above max_rtt_ms (2000) for every call
+    source = RateLimitedSource(FakeSource(clock, forming_rows(), rtt_ms=270), limiter)
+
+    async def scenario() -> FetchOnceReport:
+        await limiter.acquire()  # the previous grant: the time request below must wait 3000 ms for its slot
+        writer = await AsyncCandleWriter.open(db)
+        try:
+            return await fetch_once(source, writer, config(), clock)
+        finally:
+            await writer.close()
+
+    report = asyncio.run(scenario())
+    assert report.selection.untrusted_reason is None
+    assert len(report.selection.eligible) >= 1

@@ -9,6 +9,7 @@ import asyncio
 from collections.abc import Sequence
 from typing import Any
 
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 from tests.collector.fetch_fakes import closed_rows
 from tests.collector.manual_time import ManualTime
@@ -36,8 +37,9 @@ class ScriptedSource:
         self.delays: list[int] = []  # ms of manual time each klines call takes, consumed in order
         self.closed = False
 
-    async def fetch_server_time_ms(self) -> int:
-        return self.t.wall_ms() + self.skew_ms
+    async def fetch_server_time(self) -> ServerTimeObservation:
+        now_ns, now_ms = self.t.monotonic_ns(), self.t.wall_ms()
+        return ServerTimeObservation(now_ms + self.skew_ms, now_ns, now_ns, now_ms)
 
     def rows(self, rows: int, tf_ms: int) -> list[list[Any]]:
         bound = self.t.wall_ms() + self.skew_ms - PRECISION_MARGIN_MS - DELAY_MS

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from quasar_market_data.collector.candle_writer import WriteReport
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.validation import ValidatedCandle
 
@@ -91,14 +92,14 @@ class FakeSource:
         self.kline_ranges: list[tuple[int | None, int | None]] = []
         self.closed = False
 
-    async def fetch_server_time_ms(self) -> int:
+    async def fetch_server_time(self) -> ServerTimeObservation:
         self.time_calls += 1
+        sent_ns = self.clock.monotonic_ns()
         self.clock.advance(self.rtt_ms)
         if self.time_error is not None:
             raise self.time_error
-        if self.honour_limit:
-            return self.clock.wall_ms() + self.server_ahead_ms
-        return self.server_time_ms
+        server_time_ms = self.clock.wall_ms() + self.server_ahead_ms if self.honour_limit else self.server_time_ms
+        return ServerTimeObservation(server_time_ms, sent_ns, self.clock.monotonic_ns(), self.clock.wall_ms())
 
     def limited_rows(self, limit: int, tf_ms: int) -> list[list[Any]]:
         """``limit`` rows ending at the server's forming slot, all with the closed fixture's first row values."""

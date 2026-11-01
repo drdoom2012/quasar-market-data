@@ -86,6 +86,18 @@ class SliceReport:
     missing_in_targets: int | None
     attribution: Attribution
     status: SliceStatus
+    reason: str | None = None  # why the slice failed (BACKOFF); one line, never a stack trace
+
+
+REASON_MAX_CHARS: Final = 200
+
+
+def _reason(error: Exception) -> str:
+    """One short line naming a failure: its class (a bug must not pass for a storage or exchange fault) and message."""
+    text = str(error) or type(error).__name__
+    if not isinstance(error, HoleReadError):  # a HoleReadError message already names the underlying class
+        text = f"{type(error).__name__}: {text}"
+    return " ".join(text.split())[:REASON_MAX_CHARS]
 
 
 @dataclass
@@ -195,9 +207,9 @@ class Backfiller:
     async def _slice(self, window: IdleWindow, symbol: str) -> None:
         try:
             targets, nothing_found = await self._targets(symbol)
-        except HoleReadError:
+        except HoleReadError as error:
             self._fail(symbol)
-            self._emit(symbol, SliceStatus.BACKOFF, Attribution.READBACK_FAILED)
+            self._emit(symbol, SliceStatus.BACKOFF, Attribution.READBACK_FAILED, reason=_reason(error))
             return
         if not targets:
             if nothing_found:
@@ -207,9 +219,9 @@ class Backfiller:
             before: tuple[frozenset[int], ...] | None = await read_present(
                 self._db, venue=VENUE_BINANCE_USDM, symbol=symbol, timeframe=self._loop.timeframe, targets=targets
             )
-        except HoleReadError:
+        except HoleReadError as error:
             self._fail(symbol)
-            self._emit(symbol, SliceStatus.BACKOFF, Attribution.READBACK_FAILED)
+            self._emit(symbol, SliceStatus.BACKOFF, Attribution.READBACK_FAILED, reason=_reason(error))
             return
 
         counts = {"pages": 0, "all": 0, "some": 0, "none": 0, "stored": 0, "dup": 0, "conf": 0, "inv": 0, "pend": 0}
@@ -217,6 +229,7 @@ class Backfiller:
         inserted: int | None = 0
         status = SliceStatus.PROGRESS
         failed = False
+        reason: str | None = None
         for target in targets:
             result = await self._walk(window, symbol, target, counts, sent)
             if result.inserted is None:
@@ -229,6 +242,7 @@ class Backfiller:
                     self._exhausted_until[(symbol, target.first_ms)] = self._cycle + UNPROVEN_RETRY_CYCLES
             if result.failed:
                 failed = True
+                reason = result.reason
                 break
             if result.untrusted:
                 status = SliceStatus.TIME_UNTRUSTED
@@ -267,6 +281,7 @@ class Backfiller:
                 recovery.missing_in_targets,
                 recovery.attribution,
                 status,
+                reason,
             )
         )
 
@@ -279,8 +294,11 @@ class Backfiller:
         new: int | None = None,
         recovered: int | None = None,
         missing: int | None = None,
+        reason: str | None = None,
     ) -> None:
-        self._on_slice(SliceReport(symbol, 0, 0, 0, 0, 0, 0, 0, 0, 0, new, recovered, missing, attribution, status))
+        self._on_slice(
+            SliceReport(symbol, 0, 0, 0, 0, 0, 0, 0, 0, 0, new, recovered, missing, attribution, status, reason)
+        )
 
     async def _walk(
         self, window: IdleWindow, symbol: str, target: BackfillTarget, counts: dict[str, int], sent: set[int]
@@ -293,7 +311,7 @@ class Backfiller:
             if not self._room(window):
                 return _Walk(None, inserted, stopped=True)
             if pages_left <= 0:  # a page cap exceeded is a bug in the walk or a lying page: fail the slice
-                return _Walk(None, inserted, failed=True)
+                return _Walk(None, inserted, failed=True, reason="page cap exceeded")
             pages_left -= 1
             page = plan_page(target, start, self._tf, MAX_LIMIT)
             source = DeadlineSource(
@@ -314,14 +332,16 @@ class Backfiller:
             )
             try:
                 report = await fetch_once(source, window.sink_for(symbol), config, self._clock)
-            except SourceError:
+            except SourceError as error:
                 if window.stop.is_set():
                     return _Walk(None, inserted, stopped=True)
-                return _Walk(None, inserted, failed=True)
-            except (KlineParseError, PageViolation):
-                return _Walk(None, inserted, failed=True)
-            except CandleWriteOutcomeUnknown:
-                return _Walk(None, None, failed=True)  # the watch has marked the symbol uncertain
+                return _Walk(None, inserted, failed=True, reason=_reason(error))
+            except (KlineParseError, PageViolation) as error:
+                return _Walk(None, inserted, failed=True, reason=_reason(error))
+            except CandleWriteOutcomeUnknown as error:
+                return _Walk(
+                    None, None, failed=True, reason=_reason(error)
+                )  # the watch has marked the symbol uncertain
             counts["pages"] += 1
             rows_total += report.fetched
             sent.update(c.key.open_time_ms for c in report.selection.eligible)
@@ -336,7 +356,7 @@ class Backfiller:
                 return _Walk(None, inserted, untrusted=True)
             outcome = report.page
             if outcome is None:  # fetch_once with a page always reports one
-                return _Walk(None, inserted, failed=True)
+                return _Walk(None, inserted, failed=True, reason="no page outcome reported")
             if outcome.next_start_ms is None:
                 return _Walk(judge_target(target, self._tf, rows_total), inserted)
             start = outcome.next_start_ms
@@ -349,3 +369,4 @@ class _Walk:
     failed: bool = False
     untrusted: bool = False
     stopped: bool = False
+    reason: str | None = None

@@ -122,7 +122,7 @@ async def read_holes(db: Path, *, venue: str, symbol: str, timeframe: Timeframe,
     try:
         return await asyncio.to_thread(_read_holes, db, venue, symbol, timeframe, horizon_start_ms)
     except Exception as error:
-        raise HoleReadError(f"reading holes failed: {error}") from error
+        raise HoleReadError(f"reading holes failed: {type(error).__name__}: {error}") from error
 
 
 async def read_present(
@@ -132,4 +132,4 @@ async def read_present(
     try:
         return await asyncio.to_thread(_read_present, db, venue, symbol, timeframe, tuple(targets))
     except Exception as error:
-        raise HoleReadError(f"reading stored slots failed: {error}") from error
+        raise HoleReadError(f"reading stored slots failed: {type(error).__name__}: {error}") from error

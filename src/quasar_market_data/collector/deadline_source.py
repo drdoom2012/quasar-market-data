@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable, Sequence
 
 from quasar_market_data.collector.clock import Clock, Sleep
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 
 _NS_PER_MS = 1_000_000
@@ -59,8 +60,8 @@ class DeadlineSource:
             raise SourceError("stopped")
         raise SourceError("deadline reached" if left_ms < self._timeout_ms else "timed out")
 
-    async def fetch_server_time_ms(self) -> int:
-        return await self._race(self._inner.fetch_server_time_ms)
+    async def fetch_server_time(self) -> ServerTimeObservation:
+        return await self._race(self._inner.fetch_server_time)
 
     async def fetch_klines(
         self,

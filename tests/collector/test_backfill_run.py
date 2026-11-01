@@ -8,6 +8,7 @@ from typing import Any
 from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown
 from quasar_market_data.collector.collection_loop import LoopConfig, RoundReport, run_collection_loop
 from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 from tests.collector.backfill_fakes import FIVE, Env
 from tests.collector.fetch_fakes import ControlledSink, kline_row
@@ -30,8 +31,8 @@ class HybridSource:
         self.on_round: Callable[[int], None] | None = None
         self.page_error: Exception | None = None
 
-    async def fetch_server_time_ms(self) -> int:
-        return await self.rounds.fetch_server_time_ms()
+    async def fetch_server_time(self) -> ServerTimeObservation:
+        return await self.rounds.fetch_server_time()
 
     async def fetch_klines(
         self,

@@ -225,6 +225,8 @@ def _print_slice(report: SliceReport) -> None:
         f" | status={report.status.value}",
         flush=True,
     )
+    if report.reason is not None:  # stderr, so the documented stdout line keeps its format
+        _error(f"warning: backfill symbol={report.symbol} status={report.status.value} reason={report.reason}")
 
 
 def _report_suspension(consecutive: int, idle_overrun_ms: int) -> None:

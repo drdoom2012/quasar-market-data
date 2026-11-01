@@ -19,6 +19,7 @@ from quasar_market_data.collector.collection_loop import (
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
 from quasar_market_data.domain.schedule import next_wake_ms
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 from tests.collector.fetch_fakes import ControlledSink
 from tests.collector.loop_fakes import DELAY_MS, ScriptedSource
@@ -839,9 +840,9 @@ def test_600_symbol_first_round_keeps_the_spacing_and_the_concurrency_bound() ->
             def __init__(self, inner: ScriptedSource) -> None:
                 self.inner = inner
 
-            async def fetch_server_time_ms(self) -> int:
+            async def fetch_server_time(self) -> ServerTimeObservation:
                 starts.append(h.t.monotonic_ns())
-                return await self.inner.fetch_server_time_ms()
+                return await self.inner.fetch_server_time()
 
             async def fetch_klines(
                 self,
@@ -865,12 +866,12 @@ def test_600_symbol_first_round_keeps_the_spacing_and_the_concurrency_bound() ->
         class Counting:
             """Placed before the limiter: counts the calls of attempts that are in flight, waiting included."""
 
-            async def fetch_server_time_ms(self) -> int:
+            async def fetch_server_time(self) -> ServerTimeObservation:
                 nonlocal in_flight, peak
                 in_flight += 1
                 peak = max(peak, in_flight)
                 try:
-                    return await limited.fetch_server_time_ms()
+                    return await limited.fetch_server_time()
                 finally:
                     in_flight -= 1
 

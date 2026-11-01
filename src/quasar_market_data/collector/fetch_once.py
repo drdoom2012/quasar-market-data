@@ -1,6 +1,6 @@
 """Fetch the most recent klines of one symbol once and store only candles confirmed closed (ADR-0001).
 
-Order of work: observe server time, evaluate the conservative lower bound at the instant the klines request
+Order of work: observe server time (the source stamps the send and the answer at the network call), evaluate the conservative lower bound at the instant the klines request
 is sent, fetch the raw rows, parse them all-or-nothing, (for a backfill page) judge the page against its request, select the closed candles, write only those.
 
 Eligibility is judged at the send time of the klines request, not after the response: the response is a
@@ -27,12 +27,7 @@ from quasar_market_data.domain.closed_candles import (
     ClosedCandleSelection,
     select_closed_candles,
 )
-from quasar_market_data.domain.server_time import (
-    DEFAULT_TIME_TRUST,
-    ServerTimeObservation,
-    TimeTrustConfig,
-    server_lower_bound,
-)
+from quasar_market_data.domain.server_time import DEFAULT_TIME_TRUST, TimeTrustConfig, server_lower_bound
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.validation import ValidatedCandle
 
@@ -81,13 +76,10 @@ class FetchOnceReport:
 
 
 async def fetch_once(source: KlineSource, writer: CandleSink, config: FetchOnceConfig, clock: Clock) -> FetchOnceReport:
-    sent_ns = clock.monotonic_ns()
     try:
-        server_time_ms = await source.fetch_server_time_ms()
+        observation = await source.fetch_server_time()
     except SourceError:
         observation = None  # a failed time request means no observation, not a failed run
-    else:
-        observation = ServerTimeObservation(server_time_ms, sent_ns, clock.monotonic_ns(), clock.wall_ms())
 
     request_ns, request_wall_ms = clock.monotonic_ns(), clock.wall_ms()
     trust = server_lower_bound(observation, request_ns, request_wall_ms, None, config.time_trust)

@@ -6,6 +6,7 @@ import pytest
 
 from quasar_market_data.collector.clock import Sleep
 from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 from tests.collector.manual_time import NS_PER_MS, ManualTime, assert_no_leftover_tasks
 from tests.typing_helpers import untyped
@@ -221,9 +222,9 @@ class RecordingSource:
         self.ranges: list[tuple[int | None, int | None]] = []
         self.closed = False
 
-    async def fetch_server_time_ms(self) -> int:
+    async def fetch_server_time(self) -> ServerTimeObservation:
         self.starts.append(self.t.monotonic_ns())
-        return 0
+        return ServerTimeObservation(1_792_677_035_725, 1, 2, 1_792_677_036_000)
 
     async def fetch_klines(
         self,
@@ -247,7 +248,7 @@ def test_rate_limited_source_acquires_before_each_call_and_not_for_close() -> No
         t = ManualTime()
         inner = RecordingSource(t)
         source = RateLimitedSource(inner, limiter(t))
-        await source.fetch_server_time_ms()
+        await source.fetch_server_time()
         task = asyncio.create_task(source.fetch_klines("BTC/USDT:USDT", Timeframe("5m"), 10))
         await t.until_waiting(1)
         assert len(inner.starts) == 1  # the second call has not begun while the limiter holds it back

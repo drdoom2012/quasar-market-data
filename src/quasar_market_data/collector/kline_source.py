@@ -1,12 +1,16 @@
 """The seam between the fetch-once use case and an exchange adapter.
 
-A source returns the exchange's raw kline rows untouched (decimal text stays text) and a server time reading;
-it never decides what is closed and never reads a clock. Every failure to obtain data is a ``SourceError``.
+A source returns the exchange's raw kline rows untouched (decimal text stays text) and a server time observation;
+it never decides what is closed. It reads a clock for one purpose only: to stamp the server-time request with the
+instants it was sent and answered (ADR-0001 P-4). Those must be taken at the network call itself, after any queue
+in front of it (the rate limiter), so waiting for a slot is never counted as round-trip time. Every failure to
+obtain data is a ``SourceError``.
 """
 
 from collections.abc import Sequence
 from typing import Protocol
 
+from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 
 
@@ -15,7 +19,7 @@ class SourceError(Exception):
 
 
 class KlineSource(Protocol):
-    async def fetch_server_time_ms(self) -> int: ...
+    async def fetch_server_time(self) -> ServerTimeObservation: ...
 
     async def fetch_klines(
         self,
