@@ -175,14 +175,30 @@ docker compose cp collector:/app/data/backup.db ./quasar-backup.db
 docker compose exec collector rm /app/data/backup.db
 ```
 
+## Symbol overview (tool)
+
+A local, read-only page that shows which symbols the API serves, where each history starts, how complete the last 30 days are, and whether a symbol is fine or something is wrong with it. It is a separate consumer of the HTTP API (`tools/symbol_overview/`, standard library only, no dependency on `quasar_market_data`); the Collector, the API, the database and the contracts are unchanged. Design: `docs/superpowers/specs/2026-11-01-symbol-overview-design.md`.
+
+```
+uv run python -m tools.symbol_overview --api-url http://localhost:8000 --port 8765
+```
+
+Open `http://127.0.0.1:8765/`. `--api-url` defaults to `http://localhost:8000` and `--port` to `8765`; the page binds `127.0.0.1` only. To look at the VPS, open the SSH tunnel from the header of `compose.yaml` (`ssh -L 8000:172.31.250.10:8000 <vps>`) and run the same command. The tool is not part of the images or of `compose.yaml`.
+
+It calls only `GET /health/ingest`, `GET /v1/instruments` and `GET /v1/coverage`, and only while a page is open: one refresh at a time, at most four calls at once, the result is reused for 15 s, the page asks again every 60 s. A refresh is 2 calls plus one `/v1/coverage` per symbol with stored data.
+
+States (the first that applies is the headline; all reasons are listed): `bez dat` (nothing stored), `nelze posoudit` (an answer failed validation, an API call failed, or the server clock is ahead of the stored data), `zastaralé` (the API reports `stale` slots), `konflikt`, `díry` (missing slots after the start of the history, or slots the exchange confirmed as having no data), `zaostává` (`due` slots), `v pořádku`. If `/health/ingest` or `/v1/instruments` fails, the page shows one error and no states, never an empty or green page. Time thresholds come from the API (its `rule` and clock); the tool defines none.
+
+Limits: the API cannot tell a symbol whose first candle is not yet expected from one that should have been downloaded (both are `bez dat`); the length of a history is shown but not judged (a symbol with a short history and no holes is `v pořádku`); `v pořádku` is true at the API's time of that answer. The load of `/v1/coverage` for hundreds of symbols has not been measured: the constants (4 calls at once, 10 s per call, 60 s per refresh, 15 s cache) are placeholders until it is. `tools/` is covered by ruff, mypy and pytest, not by `lint-imports`; `tests/tools/symbol_overview/test_boundary.py` keeps it to the standard library.
+
 ## Tool scope
 
 | Tool | Covers | Does not cover |
 |---|---|---|
 | `pytest` | `tests/` only (`testpaths`), `live` marker excluded, `--strict-markers` | `spikes/` |
-| `ruff check` / `ruff format --check` | `src/`, `tests/`, `spikes/` | — |
-| `mypy` (strict) | `src/`, `tests/` | `spikes/` |
-| `lint-imports` | package `quasar_market_data` | `tests/`, `spikes/` |
+| `ruff check` / `ruff format --check` | `src/`, `tests/`, `spikes/`, `tools/` | — |
+| `mypy` (strict) | `src/`, `tests/`, `tools/` | `spikes/` |
+| `lint-imports` | package `quasar_market_data` | `tests/`, `spikes/`, `tools/` (the symbol overview tool is held to the standard library by the AST test `tests/tools/symbol_overview/test_boundary.py`) |
 | `make live` | `tests/live/` (marker `live`), run by hand | `make check` |
 
 ## Boundary enforcement

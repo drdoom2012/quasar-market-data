@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Přehled symbolů</title>
+<style>
+  :root {
+    --bg: #fafafa; --fg: #1d1d1f; --muted: #6b6b70; --line: #d8d8dc; --card: #ffffff;
+    --ok: #2e7d4f; --warn: #b26a00; --bad: #b3261e; --none: #6b6b70;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151517; --fg: #ececf0; --muted: #9a9aa2; --line: #36363b; --card: #1f1f22;
+            --ok: #5cc98a; --warn: #e0a040; --bad: #ff7b72; --none: #9a9aa2; }
+  }
+  body { font: 14px/1.4 -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 20px 0 6px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
+  #status-line { color: var(--muted); }
+  #status-line.old { color: var(--warn); font-weight: 600; }
+  button { font: inherit; padding: 4px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #api-error { display: none; border: 1px solid var(--bad); color: var(--bad); border-radius: 8px; padding: 10px 12px; margin: 8px 0; font-weight: 600; }
+  #summary { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 14px; min-width: 90px; }
+  .tile b { display: block; font-size: 22px; }
+  table { border-collapse: collapse; width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  th, td { text-align: left; padding: 5px 10px; border-top: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-size: 12px; text-transform: uppercase; border-top: 0; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; border: 1px solid currentColor; }
+  .s-ok { color: var(--ok); } .s-behind, .s-holes { color: var(--warn); } .s-stale, .s-conflict, .s-unknown { color: var(--bad); } .s-no_data { color: var(--none); }
+  canvas { width: 100%; min-width: 360px; height: 14px; display: block; border-radius: 2px; }
+  details { margin-top: 8px; } summary { cursor: pointer; color: var(--muted); }
+  #legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; font-size: 12px; color: var(--muted); }
+  #legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 4px; vertical-align: -2px; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Přehled symbolů</h1>
+  <button id="refresh" type="button">Obnovit</button>
+  <span id="status-line" role="status"></span>
+</header>
+<div id="api-error" role="alert"></div>
+<div id="summary"></div>
+<h2 id="problems-title">Co nesedí</h2>
+<table id="problems"></table>
+<details id="ok-group"></details>
+<h2>Posledních 30 dní</h2>
+<div id="legend"></div>
+<table id="heatmap"></table>
+
+<script>
+"use strict";
+// All text of the page is here. The page decides no state: it draws what /overview.json says.
+const TEXT = {
+  down: "Nástroj neodpovídá: ",
+  apiNotReady: "API není použitelné: ",
+  never: "zatím nic",
+  age: (s) => `stav z API, staženo před ${s} s`,
+  states: { no_data: "bez dat", unknown: "nelze posoudit", stale: "zastaralé", conflict: "konflikt", holes: "díry", behind: "zaostává", ok: "v pořádku" },
+  tiles: { total: "celkem" },
+  noProblems: "Nic nesedí.",
+  okGroup: (n) => `${n} ${cs(n, "symbol", "symboly", "symbolů")} v pořádku`,
+  columns: { state: "Stav", symbol: "Symbol", why: "Důvod", since: "Historie od", strip: "30 dní" },
+  reasons: {
+    no_data: () => "nic nestaženo (API nerozliší, zda se mělo)",
+    invalid: (r) => `odpověď API nelze použít (${r.detail})`,
+    stored_ahead: () => "hodiny serveru jsou před uloženými daty, čerstvost nelze posoudit",
+    stale: (r, s) => `${slots(r.slots)} po termínu, poslední candle ${fmt(s.newest_open_time_ms)}`,
+    conflict: (r) => `${slots(r.slots)} v konfliktu`,
+    missing: (r) => `chybí ${slots(r.slots)} (úseků: ${r.runs})`,
+    unavailable: (r) => `${slots(r.slots)}: burza potvrdila, že data nemá`,
+    due: (r) => `zaostává o ${slots(r.slots)}`,
+  },
+  strip: { "_": "historie tu ještě není", ".": "v pořádku", n: "ještě se nečeká", d: "zaostává", u: "burza bez dat", m: "díra", c: "konflikt", s: "zastaralé" },
+  stripNone: "nelze posoudit",
+};
+// Czech plural: 1 -> one, 2-4 -> few, otherwise many.
+const cs = (n, one, few, many) => (n === 1 ? one : n >= 2 && n <= 4 ? few : many);
+const slots = (n) => `${n} ${cs(n, "slot", "sloty", "slotů")}`;
+const ORDER = ["no_data", "unknown", "stale", "conflict", "holes", "behind", "ok"];
+const COLORS = { "_": "#c9c9cf", ".": "#2e9d62", n: "#9ec5ee", d: "#f0b429", u: "#8e5bd0", m: "#e0443a", c: "#c2186b", s: "#7a0f0f" };
+const POLL_MS = 60000, OLD_AFTER_S = 180;
+
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, v);
+  for (const c of children) node.append(c);
+  return node;
+}
+function fmt(ms) { return ms == null ? "–" : new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC"; }
+function day(ms) { return ms == null ? "–" : new Date(ms).toISOString().slice(0, 10); }
+
+function legend() {
+  const box = $("legend");
+  box.replaceChildren();
+  for (const [ch, text] of Object.entries(TEXT.strip)) {
+    const swatch = el("i"); swatch.style.background = COLORS[ch];
+    box.append(el("span", {}, swatch, text));
+  }
+}
+
+function reasonText(r, s) { return (TEXT.reasons[r.code] || (() => r.code))(r, s); }
+function tag(state) { return el("span", { class: `tag s-${state}` }, TEXT.states[state]); }
+
+function drawStrip(canvas, strip, window_) {
+  canvas.width = 720; canvas.height = 14;
+  const ctx = canvas.getContext("2d");
+  if (strip == null) {  // cannot be judged: hatched, never a color that means fine
+    ctx.fillStyle = "#8884"; ctx.fillRect(0, 0, 720, 14);
+    ctx.strokeStyle = "#888"; ctx.lineWidth = 1;
+    for (let x = -14; x < 720; x += 6) { ctx.beginPath(); ctx.moveTo(x, 14); ctx.lineTo(x + 14, 0); ctx.stroke(); }
+    canvas.title = TEXT.stripNone;
+    return;
+  }
+  for (let i = 0; i < strip.length;) {
+    let j = i; while (j < strip.length && strip[j] === strip[i]) j++;
+    ctx.fillStyle = COLORS[strip[i]] || "#000"; ctx.fillRect(i, 0, j - i, 14);
+    i = j;
+  }
+  const bucketMs = window_.bucket_slots * 300000;
+  canvas.onmousemove = (event) => {
+    const i = Math.min(strip.length - 1, Math.max(0, Math.floor(event.offsetX / canvas.getBoundingClientRect().width * strip.length)));
+    const from = window_.start + i * bucketMs;
+    canvas.title = `${fmt(from)} – ${fmt(from + bucketMs)}: ${TEXT.strip[strip[i]] || strip[i]}`;
+  };
+}
+
+function clearStates() {
+  for (const id of ["summary", "problems", "heatmap"]) $(id).replaceChildren();
+  $("ok-group").replaceChildren(); $("ok-group").style.display = "none";
+}
+
+function showError(text) { const box = $("api-error"); box.textContent = text; box.style.display = "block"; clearStates(); }
+
+function render(data, httpStatus) {
+  if (data.api_error) { showError(TEXT.apiNotReady + data.api_error.code + (data.api_error.detail ? ": " + data.api_error.detail : "")); return; }
+  $("api-error").style.display = "none";
+
+  const summary = $("summary"); summary.replaceChildren();
+  for (const key of ["total", ...ORDER]) {
+    summary.append(el("div", { class: "tile" }, el("b", {}, String(data.summary[key])), key === "total" ? TEXT.tiles.total : TEXT.states[key]));
+  }
+
+  const symbols = data.symbols;
+  const problems = symbols.filter((s) => s.state !== "ok")
+    .sort((a, b) => ORDER.indexOf(a.state) - ORDER.indexOf(b.state) || a.symbol.localeCompare(b.symbol));
+  const table = $("problems"); table.replaceChildren();
+  if (problems.length === 0) {
+    table.append(el("tr", {}, el("td", { class: "muted" }, TEXT.noProblems)));
+  } else {
+    table.append(el("tr", {}, el("th", {}, TEXT.columns.state), el("th", {}, TEXT.columns.symbol), el("th", {}, TEXT.columns.why)));
+    for (const s of problems) {
+      table.append(el("tr", {}, el("td", {}, tag(s.state)), el("td", {}, s.symbol),
+        el("td", {}, s.reasons.map((r) => reasonText(r, s)).join("; "))));
+    }
+  }
+
+  const ok = symbols.filter((s) => s.state === "ok");
+  const group = $("ok-group"); group.replaceChildren();
+  group.style.display = ok.length ? "block" : "none";
+  if (ok.length) {
+    group.append(el("summary", {}, TEXT.okGroup(ok.length)), el("div", { class: "muted" }, ok.map((s) => s.symbol).join(", ")));
+  }
+
+  const heat = $("heatmap"); heat.replaceChildren();
+  heat.append(el("tr", {}, el("th", {}, TEXT.columns.state), el("th", {}, TEXT.columns.symbol), el("th", {}, TEXT.columns.since), el("th", {}, TEXT.columns.strip)));
+  for (const s of symbols) {
+    const canvas = el("canvas");
+    drawStrip(canvas, s.strip, data.window);
+    heat.append(el("tr", {}, el("td", {}, tag(s.state)), el("td", {}, s.symbol), el("td", {}, day(s.oldest_open_time_ms)), el("td", { style: "width:60%" }, canvas)));
+  }
+}
+
+let inFlight = false, timer = null, lastFetchedAt = null, lastApiClock = null;
+
+function updateAge() {
+  const line = $("status-line");
+  if (lastFetchedAt == null) { line.textContent = ""; return; }
+  const seconds = Math.round((Date.now() - lastFetchedAt) / 1000);  // the browser's clock: display only, never a state
+  line.textContent = `${fmt(lastApiClock)} · ${TEXT.age(seconds)}`;
+  line.classList.toggle("old", seconds > OLD_AFTER_S);
+}
+
+async function refresh() {
+  if (inFlight) return;
+  inFlight = true; $("refresh").disabled = true;
+  try {
+    const response = await fetch("/overview.json", { cache: "no-store" });
+    const data = await response.json();
+    render(data, response.status);
+    lastFetchedAt = Date.now(); lastApiClock = data.generated_at_ms ?? null;
+  } catch (error) {
+    lastFetchedAt = null;
+    showError(TEXT.down + String(error));  // never leave an old green screen standing
+  } finally {
+    inFlight = false; $("refresh").disabled = false;
+    clearTimeout(timer); timer = setTimeout(refresh, POLL_MS);  // the next poll starts after this one ended
+    updateAge();
+  }
+}
+
+$("refresh").addEventListener("click", refresh);
+setInterval(updateAge, 1000);
+legend();
+refresh();
+</script>
+</body>
+</html>

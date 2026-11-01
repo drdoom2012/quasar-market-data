@@ -4,7 +4,7 @@ test:
 	uv run pytest
 
 lint:
-	uv run ruff check src tests spikes && uv run ruff format --check src tests spikes
+	uv run ruff check src tests spikes tools && uv run ruff format --check src tests spikes tools
 
 typecheck:
 	uv run mypy

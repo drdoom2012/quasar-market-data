@@ -44,9 +44,12 @@ markers = [
 line-length = 120
 src = ["src", "tests"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["tools"]
+
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "tools"]
 
 [[tool.mypy.overrides]]
 module = ["ccxt", "ccxt.*"]
