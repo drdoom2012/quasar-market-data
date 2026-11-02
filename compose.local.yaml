@@ -1,0 +1,29 @@
+# Local override: keeps the SQLite database in a host folder instead of the Docker volume `quasar-data`, and publishes
+# the API on 127.0.0.1:8000 so no SSH tunnel is needed. The database path in the config stays ../data/quasar.db.
+#
+#   docker compose -f compose.yaml -f compose.local.yaml up -d
+#   docker compose -f compose.yaml -f compose.build.yaml -f compose.local.yaml up -d   # with images built locally
+#
+# The folder is ./data/docker (git- and docker-ignored through /data/*). Do not point it at ./data itself: that is where
+# a run without Docker (`uv run quasar-collector`) keeps data/quasar.db, and the Collector must be the only writer.
+# Both services run as UID 10001, so the folder must be writable for it (on Linux: `chown 10001:10001 data/docker`);
+# the API needs write access too, because a WAL reader needs the shared-memory file.
+#
+# Published port: Docker cannot publish a port from an `internal` network, so the API also joins the ordinary bridge
+# `published`. That gives the API a route out, which compose.yaml deliberately withholds (INV/H1 isolation): use this
+# file for local work only, never on the VPS. The port is bound to 127.0.0.1, so only this machine reaches it.
+# Then:  curl localhost:8000/health
+services:
+  collector:
+    volumes:
+      - ./data/docker:/app/data
+  api:
+    volumes:
+      - ./data/docker:/app/data
+    networks:
+      published: {}
+    ports:
+      - "127.0.0.1:8000:8000"
+
+networks:
+  published: {}
