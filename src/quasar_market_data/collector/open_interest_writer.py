@@ -92,7 +92,9 @@ def _require_writer_connection(conn: sqlite3.Connection) -> None:
 
 
 def _is_busy(error: sqlite3.Error) -> bool:
-    return getattr(error, "sqlite_errorcode", None) == sqlite3.SQLITE_BUSY
+    """``SQLITE_BUSY`` or one of its extended codes (``sqlite_errorcode`` reports extended codes)."""
+    code = getattr(error, "sqlite_errorcode", None)
+    return isinstance(code, int) and code & 0xFF == sqlite3.SQLITE_BUSY
 
 
 class OpenInterestWriter:
@@ -145,6 +147,8 @@ class OpenInterestWriter:
                 f"transaction not committed; rollback could not be confirmed; the connection was closed: {error}"
             )
         if was_open and confirmed:
+            if _is_busy(error):
+                return OpenInterestWriteBusy(f"database busy at COMMIT; rolled back, nothing was written: {error}")
             return OpenInterestWriteError(f"COMMIT failed and was rolled back; nothing was written: {error}")
         suffix = "; the writer is now unusable" if self._unusable else ""
         return OpenInterestWriteOutcomeUnknown(

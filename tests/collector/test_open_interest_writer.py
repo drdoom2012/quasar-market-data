@@ -223,3 +223,33 @@ def test_closed_writer_refuses(writer: OpenInterestWriter) -> None:
     writer.close()
     with pytest.raises(OpenInterestWriteError, match="closed"):
         writer.write_transaction([oi(0)], ingested_at_ms=AT)
+
+
+def busy_error(code: int) -> sqlite3.OperationalError:
+    error = sqlite3.OperationalError("database is locked")
+    error.sqlite_errorcode = code
+    return error
+
+
+@pytest.mark.parametrize("code", [5, 261, 517, 773], ids=["busy", "busy_recovery", "busy_snapshot", "busy_timeout"])
+def test_extended_busy_codes_are_busy(db: Path, code: int) -> None:
+    conn, w = faulty(db)
+    conn.faults.append(Fault("BEGIN IMMEDIATE", busy_error(code)))
+    with pytest.raises(OpenInterestWriteBusy):
+        w.write_transaction([oi(0)], ingested_at_ms=AT)
+
+
+def test_a_non_busy_code_is_not_busy(db: Path) -> None:
+    conn, w = faulty(db)
+    conn.faults.append(Fault("BEGIN IMMEDIATE", busy_error(1555)))
+    with pytest.raises(OpenInterestWriteError) as error:
+        w.write_transaction([oi(0)], ingested_at_ms=AT)
+    assert type(error.value) is OpenInterestWriteError
+
+
+def test_busy_commit_that_rolled_back_is_busy(db: Path) -> None:
+    conn, w = faulty(db)
+    conn.faults.append(Fault("COMMIT", busy_error(5)))
+    with pytest.raises(OpenInterestWriteBusy):
+        w.write_transaction([oi(0)], ingested_at_ms=AT)
+    assert stored(db) == []
