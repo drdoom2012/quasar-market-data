@@ -117,6 +117,11 @@ def _discard_when_connected(executor: ThreadPoolExecutor, connecting: "Future[Op
     connecting.add_done_callback(cleanup)
 
 
+def _retrieve_future_exception(future: "asyncio.Future[OpenInterestBatchReport]") -> None:
+    if not future.cancelled():
+        future.exception()  # the write that submitted the job reports (or abandoned) it
+
+
 def _retrieve_exception(task: "asyncio.Task[None]") -> None:
     if not task.cancelled():
         task.exception()
@@ -170,9 +175,8 @@ class AsyncOpenInterestWriter:
         if job is None or job.done():
             return
         waiter = asyncio.wrap_future(job)
+        waiter.add_done_callback(_retrieve_future_exception)  # also when this write is cancelled while waiting
         await asyncio.wait({waiter})  # never raises the job's error; cancelling this write does not cancel the job
-        if not waiter.cancelled():
-            waiter.exception()  # mark it retrieved: the write that submitted the job reports (or abandoned) it
 
     async def _wait_for_candles(self, totals: _Totals) -> bool:
         """Wait while a candle write is active; ``True`` when it had to wait."""

@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import sqlite3
 import threading
 from collections.abc import Callable
@@ -378,3 +379,34 @@ def test_two_concurrent_writes_never_queue_a_transaction_past_the_activity_check
 
     asyncio.run(scenario())
     assert stored_count(db) == 400
+
+
+def test_a_cancelled_waiter_leaves_no_unretrieved_exception(db: Path) -> None:
+    problems: list[dict[str, Any]] = []
+
+    async def scenario() -> None:
+        asyncio.get_running_loop().set_exception_handler(lambda loop, context: problems.append(context))
+        made: list[FaultyConnection] = []
+        writer = await AsyncOpenInterestWriter.open(
+            db, activity=CandleWriteActivity(), connect=factory(made, GatedConnection)
+        )
+        conn = made[0]
+        assert isinstance(conn, GatedConnection)
+        conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("injected COMMIT failure")))
+        first = asyncio.ensure_future(writer.write(page(10), ingested_at_ms=AT))
+        assert await asyncio.to_thread(conn.reached.wait, 10)
+        first.cancel()
+        second = asyncio.ensure_future(writer.write(page(10, start=50), ingested_at_ms=AT))
+        await spin()  # second now waits for the first's transaction
+        second.cancel()
+        for task in (first, second):
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        conn.release.set()  # the first's COMMIT now fails with nobody awaiting it
+        await asyncio.sleep(0.1)
+        await writer.close()
+        gc.collect()
+        await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+    assert [p for p in problems if "never retrieved" in str(p.get("message", ""))] == []
