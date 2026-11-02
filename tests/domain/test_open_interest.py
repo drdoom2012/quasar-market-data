@@ -2,7 +2,15 @@ import pytest
 
 from quasar_market_data.domain.candle import CandleKey
 from quasar_market_data.domain.decimal_text import InvalidDecimalError
-from quasar_market_data.domain.open_interest import OpenInterest, OpenInterestKey, period_end_count
+from quasar_market_data.domain.open_interest import (
+    DEFAULT_OPEN_INTEREST_PUBLICATION_DELAY_MS,
+    OpenInterest,
+    OpenInterestKey,
+    is_open_interest_eligible,
+    period_end_count,
+    select_eligible_open_interest,
+)
+from quasar_market_data.domain.server_time import TimeRejection, TrustedTime, UntrustedTime
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.timestamps import MAX_TIMESTAMP_MS
 from tests.typing_helpers import untyped
@@ -100,3 +108,65 @@ def test_period_end_count_argument_checks() -> None:
         period_end_count(untyped(True), T, P5)
     with pytest.raises(TypeError):
         period_end_count(T, T, untyped("5m"))
+
+
+def row_at(time_ms: int) -> OpenInterest:
+    return OpenInterest(OpenInterestKey("binance-usdm", "BTC/USDT:USDT", P5, time_ms), "1", "2")
+
+
+def test_boundary_is_eligible_and_one_millisecond_earlier_is_not() -> None:
+    assert is_open_interest_eligible(T, 15_000, T + 15_000)
+    assert not is_open_interest_eligible(T, 15_000, T + 14_999)
+    assert is_open_interest_eligible(T, 0, T)
+    assert not is_open_interest_eligible(T, 0, T - 1)
+    row = row_at(T)
+    assert select_eligible_open_interest([row], 15_000, TrustedTime(T + 15_000)).eligible == (row,)
+    assert select_eligible_open_interest([row], 15_000, TrustedTime(T + 14_999)).pending == (row,)
+
+
+def test_time_ms_is_the_period_end() -> None:
+    # P-3: time_ms is the end of the period; treating it as an open time would require T + 5m + delay.
+    assert is_open_interest_eligible(T, 15_000, T + 15_000)
+    assert select_eligible_open_interest([row_at(T)], 15_000, TrustedTime(T + 15_000)).eligible == (row_at(T),)
+
+
+def test_mixed_rows_are_split_in_order() -> None:
+    rows = [row_at(T - 300_000), row_at(T), row_at(T + 300_000)]
+    selection = select_eligible_open_interest(rows, 15_000, TrustedTime(T + 15_000))
+    assert selection.eligible == (rows[0], rows[1])
+    assert selection.pending == (rows[2],)
+    assert selection.untrusted_reason is None
+
+
+@pytest.mark.parametrize("reason", list(TimeRejection), ids=lambda r: r.name.lower())
+def test_untrusted_time_selects_nothing(reason: TimeRejection) -> None:
+    rows = [row_at(T - 3_000_000), row_at(T)]
+    selection = select_eligible_open_interest(rows, 15_000, UntrustedTime(reason))
+    assert selection.eligible == ()
+    assert selection.pending == tuple(rows)
+    assert selection.untrusted_reason == reason
+
+
+def test_empty_rows() -> None:
+    for time in (TrustedTime(T), UntrustedTime(TimeRejection.NO_OBSERVATION)):
+        selection = select_eligible_open_interest([], 15_000, time)
+        assert (selection.eligible, selection.pending) == ((), ())
+
+
+def test_eligibility_argument_checks() -> None:
+    with pytest.raises(ValueError):
+        is_open_interest_eligible(T, -1, T)
+    with pytest.raises(ValueError):
+        select_eligible_open_interest([row_at(T)], -1, TrustedTime(T))
+    with pytest.raises(ValueError):
+        select_eligible_open_interest([row_at(T)], -1, UntrustedTime(TimeRejection.NO_OBSERVATION))
+    for bad in (True, 1.5):
+        with pytest.raises(TypeError):
+            is_open_interest_eligible(T, untyped(bad), T)
+        with pytest.raises(TypeError):
+            is_open_interest_eligible(T, 15_000, untyped(bad))
+    with pytest.raises(ValueError):
+        is_open_interest_eligible(MAX_TIMESTAMP_MS + 1, 15_000, T)
+    with pytest.raises(TypeError):
+        select_eligible_open_interest([row_at(T)], 15_000, untyped(object()))
+    assert DEFAULT_OPEN_INTEREST_PUBLICATION_DELAY_MS == 15_000
