@@ -122,6 +122,19 @@ ignore_imports = [
 ]
 
 [[tool.importlinter.contracts]]
+name = "open interest is independent of candle limiter and time"
+type = "forbidden"
+source_modules = [
+    "quasar_market_data.collector.binance_usdm_open_interest",
+    "quasar_market_data.collector.open_interest_budget",
+    "quasar_market_data.collector.open_interest_gate",
+]
+forbidden_modules = [
+    "quasar_market_data.collector.rate_limiter",
+    "quasar_market_data.collector.shared_server_time",
+]
+
+[[tool.importlinter.contracts]]
 name = "api reaches no network client"
 type = "forbidden"
 source_modules = ["quasar_market_data.api"]

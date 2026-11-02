@@ -23,6 +23,7 @@ CCXT_CONTRACT = "ccxt is imported only by the Binance adapter"
 NO_NETWORK_CONTRACT = "api reaches no network client"
 ENGINE_ONLY_CONTRACT = "talib and numpy are imported only by the indicator engine"
 CONFIG_CONTRACT = "config depends only on domain and the standard library"
+OI_INDEPENDENCE_CONTRACT = "open interest is independent of candle limiter and time"
 CONTRACT_NAMES = (
     DOMAIN_CONTRACT,
     INDEPENDENCE_CONTRACT,
@@ -32,6 +33,7 @@ CONTRACT_NAMES = (
     NO_NETWORK_CONTRACT,
     ENGINE_ONLY_CONTRACT,
     CONFIG_CONTRACT,
+    OI_INDEPENDENCE_CONTRACT,
 )
 
 
@@ -108,6 +110,25 @@ CASES = {
     "api_importing_config_is_allowed": Case("api/_probe.py", f"import {PACKAGE}.config\n", None),
     "collector_importing_config_is_allowed": Case("collector/_probe.py", f"import {PACKAGE}.config\n", None),
     "storage_importing_sqlite3_is_allowed": Case("storage/_probe.py", "import sqlite3\n", None),
+    "open_interest_gate_importing_the_candle_rate_limiter_fails_oi_independence": Case(
+        "collector/open_interest_gate.py", f"import {PACKAGE}.collector.rate_limiter\n", OI_INDEPENDENCE_CONTRACT
+    ),
+    "open_interest_budget_importing_shared_server_time_fails_oi_independence": Case(
+        "collector/open_interest_budget.py",
+        f"import {PACKAGE}.collector.shared_server_time\n",
+        OI_INDEPENDENCE_CONTRACT,
+    ),
+    "open_interest_source_importing_the_candle_rate_limiter_fails_oi_independence": Case(
+        "collector/binance_usdm_open_interest.py",
+        f"import ccxt\nimport {PACKAGE}.collector.rate_limiter\n",  # keeps the adapter's ignored ccxt import matched
+        OI_INDEPENDENCE_CONTRACT,
+    ),
+    "open_interest_budget_importing_the_clock_is_allowed": Case(
+        "collector/open_interest_budget.py", f"import {PACKAGE}.collector.clock\n", None
+    ),
+    "candle_modules_importing_the_rate_limiter_stay_allowed": Case(
+        "collector/_probe.py", f"import {PACKAGE}.collector.rate_limiter\n", None
+    ),
 }
 
 
