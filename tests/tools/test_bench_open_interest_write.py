@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from quasar_market_data.collector.async_open_interest_writer import DEFAULT_OPEN_INTEREST_BUSY_TIMEOUT_MS
 from quasar_market_data.collector.open_interest_writer import INSERT_OPEN_INTEREST
 from tools import bench_open_interest_write as bench
 
@@ -83,3 +84,18 @@ def test_imports_only_the_standard_library() -> None:
         "pathlib",
         "typing",
     }
+
+
+def test_busy_timeout_matches_the_writer() -> None:
+    assert bench.BUSY_TIMEOUT_MS == DEFAULT_OPEN_INTEREST_BUSY_TIMEOUT_MS
+
+
+def test_readme_runs_the_benchmark_in_the_dockerfile_runtime_image() -> None:
+    root = Path(__file__).resolve().parents[2]
+    runtime = next(
+        line.split()[1]
+        for line in (root / "Dockerfile").read_text("utf-8").splitlines()
+        if line.startswith("FROM ") and line.rstrip().endswith("AS runtime")
+    )
+    assert "@sha256:" in runtime
+    assert f"/src:ro {runtime} \\" in (root / "README.md").read_text("utf-8")

@@ -2,8 +2,11 @@
 
 Standard library only, so it runs where the project is not installed, for example on the VPS:
 
-    docker run --rm -v <empty dir on the database filesystem>:/bench -v $PWD:/src:ro python:3.12-slim \\
+    docker run --rm -v <empty dir on the database filesystem>:/bench -v $PWD:/src:ro <the Dockerfile's runtime image> \\
         python /src/bench_open_interest_write.py --schema /src/002_open_interest.sql --dir /bench/run --max-p99-ms 50
+
+Use the Dockerfile's pinned runtime image (README gives the exact reference), so the measured SQLite library is the
+production one; the ``sqlite=`` field of the output records the version either way.
 
 It creates a fresh database in ``--dir`` (missing or empty; created if missing), applies ``--schema``
 (``002_open_interest.sql``), and writes ``--transactions`` transactions of 100 new rows with the same INSERT
@@ -30,6 +33,7 @@ ROWS_PER_TRANSACTION: Final = 100
 DB_NAME: Final = "oi-bench.db"
 START_MS: Final = 1_700_000_100_000  # aligned to 5 minutes
 PERIOD_MS: Final = 300_000
+BUSY_TIMEOUT_MS: Final = 1_000  # must equal async_open_interest_writer.DEFAULT_OPEN_INTEREST_BUSY_TIMEOUT_MS (tested)
 
 # Must equal ``collector.open_interest_writer.INSERT_OPEN_INTEREST`` (asserted by a test).
 INSERT_OPEN_INTEREST: Final = (
@@ -52,7 +56,7 @@ def _connect(path: Path) -> sqlite3.Connection:
         raise SystemExit("WAL journal mode is unavailable")
     conn.execute("PRAGMA synchronous=FULL")
     conn.execute("PRAGMA recursive_triggers=ON")
-    conn.execute("PRAGMA busy_timeout=1000")
+    conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
     return conn
 
 

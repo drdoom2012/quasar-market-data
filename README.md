@@ -108,11 +108,11 @@ docker compose exec collector rm /app/data/backup.db
 **Open interest write benchmark (ADR-0003 P-9).** Measures the 100-row open interest transaction on the disk that holds the database (criterion: p99 ≤ 50 ms) without installing anything and without touching the production database or its volume. On the VPS: copy `tools/bench_open_interest_write.py` and `src/quasar_market_data/storage/migrations/002_open_interest.sql` from the release commit into one directory; find the volume's filesystem (`docker volume ls` shows its full name, usually prefixed with the Compose project; `docker volume inspect <name>` → `Mountpoint`, then `df <Mountpoint>`); create an empty directory on that filesystem outside the volume; then, right after a Collector `round` line:
 
 ```bash
-docker run --rm -v <empty dir>:/bench -v "$PWD":/src:ro python:3.12-slim \
+docker run --rm -v <empty dir>:/bench -v "$PWD":/src:ro python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337 \
   python /src/bench_open_interest_write.py --schema /src/002_open_interest.sql --dir /bench/run --max-p99-ms 50
 ```
 
-It prints one `oi_write …` line and removes its files. Locally: `make bench-oi-write` (on macOS the number is optimistic: SQLite does not force the write to the medium there).
+The image is the Dockerfile's pinned runtime base, so SQLite is the production library. It prints one `oi_write …` line and removes its files. Locally: `make bench-oi-write` (on macOS the number is optimistic: SQLite does not force the write to the medium there).
 
 ## Symbol overview (tool)
 
