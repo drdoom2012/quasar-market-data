@@ -253,3 +253,14 @@ def test_busy_commit_that_rolled_back_is_busy(db: Path) -> None:
     with pytest.raises(OpenInterestWriteBusy):
         w.write_transaction([oi(0)], ingested_at_ms=AT)
     assert stored(db) == []
+
+
+def test_conflict_stored_by_an_unknown_commit_is_reported_as_not_new_on_retry(db: Path) -> None:
+    conn, w = faulty(db)
+    w.write_transaction([oi(0, "1", "2")], ingested_at_ms=AT)
+    conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), after_execution=True))
+    with pytest.raises(OpenInterestWriteOutcomeUnknown):
+        w.write_transaction([oi(0, "1", "3")], ingested_at_ms=AT + 5)
+    retry = w.write_transaction([oi(0, "1", "3")], ingested_at_ms=AT + 9)
+    assert [c.newly_recorded for c in retry.conflicts] == [False]
+    assert conflict_rows(db) == [(T, "1", "3", AT + 5)]
