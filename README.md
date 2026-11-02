@@ -75,6 +75,14 @@ CI is configured to run `make check` on pull requests and pushes to `main` (not 
 
 Details are in [`docs/reference.md`](docs/reference.md): `quasar-api serve` and `quasar-collector run` / `fetch-once` (behaviour, exit codes), the API endpoints (instruments, health, indicators), restart reconcile, backfill and the benchmarks.
 
+## Open interest requests (ADR-0003)
+
+`quasar-collector fetch-oi-once --db market.db --symbol BTC/USDT:USDT [--periods 3]` fetches the newest 5m open interest rows of one symbol (Binance USDT-M, `GET /futures/data/openInterestHist`, public, no credentials) and stores the eligible ones; details and exit codes are in [`docs/reference.md`](docs/reference.md). Nothing collects open interest continuously yet (that is OI-4), so this command and the adapter behind it are the only users of the endpoint.
+
+**Operational requirement: nothing else on the IP may call `/futures/data/*` more than 600 times per 5 minutes.** Binance documents "IP rate limit 1000 requests/5min" for the endpoint and does not say whether all `/futures/data/*` callers share it. The open interest adapter counts its own request starts (history and server time together) in a sliding 300 s window, at most `budget_per_5min` (400 by default, 40 % of 1000), and has at most 2 requests in flight. A local limiter cannot see other consumers, so the remaining 60 % is reserved for anything else on the IP: do not run a second Collector with open interest enabled, and know what else calls `/futures/data/*` from that address.
+
+**429 and 418.** A `429` pauses every open interest request of the process for `max(Retry-After, 300 s)`, doubling on consecutive pauses up to 1 hour (a larger `Retry-After` is honoured). A `418` stops open interest until the process restarts and logs an error. Candle collection has its own client and limiter and is not paused by either. Whether a `418` caused by open interest would also ban klines for the IP is not known; the budget exists to make it unlikely.
+
 ## Deployment (S21)
 
 Two images, `ghcr.io/drdoom2012/quasar-market-data-collector` and `ghcr.io/drdoom2012/quasar-market-data-api` (`linux/amd64`, user `10001`), run as two services of `compose.yaml`. They share the volume `quasar-data` (mounted at `/app/data`, writable for both, because a WAL reader needs the shared-memory file) and read `config/quasar.compose.toml`, mounted read-only at `/app/config/`. That file must stay identical to `config/quasar.toml` except `[api].host = "0.0.0.0"` (`tests/config/test_compose_config.py`). The API stays read-only at the SQLite connection (INV-014); the Collector is the only writer.

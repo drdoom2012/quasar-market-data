@@ -1,5 +1,10 @@
 """``quasar-collector``: the Collector's command line.
 
+``fetch-oi-once`` (ADR-0003, OI-3) fetches the newest 5m open interest rows of one symbol on the open interest
+source's own client, stores the eligible ones and reports what happened. Exit codes as for ``fetch-once``, plus:
+``4`` also when a page failed after at least one of its transactions committed (those rows stay stored; re-run
+to complete the page), and ``1`` when server time is untrusted (no request is made, nothing is written).
+
 ``fetch-once`` fetches the most recent klines of one symbol, stores the confirmed closed candles and reports
 what happened. Exit codes keep apart what is known about persistence:
 
@@ -43,9 +48,16 @@ from importlib.metadata import version
 from pathlib import Path
 
 from quasar_market_data.collector.async_candle_writer import AsyncCandleWriter
+from quasar_market_data.collector.async_open_interest_writer import AsyncOpenInterestWriter, OpenInterestPageError
 from quasar_market_data.collector.backfill import BackfillConfig, Backfiller, SliceReport
 from quasar_market_data.collector.binance_klines import VENUE_BINANCE_USDM, KlineParseError
+from quasar_market_data.collector.binance_open_interest import OpenInterestParseError
 from quasar_market_data.collector.binance_usdm import BinanceUsdmSource
+from quasar_market_data.collector.binance_usdm_open_interest import (
+    DEFAULT_BUDGET_PER_5MIN,
+    BinanceUsdmOpenInterestSource,
+)
+from quasar_market_data.collector.candle_write_activity import CandleWriteActivity
 from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown
 from quasar_market_data.collector.clock import Clock, Sleep, SystemClock, system_sleep
 from quasar_market_data.collector.clock_lead import ClockLeadMonitor
@@ -63,7 +75,18 @@ from quasar_market_data.collector.fetch_once import (
     FetchOnceReport,
     fetch_once,
 )
+from quasar_market_data.collector.fetch_open_interest_once import (
+    DEFAULT_PERIODS,
+    MAX_PERIODS,
+    FetchOpenInterestOnceConfig,
+    FetchOpenInterestOnceReport,
+    OpenInterestOnceSource,
+    fetch_open_interest_once,
+)
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
+from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
+from quasar_market_data.collector.open_interest_gate import OpenInterestGate
+from quasar_market_data.collector.open_interest_writer import OpenInterestWriteOutcomeUnknown
 from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
 from quasar_market_data.collector.reconcile_reader import (
     ReadGuard,
@@ -74,6 +97,7 @@ from quasar_market_data.collector.reconcile_reader import (
 )
 from quasar_market_data.config.settings import DEFAULT_CONFIG_PATH, ConfigError, Settings, load_settings
 from quasar_market_data.domain.closed_candles import DEFAULT_PUBLICATION_DELAY_MS
+from quasar_market_data.domain.open_interest import DEFAULT_OPEN_INTEREST_PUBLICATION_DELAY_MS
 from quasar_market_data.domain.reconcile import (
     REACH_MARGIN_SLOTS,
     HistoryStatus,
@@ -93,6 +117,13 @@ EXIT_INTERRUPTED = 130
 POST_CHECK_GRACE_MS = 2_000  # how long shutdown waits for a running post-check before interrupting it
 
 type OpenSource = Callable[[], Awaitable[KlineSource]]
+type OpenInterestOpenSource = Callable[[Clock, Sleep], Awaitable[OpenInterestOnceSource]]
+
+
+async def open_binance_open_interest_source(clock: Clock, sleep: Sleep) -> OpenInterestOnceSource:
+    """The production factory: its own client, the ADR-0003 default budget (OI-4 reads it from the configuration)."""
+    budget = OpenInterestBudget(DEFAULT_BUDGET_PER_5MIN, clock, sleep)
+    return await BinanceUsdmOpenInterestSource.open(budget, OpenInterestGate(clock), clock)
 
 
 def _error(message: str) -> None:
@@ -103,6 +134,13 @@ def _limit(text: str) -> int:
     value = int(text)
     if not 1 <= value <= MAX_LIMIT:
         raise argparse.ArgumentTypeError(f"must be in 1..{MAX_LIMIT}")
+    return value
+
+
+def _periods(text: str) -> int:
+    value = int(text)
+    if not 1 <= value <= MAX_PERIODS:
+        raise argparse.ArgumentTypeError(f"must be in 1..{MAX_PERIODS}")
     return value
 
 
@@ -123,6 +161,20 @@ def _parser() -> argparse.ArgumentParser:
     fetch.add_argument("--limit", type=_limit, default=DEFAULT_LIMIT, help=f"rows to request (1..{MAX_LIMIT})")
     fetch.add_argument(
         "--publication-delay-ms", type=_delay, default=DEFAULT_PUBLICATION_DELAY_MS, help="publication delay (ADR-0001)"
+    )
+    oi = commands.add_parser(
+        "fetch-oi-once", help="fetch the newest 5m open interest rows of one symbol and store the eligible ones"
+    )
+    oi.add_argument("--db", required=True, type=Path, help="SQLite database file (its directory must exist)")
+    oi.add_argument("--symbol", required=True, help="CCXT unified symbol, e.g. BTC/USDT:USDT")
+    oi.add_argument(
+        "--periods", type=_periods, default=DEFAULT_PERIODS, help=f"newest period ends to request (1..{MAX_PERIODS})"
+    )
+    oi.add_argument(
+        "--publication-delay-ms",
+        type=_delay,
+        default=DEFAULT_OPEN_INTEREST_PUBLICATION_DELAY_MS,
+        help="publication delay (ADR-0003 P-4)",
     )
     run = commands.add_parser(
         "run", help="collect the newest closed 5m candles of the configured symbols until stopped"
@@ -168,6 +220,39 @@ async def _run(config: FetchOnceConfig, db: Path, open_source: OpenSource, clock
         stack.push_async_callback(_close_quietly, "the candle writer", writer.close)
         report = await fetch_once(source, writer, config, clock)
         return _print_report(config, report)  # printed before the resources close; the report is complete here
+
+
+def _print_open_interest_report(config: FetchOpenInterestOnceConfig, report: FetchOpenInterestOnceReport) -> int:
+    selection, write = report.selection, report.write
+    reason = selection.untrusted_reason
+    conflicts = len(write.conflicts) if write else 0
+    start = "none" if report.start_ms is None else report.start_ms
+    end = "none" if report.end_ms is None else report.end_ms
+    print(f"symbol={config.symbol} period=5m start_ms={start} end_ms={end} fetched={report.fetched}")
+    print("time=trusted" if reason is None else f"time=untrusted reason={reason.value}")
+    print(
+        f"inserted={write.inserted if write else 0} duplicates={write.duplicates if write else 0} "
+        f"conflicts={conflicts} pending={len(selection.pending)}"
+    )
+    if reason is not None:
+        _error(
+            f"error: server time is untrusted ({reason.value}); no open interest row was confirmed"
+            " and nothing was written"
+        )
+        return EXIT_FAILED
+    return EXIT_FINDINGS if conflicts else 0
+
+
+async def _run_open_interest(
+    config: FetchOpenInterestOnceConfig, db: Path, open_source: OpenInterestOpenSource, clock: Clock, sleep: Sleep
+) -> int:
+    async with AsyncExitStack() as stack:
+        source = await open_source(clock, sleep)
+        stack.push_async_callback(_close_quietly, "the exchange client", source.close)
+        writer = await AsyncOpenInterestWriter.open(db, activity=CandleWriteActivity())
+        stack.push_async_callback(_close_quietly, "the open interest writer", writer.close)
+        report = await fetch_open_interest_once(source, writer, config, clock)
+        return _print_open_interest_report(config, report)
 
 
 def run_exit_code(outcome: LoopExit | FatalLoopError) -> int:
@@ -550,10 +635,52 @@ def _fetch_once(args: argparse.Namespace, open_source: OpenSource, clock: Clock)
         return EXIT_FAILED
 
 
+_UNKNOWN_OUTCOME_MESSAGE = (
+    "write outcome unknown: the batch is stored completely or not at all; "
+    "re-run the same command to reconcile (writes are idempotent)"
+)
+
+
+def _open_interest_page_failure(error: OpenInterestPageError) -> int:
+    if error.committed_transactions > 0:
+        _error(
+            f"write incomplete: {error.committed_transactions} transaction(s) committed and stay stored,"
+            f" the rest of the page is not stored or its outcome is unknown ({error.cause});"
+            " re-run the same command to complete it (writes are idempotent)"
+        )
+        return EXIT_UNKNOWN_OUTCOME
+    if isinstance(error.cause, OpenInterestWriteOutcomeUnknown):
+        _error(_UNKNOWN_OUTCOME_MESSAGE)
+        return EXIT_UNKNOWN_OUTCOME
+    _error(f"error: {error.cause}")  # the first transaction failed with certainty: nothing was written
+    return EXIT_FAILED
+
+
+def _fetch_open_interest_once(
+    args: argparse.Namespace, open_source: OpenInterestOpenSource, clock: Clock, sleep: Sleep
+) -> int:
+    db: Path = args.db
+    if not db.parent.is_dir():
+        _error(f"error: database directory {db.parent} does not exist; nothing was written")
+        return EXIT_FAILED
+    config = FetchOpenInterestOnceConfig(
+        symbol=args.symbol, periods=args.periods, publication_delay_ms=args.publication_delay_ms
+    )
+    try:
+        _migrate(db, clock)
+        return asyncio.run(_run_open_interest(config, db, open_source, clock, sleep))
+    except OpenInterestPageError as error:
+        return _open_interest_page_failure(error)
+    except (SourceError, OpenInterestParseError, StorageError, sqlite3.Error) as error:  # raised before any write
+        _error(f"error: {error}")
+        return EXIT_FAILED
+
+
 def main(
     argv: list[str] | None = None,
     *,
     open_source: OpenSource = BinanceUsdmSource.open,
+    open_oi_source: OpenInterestOpenSource = open_binance_open_interest_source,
     clock: Clock | None = None,
     sleep: Sleep = system_sleep,
 ) -> int:
@@ -570,6 +697,8 @@ def main(
         print(loaded.start_line(), flush=True)
         return _run_command(loaded.settings, open_source, clock or SystemClock(), sleep)
     try:
+        if args.command == "fetch-oi-once":
+            return _fetch_open_interest_once(args, open_oi_source, clock or SystemClock(), sleep)
         return _fetch_once(args, open_source, clock or SystemClock())
     except KeyboardInterrupt:
         _error(

@@ -72,6 +72,25 @@ Fetches the most recent 5m klines of one Binance USDT-M perpetual (public endpoi
 | `130` | interrupted; whether the last batch was stored is unknown; re-run to reconcile |
 | `2` | usage error |
 
+### `quasar-collector fetch-oi-once`
+
+```
+quasar-collector fetch-oi-once --db market.db --symbol BTC/USDT:USDT [--periods 3] [--publication-delay-ms 15000]
+```
+
+Fetches the newest `--periods` (1..500, default 3) 5m open interest rows of one Binance USDT-M perpetual on its own CCXT client (ADR-0003 P-1, P-5), migrates the database on first use (the directory of `--db` must exist), stores only eligible rows and prints three `key=value` lines (`symbol`/`period`/`start_ms`/`end_ms`/`fetched`, `time`, and `inserted`/`duplicates`/`conflicts`/`pending`). The range is `[B - (periods - 1) x 5 min, B]` where `B` is the newest period end at or before the server-time lower bound; `time_ms` of a row is the **end** of its period. A row is eligible when its period end plus `--publication-delay-ms` (default 15 000) is at or before that bound; a younger row is `pending` and not stored, and a row Binance does not return yet is simply absent (never inferred). With untrusted server time no request is made and nothing is written. Values are stored as the decimal text Binance sent. Re-running is safe: stored rows are `duplicates`; a revised value is recorded in `open_interest_conflicts` and never overwrites.
+
+Every request obeys the P-5 rules (aligned bounds, at most 500 period ends including both bounds, no start older than 29 days before the lower bound) and the P-10 budget; see "Open interest requests" in the README for the 429/418 behaviour and the IP requirement.
+
+| Exit | Meaning |
+|---|---|
+| `0` | every eligible row stored; nothing conflicting |
+| `3` | eligible rows stored, but conflicts were found (see the output) |
+| `1` | failed; nothing was written, with certainty (source error, malformed response, a 429 pause or 418 stop, untrusted server time, schema or directory problem) |
+| `4` | the write's outcome is unknown, or a page failed after at least one transaction (of at most 100 rows) committed: those rows stay stored; re-run the same command to complete it |
+| `130` | interrupted; whether the last batch was stored is unknown; re-run to reconcile |
+| `2` | usage error |
+
 ### `quasar-collector run`
 
 ```

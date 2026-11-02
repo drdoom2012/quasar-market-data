@@ -116,7 +116,24 @@ name = "ccxt is imported only by the Binance adapter"
 type = "forbidden"
 source_modules = ["quasar_market_data.api", "quasar_market_data.collector"]
 forbidden_modules = ["ccxt"]
-ignore_imports = ["quasar_market_data.collector.binance_usdm -> ccxt"]
+ignore_imports = [
+    "quasar_market_data.collector.binance_usdm -> ccxt",
+    "quasar_market_data.collector.binance_usdm_open_interest -> ccxt",
+]
+
+[[tool.importlinter.contracts]]
+name = "open interest is independent of candle limiter and time"
+type = "forbidden"
+source_modules = [
+    "quasar_market_data.collector.binance_usdm_open_interest",
+    "quasar_market_data.collector.open_interest_budget",
+    "quasar_market_data.collector.open_interest_gate",
+    "quasar_market_data.collector.fetch_open_interest_once",
+]
+forbidden_modules = [
+    "quasar_market_data.collector.rate_limiter",
+    "quasar_market_data.collector.shared_server_time",
+]
 
 [[tool.importlinter.contracts]]
 name = "api reaches no network client"
