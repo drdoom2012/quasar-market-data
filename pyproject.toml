@@ -129,6 +129,8 @@ source_modules = [
     "quasar_market_data.collector.open_interest_budget",
     "quasar_market_data.collector.open_interest_gate",
     "quasar_market_data.collector.fetch_open_interest_once",
+    "quasar_market_data.collector.open_interest_reader",
+    "quasar_market_data.collector.open_interest_measurements",
 ]
 forbidden_modules = [
     "quasar_market_data.collector.rate_limiter",

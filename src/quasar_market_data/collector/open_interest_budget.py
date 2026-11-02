@@ -48,3 +48,13 @@ class OpenInterestBudget:
                     return
                 remaining_ns = self._starts[0] + _WINDOW_NS - now
                 await self._sleep(-(-remaining_ns // _NS_PER_MS))
+
+    def committed_at(self, at_ns: int) -> int:
+        """Counted starts whose 300 s window still covers ``at_ns`` (a start at ``s`` counts while ``at_ns < s + 300 s``).
+
+        A read-only view for a caller that must leave room for a later request (the catch-up before a round, ADR-0003
+        P-15); it neither removes entries nor reads the clock.
+        """
+        if type(at_ns) is not int:
+            raise TypeError(f"at_ns must be int, got {type(at_ns).__name__}")
+        return sum(1 for start in self._starts if start + _WINDOW_NS > at_ns)
