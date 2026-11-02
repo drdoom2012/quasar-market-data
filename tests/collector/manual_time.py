@@ -11,6 +11,7 @@ ahead of work that needs real time, and a slower machine sees "nothing is waitin
 
 import asyncio
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,6 +44,10 @@ def _thread_jobs(loop: asyncio.AbstractEventLoop) -> _ThreadJobs:
     loop.run_in_executor = run_in_executor  # type: ignore[assignment]
     loop._manual_time_jobs = jobs  # type: ignore[attr-defined]
     return jobs
+
+
+def _finish(jobs: _ThreadJobs) -> None:
+    jobs.pending -= 1
 
 
 @dataclass(order=True)
@@ -91,6 +96,25 @@ class ManualTime:
         finally:
             if waiter in self._waiters:
                 self._waiters.remove(waiter)
+
+    def track_executor(self, executor: ThreadPoolExecutor) -> None:
+        """Make ``settle`` wait for the jobs submitted to ``executor`` with ``executor.submit``.
+
+        ``settle`` sees only ``loop.run_in_executor`` jobs; ``AsyncOpenInterestWriter`` submits to its own executor and
+        wraps the future with ``asyncio.wrap_future``, which it cannot see (the F-19 race again). Call it from inside the
+        running loop, once per executor, before the first submission.
+        """
+        loop = asyncio.get_running_loop()
+        jobs = _thread_jobs(loop)
+        original = executor.submit
+
+        def submit(function: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+            future = original(function, *args, **kwargs)
+            jobs.pending += 1
+            future.add_done_callback(lambda _: loop.call_soon_threadsafe(_finish, jobs))
+            return future
+
+        executor.submit = submit  # type: ignore[method-assign]
 
     async def settle(self) -> None:
         jobs = _thread_jobs(asyncio.get_running_loop())
