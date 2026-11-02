@@ -8,8 +8,9 @@ Contention rules (P-9 rules 1 and 2): ``write`` splits a page into transactions 
 ``MAX_ROWS_PER_TRANSACTION`` rows, in input order. Immediately before submitting each transaction it waits while
 ``CandleWriteActivity`` is active (``while activity.active: await activity.wait_idle()``, with no ``await``
 between the last check and the submission). At most one open interest transaction is ever in flight: before its
-check, ``write`` waits for the previous transaction, also one left running by a cancelled ``write``. A candle write
-that starts after the check can therefore wait for at most that one transaction.
+check, ``write`` waits for the previous transaction, also one left running by a cancelled ``write`` or submitted by
+another concurrent ``write``; both conditions are re-checked after every ``await``. A candle write that starts after
+the check can therefore wait for at most that one transaction.
 
 A failing transaction raises ``OpenInterestPageError``: earlier transactions of the page stay committed, the error
 carries their count and report, and re-sending the page is idempotent. Cancellation between transactions starts no
@@ -173,14 +174,15 @@ class AsyncOpenInterestWriter:
         if not waiter.cancelled():
             waiter.exception()  # mark it retrieved: the write that submitted the job reports (or abandoned) it
 
-    async def _wait_for_candles(self, totals: _Totals) -> None:
+    async def _wait_for_candles(self, totals: _Totals) -> bool:
+        """Wait while a candle write is active; ``True`` when it had to wait."""
         if not self._activity.active:
-            return
-        totals.yields += 1
+            return False
         started = self._monotonic_ns()
         while self._activity.active:
             await self._activity.wait_idle()
         totals.yield_wait_ns += self._monotonic_ns() - started
+        return True
 
     async def write(self, rows: Sequence[OpenInterest], *, ingested_at_ms: int) -> OpenInterestWriteReport:
         if self._state is not WriterState.OPEN:
@@ -193,8 +195,13 @@ class AsyncOpenInterestWriter:
         totals = _Totals()
         for committed, start in enumerate(range(0, len(page), MAX_ROWS_PER_TRANSACTION)):
             chunk = page[start : start + MAX_ROWS_PER_TRANSACTION]
-            await self._wait_for_previous()
-            await self._wait_for_candles(totals)
+            yielded = False
+            while True:  # several callers may wait at once: re-check both conditions after every await
+                await self._wait_for_previous()
+                yielded = await self._wait_for_candles(totals) or yielded
+                if (self._last_job is None or self._last_job.done()) and not self._activity.active:
+                    break
+            totals.yields += yielded
             if self._state is not WriterState.OPEN:
                 raise OpenInterestWriteError(f"writer is {self._state.value}")
             # no await between the last activity check and the submission

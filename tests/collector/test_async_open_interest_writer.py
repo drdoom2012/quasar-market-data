@@ -327,3 +327,54 @@ def test_wrong_row_type_is_refused_before_any_transaction(db: Path) -> None:
         await writer.close()
 
     asyncio.run(scenario())
+
+
+class TwoGates(FaultyConnection):
+    """Blocks COMMIT #1 and COMMIT #2 on the worker thread, each until its own release."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.armed = False
+        self.commits = 0
+        self.reached = {1: threading.Event(), 2: threading.Event()}
+        self.release = {1: threading.Event(), 2: threading.Event()}
+
+    def execute(self, sql: str, *args: Any) -> sqlite3.Cursor:
+        if sql == "COMMIT" and self.armed:
+            self.commits += 1
+            if self.commits in self.reached:
+                self.reached[self.commits].set()
+                assert self.release[self.commits].wait(10)
+        return super().execute(sql, *args)
+
+
+def test_two_concurrent_writes_never_queue_a_transaction_past_the_activity_check(db: Path) -> None:
+    def connect(path: Path, busy_timeout_ms: int) -> sqlite3.Connection:
+        conn = open_faulty_writer(path, AT, factory=TwoGates)
+        assert isinstance(conn, TwoGates)
+        conn.armed = True
+        made.append(conn)
+        return conn
+
+    made: list[FaultyConnection] = []
+
+    async def scenario() -> None:
+        activity = CandleWriteActivity()
+        writer = await AsyncOpenInterestWriter.open(db, activity=activity, connect=connect)
+        conn = made[0]
+        assert isinstance(conn, TwoGates)
+        first = asyncio.ensure_future(writer.write(page(200), ingested_at_ms=AT))
+        second = asyncio.ensure_future(writer.write(page(200, start=300), ingested_at_ms=AT))
+        assert await asyncio.to_thread(conn.reached[1].wait, 10)
+        conn.release[1].set()  # both callers wake; only one may submit, the other must re-check
+        assert await asyncio.to_thread(conn.reached[2].wait, 10)
+        with activity.writing():
+            conn.release[2].set()
+            await spin()
+            assert begins(conn) == 2, "a transaction queued behind COMMIT #2 began while a candle write was active"
+        await asyncio.gather(first, second)
+        assert begins(conn) == 4
+        await writer.close()
+
+    asyncio.run(scenario())
+    assert stored_count(db) == 400
