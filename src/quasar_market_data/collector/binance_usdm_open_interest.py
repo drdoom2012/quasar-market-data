@@ -16,6 +16,11 @@ waited while another got a 429/418 sends nothing), the CCXT call. The slot is ta
 waiting for a slot does not use up budget it cannot yet spend. CCXT's own throttle (``enableRateLimit``,
 ``rateLimit`` 50 ms) may still delay the network send after the grant; that only spaces requests further apart.
 
+Share one source (one gate, one budget, one in-flight limit of ``MAX_IN_FLIGHT``) between everything that asks
+for open interest in a process: the limit belongs to the instance, so two sources would allow four requests in
+flight. The budget is a plain FIFO; "rounds pre-empt backfill" (P-15, OI-4) is OI-4 work on top of it. ``OpenInterestPaused``
+carries ``remaining_ms`` and ``until_monotonic_ns`` (the gate's monotonic clock) so a caller can schedule around it.
+
 Request rules (P-5) are checked by ``validate_open_interest_request`` before any budget use or request: both
 bounds aligned, at most 500 period ends including both bounds, no start older than the 29-day horizon before
 ``as_of_ms``. A violation raises ``OpenInterestRequestRefused``. An over-long range is refused, never split (the
@@ -146,13 +151,15 @@ class BinanceUsdmOpenInterestSource:
         retry_after = _retry_after_ms(getattr(self._client, "last_response_headers", None))
         if not text.startswith(f"{exchange_id} 429 "):
             retry_after = 0
-        return OpenInterestPaused(self._gate.record_rate_limited(retry_after))
+        self._gate.record_rate_limited(retry_after)
+        return self._gate.paused()
 
     async def _request[T](self, what: str, call: Callable[[], Awaitable[T]]) -> T:
         self._gate.check()
         async with self._in_flight:
             await self._budget.acquire()
             self._gate.check()  # the start is counted, but a call that waited sends nothing into a pause
+            generation = self._gate.generation
             try:
                 result = await call()
             except (ccxt.BaseError, SourceError) as error:
@@ -161,11 +168,11 @@ class BinanceUsdmOpenInterestSource:
                 if stop is not None:
                     raise stop from error
                 if isinstance(error, SourceError):
-                    if original is None:
-                        self._gate.record_success()  # the answer arrived; the adapter rejected its content
+                    if not isinstance(original, ccxt.BaseError):
+                        self._gate.record_success(generation)  # the answer arrived; the adapter rejected its content
                     raise
                 raise SourceError(f"{what} failed: {error}") from error
-            self._gate.record_success()
+            self._gate.record_success(generation)
             return result
 
     def market_id(self, symbol: str) -> str:

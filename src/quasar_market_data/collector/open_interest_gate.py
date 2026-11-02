@@ -29,8 +29,9 @@ _MAX_DOUBLINGS: Final = 10  # 300 s * 2^10 is far above the cap; bounds the inte
 class OpenInterestPaused(SourceError):
     """A 429 paused all open interest requests; ``remaining_ms`` is the time left (rounded up)."""
 
-    def __init__(self, remaining_ms: int) -> None:
+    def __init__(self, remaining_ms: int, until_monotonic_ns: int) -> None:
         self.remaining_ms = remaining_ms
+        self.until_monotonic_ns = until_monotonic_ns  # the end of the pause on the gate's monotonic clock
         super().__init__(f"open interest requests are paused after a 429 for another {remaining_ms} ms")
 
 
@@ -48,6 +49,12 @@ class OpenInterestGate:
         self._banned = False
         self._pause_until_ns: int | None = None
         self._consecutive = 0
+        self._generation = 0
+
+    @property
+    def generation(self) -> int:
+        """Counts pauses and the ban. A request notes it when it starts and passes it to ``record_success``."""
+        return self._generation
 
     def _remaining_ns(self) -> int:
         if self._pause_until_ns is None:
@@ -57,9 +64,13 @@ class OpenInterestGate:
     def check(self) -> None:
         if self._banned:
             raise OpenInterestBanned
-        remaining_ns = self._remaining_ns()
-        if remaining_ns > 0:
-            raise OpenInterestPaused(-(-remaining_ns // _NS_PER_MS))
+        if self._remaining_ns() > 0:
+            raise self.paused()
+
+    def paused(self) -> OpenInterestPaused:
+        """The signal for the pause in force now (call it only while a pause is running)."""
+        assert self._pause_until_ns is not None
+        return OpenInterestPaused(-(-self._remaining_ns() // _NS_PER_MS), self._pause_until_ns)
 
     def record_rate_limited(self, retry_after_ms: int) -> int:
         """Record a 429 and return the pause in force from now, in ms."""
@@ -70,17 +81,24 @@ class OpenInterestGate:
         now = self._clock.monotonic_ns()
         if self._remaining_ns() == 0:
             self._consecutive += 1  # a new pause; a 429 inside a running one is the same pause
+            self._generation += 1
         doubled = min(_BASE_PAUSE_MS * 2 ** min(self._consecutive - 1, _MAX_DOUBLINGS), _MAX_DOUBLED_PAUSE_MS)
         until_ns = now + max(retry_after_ms, doubled) * _NS_PER_MS
         if self._pause_until_ns is None or until_ns > self._pause_until_ns:
             self._pause_until_ns = until_ns
         return -(-(self._pause_until_ns - now) // _NS_PER_MS)
 
-    def record_success(self) -> None:
-        if self._remaining_ns() == 0:
+    def record_success(self, started_generation: int) -> None:
+        """Reset the doubling for a success of a request that started after the last pause began.
+
+        A request that was in flight when a 429 arrived (it started in an earlier generation) neither shortens the
+        pause nor resets the doubling, also when it finishes after the pause has ended.
+        """
+        if started_generation == self._generation and self._remaining_ns() == 0:
             self._consecutive = 0
 
     def record_banned(self) -> None:
         if not self._banned:
             self._banned = True
+            self._generation += 1
             self._logger.error("open interest stopped for this run: Binance answered 418 (IP banned)")

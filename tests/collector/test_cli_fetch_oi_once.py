@@ -204,7 +204,7 @@ def test_the_factory_gets_the_injected_clock_and_sleep(db: Path) -> None:
 
 @pytest.mark.parametrize(
     "error",
-    [SourceError("boom"), OpenInterestPaused(300_000), OpenInterestBanned()],
+    [SourceError("boom"), OpenInterestPaused(300_000, 1), OpenInterestBanned()],
     ids=["source", "paused", "banned"],
 )
 def test_a_source_failure_exits_one_with_nothing_written(
@@ -214,6 +214,18 @@ def test_a_source_failure_exits_one_with_nothing_written(
     assert run_cli(db, FakeOiSource(clock, hist_error=error), clock) == 1
     assert capsys.readouterr().err.startswith("error:")
     assert stored(db) == []
+
+
+@pytest.mark.parametrize("error", [OpenInterestPaused(300_000, 1), OpenInterestBanned()], ids=["paused", "banned"])
+def test_a_429_or_418_on_the_time_request_is_reported_as_such_not_as_untrusted_time(
+    db: Path, capsys: pytest.CaptureFixture[str], error: SourceError
+) -> None:
+    clock = FakeClock()
+    source = FakeOiSource(clock, time_error=error)
+    assert run_cli(db, source, clock) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("error:") and "untrusted" not in err and str(error) in err
+    assert source.hist_calls == [] and stored(db) == []
 
 
 def test_a_rejected_response_exits_one_with_nothing_written(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -228,15 +240,6 @@ def failing_write(monkeypatch: pytest.MonkeyPatch, error: OpenInterestWriteError
         raise error
 
     monkeypatch.setattr(AsyncOpenInterestWriter, "write", write)
-
-
-def test_an_unknown_write_outcome_exits_four(
-    db: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    failing_write(monkeypatch, OpenInterestWriteOutcomeUnknown("commit failed"))
-    clock = FakeClock()
-    assert run_cli(db, FakeOiSource(clock), clock) == 4
-    assert "unknown" in capsys.readouterr().err
 
 
 def test_an_unknown_outcome_inside_a_page_error_exits_four(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:

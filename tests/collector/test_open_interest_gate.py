@@ -62,7 +62,7 @@ def test_a_success_after_the_pause_resets_the_doubling() -> None:
     clock, gate = make()
     clock.advance(gate.record_rate_limited(0))
     clock.advance(gate.record_rate_limited(0))
-    gate.record_success()
+    gate.record_success(gate.generation)
     assert gate.record_rate_limited(0) == 300 * S
 
 
@@ -93,8 +93,9 @@ def test_a_later_429_during_a_pause_never_shortens_it() -> None:
 
 def test_a_late_success_during_a_pause_does_not_shorten_it_or_reset_the_doubling() -> None:
     clock, gate = make()
+    started = gate.generation  # the request started before the 429
     gate.record_rate_limited(0)
-    gate.record_success()  # a request in flight when the 429 arrived completes
+    gate.record_success(started)  # a request in flight when the 429 arrived completes
     with pytest.raises(OpenInterestPaused):
         gate.check()
     clock.advance(300 * S)
@@ -109,7 +110,7 @@ def test_a_ban_is_permanent_for_the_process_run() -> None:
     clock.advance(2 * 3600 * S)
     with pytest.raises(OpenInterestBanned):
         gate.check()
-    gate.record_success()
+    gate.record_success(gate.generation)
     with pytest.raises(OpenInterestBanned):
         gate.check()
 
@@ -130,6 +131,26 @@ def test_a_ban_logs_one_error(caplog: pytest.LogCaptureFixture) -> None:
     errors = [r for r in caplog.records if r.levelno == logging.ERROR]
     assert len(errors) == 1
     assert "418" in errors[0].getMessage()
+
+
+def test_a_request_that_started_before_a_pause_cannot_reset_the_doubling_after_it_ended() -> None:
+    clock, gate = make()
+    started = gate.generation
+    clock.advance(gate.record_rate_limited(0))  # first pause, now over
+    gate.record_success(started)  # the slow request from before the pause finishes
+    assert gate.record_rate_limited(0) == 600 * S  # still the second step
+    clock.advance(600 * S)
+    gate.record_success(gate.generation)  # a request that started after the pause ended
+    assert gate.record_rate_limited(0) == 300 * S
+
+
+def test_the_pause_signal_carries_the_end_on_the_monotonic_clock() -> None:
+    clock, gate = make()
+    now = clock.monotonic_ns()
+    gate.record_rate_limited(0)
+    with pytest.raises(OpenInterestPaused) as raised:
+        gate.check()
+    assert raised.value.until_monotonic_ns == now + 300 * S * 1_000_000
 
 
 @pytest.mark.parametrize("bad", [-1, True, 1.5, "10", None])

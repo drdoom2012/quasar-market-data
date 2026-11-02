@@ -123,6 +123,11 @@ CASES = {
         f"import ccxt\nimport {PACKAGE}.collector.rate_limiter\n",  # keeps the adapter's ignored ccxt import matched
         OI_INDEPENDENCE_CONTRACT,
     ),
+    "fetch_open_interest_once_importing_shared_server_time_fails_oi_independence": Case(
+        "collector/fetch_open_interest_once.py",
+        f"import {PACKAGE}.collector.shared_server_time\n",
+        OI_INDEPENDENCE_CONTRACT,
+    ),
     "open_interest_budget_importing_the_clock_is_allowed": Case(
         "collector/open_interest_budget.py", f"import {PACKAGE}.collector.clock\n", None
     ),

@@ -671,9 +671,6 @@ def _fetch_open_interest_once(
         return asyncio.run(_run_open_interest(config, db, open_source, clock, sleep))
     except OpenInterestPageError as error:
         return _open_interest_page_failure(error)
-    except OpenInterestWriteOutcomeUnknown:
-        _error(_UNKNOWN_OUTCOME_MESSAGE)
-        return EXIT_UNKNOWN_OUTCOME
     except (SourceError, OpenInterestParseError, StorageError, sqlite3.Error) as error:  # raised before any write
         _error(f"error: {error}")
         return EXIT_FAILED

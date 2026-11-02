@@ -538,6 +538,85 @@ def test_retry_after_is_read_case_insensitively_and_strictly(headers: dict[str, 
     run(scenario)
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        ddos(503),
+        ccxt.RateLimitExceeded('binanceusdm {"code":-1003,"msg":"Too many requests."}'),
+    ],
+    ids=["other_ddos_protection", "rate_limit_exceeded"],
+)
+def test_retry_after_is_only_read_for_an_http_429(error: ccxt.BaseError) -> None:
+    async def scenario() -> None:
+        rig = Rig()
+        source = await rig.open()
+        rig.exchange.last_response_headers = {"Retry-After": "900"}  # may belong to another response
+        rig.exchange.errors = [error]
+        with pytest.raises(OpenInterestPaused) as raised:
+            await hist(source)
+        assert raised.value.remaining_ms == 300 * S
+
+    run(scenario)
+
+
+@pytest.mark.parametrize(
+    "bad_time", [{"serverTime": "x"}, {"serverTime": 1}, {}], ids=["str", "out_of_range", "missing"]
+)
+def test_a_time_answer_the_adapter_rejects_still_counts_as_a_success_for_the_gate(bad_time: object) -> None:
+    async def scenario() -> None:
+        rig = Rig()
+        source = await rig.open()
+        rig.exchange.errors = [ddos(429)]
+        with pytest.raises(OpenInterestPaused):
+            await hist(source)
+        await rig.t.advance(300 * S)
+        rig.exchange.time_response = bad_time
+        with pytest.raises(SourceError) as raised:
+            await source.fetch_server_time()
+        assert not isinstance(raised.value, (OpenInterestPaused, OpenInterestBanned))
+        rig.exchange.errors = [ddos(429)]
+        with pytest.raises(OpenInterestPaused) as again:
+            await hist(source)
+        assert again.value.remaining_ms == 300 * S  # the answer arrived: the doubling was reset
+
+    run(scenario)
+
+
+def test_the_pause_signal_names_the_end_of_the_pause() -> None:
+    async def scenario() -> None:
+        rig = Rig()
+        source = await rig.open()
+        started = rig.t.monotonic_ns()
+        rig.exchange.errors = [ddos(429)]
+        with pytest.raises(OpenInterestPaused) as raised:
+            await hist(source)
+        assert raised.value.until_monotonic_ns == started + 300 * S * NS_PER_MS
+
+    run(scenario)
+
+
+def test_a_request_that_started_before_a_pause_cannot_reset_the_doubling() -> None:
+    async def scenario() -> None:
+        rig = Rig()
+        source = await rig.open()
+        rig.exchange.hold = True
+        slow = asyncio.create_task(hist(source))  # starts, then waits on the exchange
+        await rig.t.settle()
+        rig.exchange.hold = False
+        rig.exchange.errors = [ddos(429)]
+        with pytest.raises(OpenInterestPaused):
+            await hist(source)  # a second request gets the 429 meanwhile
+        await rig.t.advance(300 * S)  # the pause is over
+        rig.exchange.release.set()
+        await slow  # the slow request succeeds only now: it started before the pause
+        rig.exchange.errors = [ddos(429)]
+        with pytest.raises(OpenInterestPaused) as raised:
+            await hist(source)
+        assert raised.value.remaining_ms == 600 * S
+
+    run(scenario)
+
+
 def test_418_stops_open_interest_for_the_run_on_both_endpoints() -> None:
     async def scenario() -> None:
         rig = Rig()

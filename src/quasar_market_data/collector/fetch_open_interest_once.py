@@ -10,7 +10,8 @@ With untrusted time **no request is made**: nothing could be stored, and an elig
 inferred from a clock that cannot be trusted. The report then carries the reason. A row that is not yet eligible
 is pending and is not stored; it is not an error. Absence of a row is not an error either (P-7).
 
-Failures propagate: ``SourceError`` (also ``OpenInterestPaused`` and ``OpenInterestBanned``),
+Failures propagate: ``SourceError`` (also ``OpenInterestPaused`` and ``OpenInterestBanned``, which on the time
+request are re-raised instead of being read as "no observation"),
 ``OpenInterestParseError`` and any writer error, including ``OpenInterestPageError``, reach the caller unchanged.
 """
 
@@ -22,6 +23,7 @@ from quasar_market_data.collector.async_open_interest_writer import OpenInterest
 from quasar_market_data.collector.binance_open_interest import parse_open_interest_hist
 from quasar_market_data.collector.clock import Clock
 from quasar_market_data.collector.kline_source import SourceError
+from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestPaused
 from quasar_market_data.domain.open_interest import (
     DEFAULT_OPEN_INTEREST_PUBLICATION_DELAY_MS,
     OpenInterest,
@@ -99,6 +101,8 @@ async def fetch_open_interest_once(
 ) -> FetchOpenInterestOnceReport:
     try:
         observation = await source.fetch_server_time()
+    except (OpenInterestPaused, OpenInterestBanned):
+        raise  # a 429/418 on the time request is not "untrusted time": say what happened
     except SourceError:
         observation = None  # a failed time request means no observation, not a failed run
 
