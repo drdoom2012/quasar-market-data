@@ -46,7 +46,8 @@ def steady_budget(budget_per_5min: int) -> int:
     return budget * 3 // 4
 
 
-def _round_cost(symbol_count: int, c: int) -> int:
+def round_cost(symbol_count: int, c: int) -> int:
+    """Request starts per 5 minutes a round needs: one request and one retry per symbol, plus two time calls."""
     return 2 * _ceil_div(symbol_count, c) + 2
 
 
@@ -57,7 +58,7 @@ def open_interest_cadence(symbol_count: int, budget_per_5min: int) -> int:
         raise ValueError(f"symbol_count must be >= 1, got {count}")
     steady = steady_budget(budget_per_5min)
     for c in range(1, MAX_CADENCE + 1):
-        if _round_cost(count, c) <= steady:
+        if round_cost(count, c) <= steady:
             return c
     largest = MAX_CADENCE * ((steady - 2) // 2)
     raise CadenceError(
@@ -69,7 +70,7 @@ def open_interest_cadence(symbol_count: int, budget_per_5min: int) -> int:
 def backfill_share(symbol_count: int, budget_per_5min: int) -> int:
     """Request starts per 5 minutes left for the backfill: ``b - 2 * ceil(S / c) - 2``."""
     c = open_interest_cadence(symbol_count, budget_per_5min)
-    return budget_per_5min - _round_cost(symbol_count, c)
+    return budget_per_5min - round_cost(symbol_count, c)
 
 
 def symbols_for_round(symbols: Sequence[str], boundary_ms: int, c: int, period: Timeframe) -> tuple[str, ...]:
