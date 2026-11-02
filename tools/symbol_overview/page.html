@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="cs">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Přehled symbolů</title>
+<title>Symbol overview</title>
 <style>
   :root {
     --bg: #fafafa; --fg: #1d1d1f; --muted: #6b6b70; --line: #d8d8dc; --card: #ffffff;
@@ -39,16 +39,16 @@
 </head>
 <body>
 <header>
-  <h1>Přehled symbolů</h1>
-  <button id="refresh" type="button">Obnovit</button>
+  <h1>Symbol overview</h1>
+  <button id="refresh" type="button">Refresh</button>
   <span id="status-line" role="status"></span>
 </header>
 <div id="api-error" role="alert"></div>
 <div id="summary"></div>
-<h2 id="problems-title">Co nesedí</h2>
+<h2 id="problems-title">What is wrong</h2>
 <table id="problems"></table>
 <details id="ok-group"></details>
-<h2>Posledních 30 dní</h2>
+<h2>Last 30 days</h2>
 <div id="legend"></div>
 <table id="heatmap"></table>
 
@@ -56,31 +56,31 @@
 "use strict";
 // All text of the page is here. The page decides no state: it draws what /overview.json says.
 const TEXT = {
-  down: "Nástroj neodpovídá: ",
-  apiNotReady: "API není použitelné: ",
-  never: "zatím nic",
-  age: (s) => `stav z API, staženo před ${s} s`,
-  states: { no_data: "bez dat", unknown: "nelze posoudit", stale: "zastaralé", conflict: "konflikt", holes: "díry", behind: "zaostává", ok: "v pořádku" },
-  tiles: { total: "celkem" },
-  noProblems: "Nic nesedí.",
-  okGroup: (n) => `${n} ${cs(n, "symbol", "symboly", "symbolů")} v pořádku`,
-  columns: { state: "Stav", symbol: "Symbol", why: "Důvod", since: "Historie od", strip: "30 dní" },
+  down: "The tool does not respond: ",
+  apiNotReady: "The API is not usable: ",
+  never: "nothing yet",
+  age: (s) => `state from the API, fetched ${s} s ago`,
+  states: { no_data: "no data", unknown: "cannot judge", stale: "stale", conflict: "conflict", holes: "holes", behind: "behind", ok: "ok" },
+  tiles: { total: "total" },
+  noProblems: "Nothing is wrong.",
+  okGroup: (n) => `${n} ${plural(n, "symbol", "symbols")} ok`,
+  columns: { state: "State", symbol: "Symbol", why: "Reason", since: "History since", strip: "30 days" },
   reasons: {
-    no_data: () => "nic nestaženo (API nerozliší, zda se mělo)",
-    invalid: (r) => `odpověď API nelze použít (${r.detail})`,
-    stored_ahead: () => "hodiny serveru jsou před uloženými daty, čerstvost nelze posoudit",
-    stale: (r, s) => `${slots(r.slots)} po termínu, poslední candle ${fmt(s.newest_open_time_ms)}`,
-    conflict: (r) => `${slots(r.slots)} v konfliktu`,
-    missing: (r) => `chybí ${slots(r.slots)} (úseků: ${r.runs})`,
-    unavailable: (r) => `${slots(r.slots)}: burza potvrdila, že data nemá`,
-    due: (r) => `zaostává o ${slots(r.slots)}`,
+    no_data: () => "nothing downloaded (the API cannot tell whether something should have been)",
+    invalid: (r) => `the API answer cannot be used (${r.detail})`,
+    stored_ahead: () => "the server clock is ahead of the stored data, freshness cannot be judged",
+    stale: (r, s) => `${slots(r.slots)} overdue, last candle ${fmt(s.newest_open_time_ms)}`,
+    conflict: (r) => `${slots(r.slots)} in conflict`,
+    missing: (r) => `${slots(r.slots)} missing (runs: ${r.runs})`,
+    unavailable: (r) => `${slots(r.slots)}: the exchange confirmed it has no data`,
+    due: (r) => `behind by ${slots(r.slots)}`,
   },
-  strip: { "_": "historie tu ještě není", ".": "v pořádku", n: "ještě se nečeká", d: "zaostává", u: "burza bez dat", m: "díra", c: "konflikt", s: "zastaralé" },
-  stripNone: "nelze posoudit",
+  strip: { "_": "no history yet", ".": "ok", n: "not expected yet", d: "behind", u: "exchange has no data", m: "hole", c: "conflict", s: "stale" },
+  stripNone: "cannot judge",
 };
-// Czech plural: 1 -> one, 2-4 -> few, otherwise many.
-const cs = (n, one, few, many) => (n === 1 ? one : n >= 2 && n <= 4 ? few : many);
-const slots = (n) => `${n} ${cs(n, "slot", "sloty", "slotů")}`;
+// English plural: 1 -> one, otherwise many.
+const plural = (n, one, many) => (n === 1 ? one : many);
+const slots = (n) => `${n} ${plural(n, "slot", "slots")}`;
 const ORDER = ["no_data", "unknown", "stale", "conflict", "holes", "behind", "ok"];
 const COLORS = { "_": "#c9c9cf", ".": "#2e9d62", n: "#9ec5ee", d: "#f0b429", u: "#8e5bd0", m: "#e0443a", c: "#c2186b", s: "#7a0f0f" };
 const POLL_MS = 60000, OLD_AFTER_S = 180;

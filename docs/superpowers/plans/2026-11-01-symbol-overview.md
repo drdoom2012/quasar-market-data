@@ -198,7 +198,7 @@ Failure modes the spec implies that a user would hit; each has a test in the nam
   - One `TEXT` table in the script holds every Czech string and the reason templates (`no_data`, `invalid`, `stored_ahead`, `stale`, `conflict`, `missing`, `unavailable`, `due`), keyed by the reason code.
   - Fetch `/overview.json`; schedule the next poll 60 s after the previous request **finished or failed**; the `#refresh` button triggers a fetch only when none is in flight.
   - `#api-error`: shown for any response with `api_error` (and for a network failure to the tool itself); when shown, no states are drawn.
-  - `#summary`: a tile per state with its count; `#problems`: every symbol whose state is not `ok`, ordered by `STATE_ORDER` then symbol, each with all reasons in words; `#ok-group`: a `<details>` "N symbolů v pořádku" listing the `ok` symbols.
+  - `#summary`: a tile per state with its count; `#problems`: every symbol whose state is not `ok`, ordered by `STATE_ORDER` then symbol, each with all reasons in words; `#ok-group`: a `<details>` "N symbols ok" listing the `ok` symbols.
   - `#heatmap`: one row per symbol with "Historie od" (UTC date of `oldest_open_time_ms`) and one `<canvas width=720 height=14>` drawn from the strip string (one fill per run of equal characters; a hatched fill for `strip === null`); a tooltip from `mousemove` giving the bucket's UTC range and state in words. Colors must also differ in lightness, and the legend names every state.
   - Header line: `generated_at_ms` (API clock) and the snapshot's age from the **browser** clock; older than 3 × 60 s is shown in the warning color. This age is display only.
   - The page contains no rule that decides a state.

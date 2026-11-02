@@ -18,7 +18,7 @@ Approved scope: a separate, read-only, local tool. Python standard library plus 
 The user decided:
 - Two parts. **Top:** a summary (counts of symbols by state) and a list of **only the symbols that have a problem**, each with the reasons in words. **Below:** a heatmap, one row per symbol, one strip per row for the last 30 days, with the start of the symbol's history.
 - Strip colors: candle present, hole, history not there yet.
-- Healthy symbols are collapsed in the problem list (my reading: one expandable group "N symbolů v pořádku").
+- Healthy symbols are collapsed in the problem list (my reading: one expandable group "N symbols ok").
 - Read-only, no controls. The existing API is the only data source.
 - The page text is Czech, as in the mockups.
 
@@ -137,14 +137,14 @@ This uses only integer arithmetic on aligned values (checked in 5.6), so the bou
 
 | Code | State | When | Text (Czech) |
 |---|---|---|---|
-| `no_data` | `no_data` | `/v1/instruments` says `newest_open_time_ms` is null | "nic nestaženo (API nerozliší, zda se mělo)" |
+| `no_data` | `no_data` | `/v1/instruments` says `newest_open_time_ms` is null | "nothing downloaded (the API cannot tell whether something should have been)" |
 | `invalid:<reason>`, `transport:<reason>` | `unknown` | validation (5.6) or the call (5.10) failed | the reason |
-| `stored_ahead` | `unknown` | `c.stored_ahead_of_as_of` is true | "hodiny serveru jsou před uloženými daty, čerstvost nelze posoudit" |
-| `stale` | `stale` | `c.stale_slots > 0` | "poslední candle před … , N slotů po termínu" |
-| `conflict` | `conflict` | `c.conflicted_slots > 0` | "N slotů v konfliktu" |
-| `missing` | `holes` | `real_missing_slots > 0` | "N chybějících slotů ve K úsecích" |
-| `unavailable` | `holes` | `c.unavailable_slots > 0` | "N slotů potvrzeno burzou jako bez dat" |
-| `due` | `behind` | `c.due_slots > 0` | "zaostává o N slotů" |
+| `stored_ahead` | `unknown` | `c.stored_ahead_of_as_of` is true | "the server clock is ahead of the stored data, freshness cannot be judged" |
+| `stale` | `stale` | `c.stale_slots > 0` | "N slots overdue, last candle …" |
+| `conflict` | `conflict` | `c.conflicted_slots > 0` | "N slots in conflict" |
+| `missing` | `holes` | `real_missing_slots > 0` | "N slots missing (runs: K)" |
+| `unavailable` | `holes` | `c.unavailable_slots > 0` | "N slots: the exchange confirmed it has no data" |
+| `due` | `behind` | `c.due_slots > 0` | "behind by N slots" |
 
 - The **headline state** is the first that applies in the order `no_data, unknown, stale, conflict, holes, behind`; `ok` if none applies. **All** reasons are kept, so a stale symbol that also has holes shows both. The summary counts each symbol once, by its headline state.
 - `not_yet_expected` is never a reason (V7). `ok` is a positive statement: the answer validated, the clock states are clean and no real finding exists. It does **not** say the history is long enough (L2).
@@ -165,7 +165,7 @@ A failure of any check gives `unknown` for the symbol (steps 1 and 2: a page-lev
 
 **`/health/ingest`:** `as_of_ms` is an `int` in the V10 range; `rule.publication_delay_ms` and `rule.lag_threshold_ms` are non-negative `int`.
 
-**`/v1/instruments`:** `instruments` is a list; each item has string `venue`, `symbol`, `timeframe` and `newest_open_time_ms` that is `null` or an `int` in the V10 range aligned to 300 000; no duplicate `(venue, symbol, timeframe)`; `venue == "binance-usdm"` and `timeframe == "5m"` (anything else is outside API v1, C§5.1, and the symbol becomes `unknown`, not silently skipped). **An empty list is a page-level error** ("žádné nakonfigurované symboly"), never an all-green page.
+**`/v1/instruments`:** `instruments` is a list; each item has string `venue`, `symbol`, `timeframe` and `newest_open_time_ms` that is `null` or an `int` in the V10 range aligned to 300 000; no duplicate `(venue, symbol, timeframe)`; `venue == "binance-usdm"` and `timeframe == "5m"` (anything else is outside API v1, C§5.1, and the symbol becomes `unknown`, not silently skipped). **An empty list is a page-level error** ("no configured symbols"), never an all-green page.
 
 **`/v1/coverage` for one symbol:**
 - *Echo:* `venue`, `symbol`, `timeframe`, `start`, `end` equal the request.
@@ -201,7 +201,7 @@ or, at page level, `{"api_error": {"code": "...", "message": "..."}}` with a non
 
 | Failure | Result |
 |---|---|
-| `/health/ingest` or `/v1/instruments` fails in any way (connection, timeout, `503`, `500`, bad status, invalid body, empty universe) | One page-level message ("API není připravené: <reason>" / the error); **no** symbol states |
+| `/health/ingest` or `/v1/instruments` fails in any way (connection, timeout, `503`, `500`, bad status, invalid body, empty universe) | One page-level message ("The API is not usable: <reason>" / the error); **no** symbol states |
 | `503 not_ready` | Same; the reason (`database_missing`, `schema_mismatch`, `database_unreadable`) is shown; `Retry-After` is not honored (the next refresh is the retry) |
 | One symbol's coverage fails in any way, or fails validation | That symbol is `unknown`, with the reason; other symbols are unaffected |
 | Deadline reached (5.10) | Symbols without an answer are `unknown` (`deadline`) |
