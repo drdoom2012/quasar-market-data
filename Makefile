@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck imports check live bench bench-health bench-indicators images compose-test
+.PHONY: test lint typecheck imports check live bench bench-health bench-indicators bench-oi-write images compose-test
 
 test:
 	uv run pytest
@@ -32,6 +32,11 @@ bench-health:
 # The largest /v1/indicators request on a generated database in a fresh temp dir; informative, not part of `check`.
 bench-indicators:
 	uv run python -m tests.api.bench_indicators
+
+# The 100-row open interest transaction on this machine's temp disk (ADR-0003 P-9: p99 <= 50 ms); not part of `check`.
+# On the VPS run tools/bench_open_interest_write.py in python:3.12-slim instead (README, "Schema upgrade (version 2)").
+bench-oi-write:
+	uv run python tools/bench_open_interest_write.py --schema src/quasar_market_data/storage/migrations/002_open_interest.sql --max-p99-ms 50
 
 # Builds the collector and api images (linux/amd64) with local tags; needs Docker, not part of `check`.
 images:

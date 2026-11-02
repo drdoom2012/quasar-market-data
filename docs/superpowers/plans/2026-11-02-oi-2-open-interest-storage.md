@@ -188,7 +188,8 @@ Tests only; a failure is fixed in Tasks 2–4, never by weakening the test. The 
 
 ## Measurements
 
-(filled in by Task 6)
+- **Local, 2026-11-02:** `oi_write rows_per_tx=100 transactions=1000 p50_ms=0.171 p99_ms=0.236 max_ms=1.386 sqlite=3.53.1`. macOS 27.0.1, internal SSD, APFS, temp directory. **Not representative:** on macOS SQLite's `synchronous=FULL` issues `fsync`, not `F_FULLFSYNC` (`PRAGMA fullfsync` is off), so the write is not forced to the medium; the empty database also understates B-tree depth. This only shows the benchmark works.
+- **VPS (target disk):** pending, Task 6 Step 7 (user). The PR is not merged before this line is filled in.
 
 ## Review history
 
