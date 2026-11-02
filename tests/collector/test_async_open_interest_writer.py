@@ -410,3 +410,30 @@ def test_a_cancelled_waiter_leaves_no_unretrieved_exception(db: Path) -> None:
 
     asyncio.run(scenario())
     assert [p for p in problems if "never retrieved" in str(p.get("message", ""))] == []
+
+
+def test_close_in_the_middle_of_a_page_reports_the_committed_part(db: Path) -> None:
+    class AfterFirstCommit(GatedConnection):
+        after = True
+
+    async def scenario() -> None:
+        made: list[FaultyConnection] = []
+        writer = await AsyncOpenInterestWriter.open(
+            db, activity=CandleWriteActivity(), connect=factory(made, AfterFirstCommit)
+        )
+        conn = made[0]
+        assert isinstance(conn, GatedConnection)
+        task = asyncio.ensure_future(writer.write(page(300), ingested_at_ms=AT))
+        assert await asyncio.to_thread(conn.reached.wait, 10)
+        closing = asyncio.ensure_future(writer.close())
+        await spin(1)
+        conn.release.set()
+        with pytest.raises(OpenInterestPageError) as error:
+            await task
+        assert error.value.committed_transactions == 1
+        assert error.value.partial.inserted == 100
+        assert "closing" in str(error.value.cause)
+        await closing
+
+    asyncio.run(scenario())
+    assert stored_count(db) == 100

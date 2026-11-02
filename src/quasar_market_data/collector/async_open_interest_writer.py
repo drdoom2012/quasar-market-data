@@ -207,7 +207,8 @@ class AsyncOpenInterestWriter:
                     break
             totals.yields += yielded
             if self._state is not WriterState.OPEN:
-                raise OpenInterestWriteError(f"writer is {self._state.value}")
+                closed = OpenInterestWriteError(f"writer is {self._state.value}")
+                raise OpenInterestPageError(closed, committed, totals.report()) from closed
             # no await between the last activity check and the submission
             job = self._executor.submit(partial(self._writer.write_transaction, chunk, ingested_at_ms=ingested_at_ms))
             self._last_job = job
