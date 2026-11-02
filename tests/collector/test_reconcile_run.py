@@ -512,7 +512,8 @@ def test_reconcile_failure_exits_1_before_any_network_call_or_writer_open(
     handlers = (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT))
     opened: list[FakeSource] = []
     run = invoke(db, capsys, opened=opened)
-    assert run.code == 1 and "boom" in run.err and run.err.startswith("error:")
+    err = "\n".join(line for line in run.err.splitlines() if not line.startswith("migrated to"))  # OI-2 line
+    assert run.code == 1 and "boom" in err and err.startswith("error:")
     assert opened == [] and writer_spy.opened == 0
     assert (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT)) == handlers
 
@@ -525,7 +526,7 @@ def test_a_non_sqlite_file_is_a_reconcile_error_not_a_traceback(
     run = invoke(db, capsys, opened=opened)  # the migration, which runs first, refuses it
     assert run.code == 1 and run.err.startswith("error:") and opened == []
 
-    monkeypatch.setattr(cli, "_migrate", lambda db, clock: None)  # the reconcile read itself refuses it as well
+    monkeypatch.setattr(cli, "_migrate", lambda db, clock: (2, 2))  # the reconcile read itself refuses it as well
     run = invoke(db, capsys, opened=opened)
     assert run.code == 1 and "restart reconcile failed" in run.err
     assert opened == [] and writer_spy.opened == 0

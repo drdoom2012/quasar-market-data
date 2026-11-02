@@ -21,6 +21,7 @@ from quasar_market_data.collector.cli import main
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import MigrationError, migrate
+from quasar_market_data.storage.schema import SCHEMA_VERSION
 from tests.collector.fetch_fakes import SYMBOL, FakeClock, FakeSource, closed_rows, forming_rows
 from tests.collector.test_candle_writer import AT
 from tests.storage.test_migrate import foreign_file, sha
@@ -207,7 +208,8 @@ def test_a_schema_from_the_future_exits_one(db: Path, capsys: pytest.CaptureFixt
     conn = open_writer(db)
     migrate(conn, applied_at_ms=AT)
     conn.execute(
-        "INSERT INTO schema_migrations (version, name, checksum_sha256, applied_at_ms) VALUES (2, 'x', 'y', 1)"
+        "INSERT INTO schema_migrations (version, name, checksum_sha256, applied_at_ms) VALUES (?, 'x', 'y', 1)",
+        (SCHEMA_VERSION + 1,),
     )
     conn.close()
     clock = FakeClock()

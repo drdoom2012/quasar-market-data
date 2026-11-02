@@ -22,6 +22,8 @@ from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.config.settings import DEFAULT_CONFIG_PATH, load_settings
 from quasar_market_data.domain.reconcile import steady_state_limit_needed
 from quasar_market_data.domain.server_time import ServerTimeObservation
+from quasar_market_data.storage.connection import open_writer
+from quasar_market_data.storage.migrate import load_migrations, migrate
 from tests.collector.fetch_fakes import (
     FIVE_MINUTES,
     SYMBOL,
@@ -258,7 +260,7 @@ def test_writer_close_failure_on_a_clean_run_exits_1_and_is_an_error(
     clock = FakeClock()
     source = FakeSource(clock, forming_rows())
     assert run_cli(db, source, clock, stop_on_sleep(clock)) == 1
-    err = capsys.readouterr().err
+    err = "\n".join(line for line in capsys.readouterr().err.splitlines() if not line.startswith("migrated to"))
     assert err.startswith("error:") and "close failed" in err
 
 
@@ -496,3 +498,33 @@ def test_a_foreign_database_file_exits_1_untouched_and_opens_nothing(
     assert run_cli(db, FakeSource(clock, forming_rows()), clock, AdvancingSleep(clock), opened=opened) == 1
     assert sha(db) == before and opened == []
     assert "not a quasar-market-data database" in capsys.readouterr().err
+
+
+def migration_lines(err: str) -> list[str]:
+    return [line for line in err.splitlines() if line.startswith("migrated to version")]
+
+
+def test_first_start_prints_the_migration_on_stderr(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    clock = FakeClock()
+    assert run_cli(db, FakeSource(clock, forming_rows()), clock, stop_on_sleep(clock)) == 0
+    captured = capsys.readouterr()
+    assert migration_lines(captured.err) == ["migrated to version 2 (from 0)"]
+    assert "migrated" not in captured.out
+
+
+def test_upgrade_from_v1_prints_from_one(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    conn = open_writer(db)
+    migrate(conn, applied_at_ms=1_792_677_000_000, migrations=load_migrations()[:1])
+    conn.close()
+    clock = FakeClock()
+    assert run_cli(db, FakeSource(clock, forming_rows()), clock, stop_on_sleep(clock)) == 0
+    assert migration_lines(capsys.readouterr().err) == ["migrated to version 2 (from 1)"]
+
+
+def test_start_on_a_current_database_prints_no_migration_line(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    conn = open_writer(db)
+    migrate(conn, applied_at_ms=1_792_677_000_000)
+    conn.close()
+    clock = FakeClock()
+    assert run_cli(db, FakeSource(clock, forming_rows()), clock, stop_on_sleep(clock)) == 0
+    assert migration_lines(capsys.readouterr().err) == []

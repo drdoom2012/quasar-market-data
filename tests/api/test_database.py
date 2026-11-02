@@ -17,6 +17,7 @@ from quasar_market_data.api.errors import ApiError
 from quasar_market_data.api.params import CandlesRequest
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import UnsupportedSqliteError, open_reader, open_writer
+from quasar_market_data.storage.schema import SCHEMA_VERSION
 from tests.api.seed import SYMBOL, VENUE, insert_candle, make_database
 
 TF = 300_000
@@ -122,7 +123,7 @@ def test_a_path_below_a_regular_file_is_database_missing(tmp_path: Path) -> None
 def test_schema_problems_are_schema_mismatch_without_retry_after(tmp_path: Path) -> None:
     newer = make_database(tmp_path / "newer.db", candles=[slot(0)])
     raw = sqlite3.connect(newer)
-    raw.execute("INSERT INTO schema_migrations VALUES (2, 'x', 'x', 0)")
+    raw.execute("INSERT INTO schema_migrations VALUES (?, 'x', 'x', 0)", (SCHEMA_VERSION + 1,))
     raw.commit()
     raw.close()
     text = tmp_path / "text.db"

@@ -10,7 +10,7 @@ from typing import Final
 from quasar_market_data.storage.connection import StorageError
 
 APPLICATION_ID: Final = 0x514D4431  # "QMD1": refuse to touch a SQLite file that is not ours
-SCHEMA_VERSION: Final = 1  # the highest migration shipped in ``storage.migrations``
+SCHEMA_VERSION: Final = 2  # the highest migration shipped in ``storage.migrations``
 
 
 class SchemaMismatchError(StorageError):

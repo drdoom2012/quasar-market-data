@@ -8,12 +8,13 @@ from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import (
     Migration,
     MigrationError,
+    applied_version,
     load_migrations,
     migrate,
     refuse_foreign_file,
 )
 from quasar_market_data.storage.schema import APPLICATION_ID, SCHEMA_VERSION
-from tests.storage.conftest import schema_v1_sql
+from tests.storage.conftest import schema_sql
 from tests.typing_helpers import untyped
 
 AT = 1_792_677_000_000
@@ -45,19 +46,26 @@ def conn(tmp_path: Path) -> sqlite3.Connection:
     return open_writer(tmp_path / "m.db")
 
 
-def test_fresh_database_is_migrated_to_version_one(conn: sqlite3.Connection) -> None:
-    assert migrate(conn, applied_at_ms=AT) == 1
+def test_fresh_database_is_migrated_to_the_latest_version(conn: sqlite3.Connection) -> None:
+    assert migrate(conn, applied_at_ms=AT) == 2
     assert conn.execute("PRAGMA application_id").fetchone() == (APPLICATION_ID,)
-    assert conn.execute("SELECT * FROM schema_migrations").fetchall() == [(1, "schema_v1", M1.checksum, AT)]
+    assert conn.execute("SELECT * FROM schema_migrations ORDER BY version").fetchall() == [
+        (1, "schema_v1", M1.checksum, AT),
+        (2, "open_interest", load_migrations()[1].checksum, AT),
+    ]
     tables = {name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"candles", "candle_conflicts", "unavailable_candles", "schema_migrations"} <= tables
+    assert {"open_interest", "open_interest_conflicts"} <= tables
 
 
 def test_migrate_is_idempotent(conn: sqlite3.Connection) -> None:
     migrate(conn, applied_at_ms=AT)
     before = inventory(conn)
-    assert migrate(conn, applied_at_ms=AT + 1) == 1
-    assert conn.execute("SELECT version, applied_at_ms FROM schema_migrations").fetchall() == [(1, AT)]
+    assert migrate(conn, applied_at_ms=AT + 1) == 2
+    assert conn.execute("SELECT version, applied_at_ms FROM schema_migrations ORDER BY version").fetchall() == [
+        (1, AT),
+        (2, AT),
+    ]
     assert inventory(conn) == before
 
 
@@ -95,7 +103,7 @@ def test_checksum_mismatch_is_refused(conn: sqlite3.Connection) -> None:
     conn.execute("UPDATE schema_migrations SET checksum_sha256 = 'tampered'")
     with pytest.raises(MigrationError, match="checksum"):
         migrate(conn, applied_at_ms=AT)
-    assert conn.execute("SELECT checksum_sha256 FROM schema_migrations").fetchall() == [("tampered",)]
+    assert conn.execute("SELECT checksum_sha256 FROM schema_migrations").fetchall() == [("tampered",)] * SCHEMA_VERSION
 
 
 def test_database_newer_than_the_code_is_refused(conn: sqlite3.Connection) -> None:
@@ -281,9 +289,70 @@ def test_checksum_is_sha256_of_the_file_bytes() -> None:
     assert migration_.sql == "SELECT 1;\n"
 
 
-def test_migrated_database_matches_the_schema_v1_fixture(
-    conn: sqlite3.Connection, schema_conn: sqlite3.Connection
+def test_migrated_database_matches_the_shipped_schema_fixture(
+    conn: sqlite3.Connection, schema_v2_conn: sqlite3.Connection
 ) -> None:
     migrate(conn, applied_at_ms=AT)
-    assert schema_v1_sql()  # the fixture applied the same SQL directly
-    assert inventory(conn) == inventory(schema_conn)
+    assert schema_sql(2)  # the fixture applied the same SQL directly
+    assert inventory(conn) == inventory(schema_v2_conn)
+
+
+V1_TABLES = {
+    "candles": "venue, symbol, timeframe, open_time_ms",
+    "candle_conflicts": "conflict_id",
+    "unavailable_candles": "venue, symbol, timeframe, open_time_ms",
+}
+
+
+def table_digest(conn: sqlite3.Connection, table: str) -> str:
+    rows = conn.execute(f"SELECT * FROM {table} ORDER BY {V1_TABLES[table]}").fetchall()
+    return hashlib.sha256(repr(rows).encode()).hexdigest()
+
+
+def test_upgrade_from_v1_keeps_every_v1_row(conn: sqlite3.Connection) -> None:
+    migrate(conn, applied_at_ms=AT, migrations=(M1,))
+    for offset in range(3):
+        conn.execute(
+            "INSERT INTO candles VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', ?, '1', '2', '1', '2', '3', NULL, 1)",
+            (1_792_676_700_000 + offset * 300_000,),
+        )
+    conn.execute(
+        "INSERT INTO candle_conflicts (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume,"
+        " turnover, first_seen_at_ms) VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', 1792676700000,"
+        " '1', '2', '1', '9', '3', NULL, 2)"
+    )
+    conn.execute(
+        "INSERT INTO unavailable_candles VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', 1792677600000,"
+        " 'EXCHANGE_NO_DATA', 3)"
+    )
+    before = {table: table_digest(conn, table) for table in V1_TABLES}
+    assert conn.execute("SELECT count(*) FROM candles").fetchone() == (3,)
+
+    assert migrate(conn, applied_at_ms=AT + 1) == 2
+    assert versions(conn) == [1, 2]
+    assert {table: table_digest(conn, table) for table in V1_TABLES} == before
+
+    after = inventory(conn)
+    assert migrate(conn, applied_at_ms=AT + 2) == 2
+    assert inventory(conn) == after
+    assert versions(conn) == [1, 2]
+
+
+def test_applied_version(conn: sqlite3.Connection, tmp_path: Path) -> None:
+    assert applied_version(conn) == 0
+    migrate(conn, applied_at_ms=AT, migrations=(M1,))
+    assert applied_version(conn) == 1
+    migrate(conn, applied_at_ms=AT)
+    assert applied_version(conn) == 2
+
+    foreign = open_writer(tmp_path / "foreign.db")
+    foreign.execute("CREATE TABLE other (a INTEGER)")
+    with pytest.raises(MigrationError):
+        applied_version(foreign)
+    foreign.close()
+
+    ours_without_table = open_writer(tmp_path / "ours.db")
+    ours_without_table.execute(f"PRAGMA application_id = {APPLICATION_ID}")
+    with pytest.raises(MigrationError):
+        applied_version(ours_without_table)
+    ours_without_table.close()
