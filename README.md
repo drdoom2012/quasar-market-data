@@ -103,6 +103,17 @@ docker compose cp collector:/app/data/backup.db ./quasar-backup.db
 docker compose exec collector rm /app/data/backup.db
 ```
 
+**Schema upgrade (version 2).** The release that ships OI-2 adds the open interest tables (ADR-0003 P-6, P-14). The Collector migrates on start; the API serves only the schema it was built for. Procedure: (1) take a backup as in "Backup" above; (2) `docker compose pull && docker compose up -d`; (3) wait until `curl localhost:8000/health/ready` (through the tunnel) answers `200` with `"schema_version":2` and `docker compose logs collector` shows `migrated to version 2 (from 1)`. Until both have happened the API answers `503 not_ready` (`schema_mismatch`); expected seconds to a minute, not measured. (4) **There is no rollback by redeploy:** a Collector of the previous release refuses the newer database ("newer than the code"). Going back means restoring the backup with the previous release, which loses the candles collected since.
+
+**Open interest write benchmark (ADR-0003 P-9).** Measures the 100-row open interest transaction on the disk that holds the database (criterion: p99 ≤ 50 ms) without installing anything and without touching the production database or its volume. On the VPS: copy `tools/bench_open_interest_write.py` and `src/quasar_market_data/storage/migrations/002_open_interest.sql` from the release commit into one directory; find the volume's filesystem (`docker volume ls` shows its full name, usually prefixed with the Compose project; `docker volume inspect <name>` → `Mountpoint`, then `df <Mountpoint>`); create an empty directory on that filesystem outside the volume; then, right after a Collector `round` line:
+
+```bash
+docker run --rm -v <empty dir>:/bench -v "$PWD":/src:ro python:3.12-slim \
+  python /src/bench_open_interest_write.py --schema /src/002_open_interest.sql --dir /bench/run --max-p99-ms 50
+```
+
+It prints one `oi_write …` line and removes its files. Locally: `make bench-oi-write` (on macOS the number is optimistic: SQLite does not force the write to the medium there).
+
 ## Symbol overview (tool)
 
 A local, read-only page that shows which symbols the API serves, where each history starts, how complete the last 30 days are, and whether a symbol is fine or something is wrong with it. It is a separate consumer of the HTTP API (`tools/symbol_overview/`, standard library only, no dependency on `quasar_market_data`); the Collector, the API, the database and the contracts are unchanged. Design: `docs/superpowers/specs/2026-11-01-symbol-overview-design.md`.
