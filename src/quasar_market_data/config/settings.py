@@ -14,6 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from quasar_market_data.domain.open_interest_cadence import (
+    MAX_BUDGET_PER_5MIN,
+    MIN_BUDGET_PER_5MIN,
+    CadenceError,
+    open_interest_cadence,
+)
 from quasar_market_data.domain.reconcile import steady_state_limit_needed
 from quasar_market_data.domain.timeframe import Timeframe
 
@@ -23,6 +29,9 @@ MAX_LIMIT: Final = 1000
 MAX_BACKFILL_DAYS: Final = 365
 MAX_PUBLICATION_DELAY_MS: Final = 300_000
 MAX_LAG_THRESHOLD_MS: Final = 900_000
+SUPPORTED_OPEN_INTEREST_PERIOD: Final = "5m"
+MIN_ROUND_OFFSET_MS: Final = 60_000
+MAX_ROUND_OFFSET_MS: Final = 280_000
 MAX_SYMBOL_CHARS: Final = 64
 DEFAULT_CONFIG_PATH: Final = Path("config/quasar.toml")
 
@@ -71,6 +80,15 @@ class CollectorSettings:
 
 
 @dataclass(frozen=True)
+class OpenInterestSettings:
+    enabled: bool
+    period: str
+    publication_delay_ms: int
+    round_offset_ms: int
+    budget_per_5min: int
+
+
+@dataclass(frozen=True)
 class ApiSettings:
     host: str
     port: int
@@ -83,6 +101,7 @@ class Settings:
     venues: tuple[Venue, ...]
     collector: CollectorSettings
     api: ApiSettings
+    open_interest: OpenInterestSettings | None = None  # absent table: open interest is off (ADR-0003 P-13)
 
     def instruments(self) -> tuple[Instrument, ...]:
         return tuple(
@@ -238,6 +257,26 @@ def _api(root: dict[str, Any]) -> ApiSettings:
     return ApiSettings(host, _int(table, "api", "port", 1, 65535))
 
 
+def _open_interest(root: dict[str, Any], symbol_count: int) -> OpenInterestSettings | None:
+    if "open_interest" not in root:
+        return None
+    table = _table(root, "", "open_interest")
+    path = "open_interest"
+    _check_keys(table, path, {"enabled", "period", "publication_delay_ms", "round_offset_ms", "budget_per_5min"})
+    enabled = _bool(table, path, "enabled")
+    period = _str(table, path, "period")
+    if period != SUPPORTED_OPEN_INTEREST_PERIOD:
+        raise ConfigError(f"{path}.period", f"{period!r} is not supported; only {SUPPORTED_OPEN_INTEREST_PERIOD!r}")
+    delay = _int(table, path, "publication_delay_ms", 0, MAX_PUBLICATION_DELAY_MS)
+    offset = _int(table, path, "round_offset_ms", MIN_ROUND_OFFSET_MS, MAX_ROUND_OFFSET_MS)
+    budget = _int(table, path, "budget_per_5min", MIN_BUDGET_PER_5MIN, MAX_BUDGET_PER_5MIN)
+    try:
+        open_interest_cadence(symbol_count, budget)
+    except CadenceError as exc:
+        raise ConfigError(f"{path}.budget_per_5min", str(exc)) from exc
+    return OpenInterestSettings(enabled, period, delay, offset, budget)
+
+
 def parse_settings(text: str, *, base_dir: Path) -> Settings:
     if not base_dir.is_absolute():
         raise ValueError(f"base_dir must be absolute, got {base_dir}")
@@ -245,18 +284,19 @@ def parse_settings(text: str, *, base_dir: Path) -> Settings:
         root = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError("file", f"not valid TOML: {exc}") from exc
-    _check_keys(root, "", {"database", "rule", "venues", "collector", "api"})
+    _check_keys(root, "", {"database", "rule", "venues", "collector", "api", "open_interest"})
     database_path = _database_path(root, base_dir)
     rule = _rule(root)
     venues = _venues(root)
     collector = _collector(root)
     api = _api(root)
+    open_interest = _open_interest(root, len(venues[0].symbols))
     needed = steady_state_limit_needed(rule.publication_delay_ms, Timeframe(SUPPORTED_TIMEFRAMES[0]).milliseconds)
     if collector.limit < needed:
         raise ConfigError(
             "collector.limit", f"publication_delay_ms {rule.publication_delay_ms} needs limit >= {needed}"
         )
-    return Settings(database_path, rule, venues, collector, api)
+    return Settings(database_path, rule, venues, collector, api, open_interest)
 
 
 @dataclass(frozen=True)
