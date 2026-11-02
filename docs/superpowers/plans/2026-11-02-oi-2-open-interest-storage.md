@@ -162,7 +162,7 @@ Tests only; a failure is fixed in Tasks 2–4, never by weakening the test. The 
 - [ ] **Step 2: Run.** Expect FAIL. **Step 3: Implement.** **Step 4: Run** and `make check`. Expect PASS.
 - [ ] **Step 5: Run** `make bench-oi-write` locally (`--max-p99-ms 50`) and record the line, disk, sample size and date under "Measurements". The empty database understates B-tree depth; note it.
 - [ ] **Step 6: Commit** `test: benchmark for the 100-row open interest transaction (ADR-0003 P-9)`.
-- [ ] **Step 7 (user, HARD STOP before the PR is merged):** on the VPS, copy the two files of the branch head, find the volume's filesystem (`docker volume inspect quasar-data` → `Mountpoint`; `df` on it), create an empty directory on that filesystem **outside** the volume, and run `docker run --rm -v <dir>:/bench -v $PWD:/src:ro python:3.12-slim python /src/bench_open_interest_write.py --schema /src/002_open_interest.sql --dir /bench/run --max-p99-ms 50`, right after a Collector `round` line. Record the line here. If p99 > 50 ms, lower `MAX_ROWS_PER_TRANSACTION` and re-measure (P-9).
+- [ ] **Step 7 (optional since ADR-0003 amendment A-1; was a hard stop):** on the VPS, copy the two files of the branch head, find the volume's filesystem (`docker volume inspect quasar-data` → `Mountpoint`; `df` on it), create an empty directory on that filesystem **outside** the volume, and run `docker run --rm -v <dir>:/bench -v $PWD:/src:ro python:3.12-slim python /src/bench_open_interest_write.py --schema /src/002_open_interest.sql --dir /bench/run --max-p99-ms 50`, right after a Collector `round` line. Record the line here. If p99 > 50 ms, lower `MAX_ROWS_PER_TRANSACTION` and re-measure (P-9).
 
 ### Task 7: Documentation and invariant register
 
@@ -189,7 +189,7 @@ Tests only; a failure is fixed in Tasks 2–4, never by weakening the test. The 
 ## Measurements
 
 - **Local, 2026-11-02:** `oi_write rows_per_tx=100 transactions=1000 p50_ms=0.171 p99_ms=0.236 max_ms=1.386 sqlite=3.53.1`. macOS 27.0.1, internal SSD, APFS, temp directory. **Not representative:** on macOS SQLite's `synchronous=FULL` issues `fsync`, not `F_FULLFSYNC` (`PRAGMA fullfsync` is off), so the write is not forced to the medium; the empty database also understates B-tree depth. This only shows the benchmark works.
-- **VPS (target disk):** pending, Task 6 Step 7 (user). The PR is not merged before this line is filled in.
+- **VPS (target disk):** not run. ADR-0003 amendment A-1 (approved by the user on 2026-11-02) moves the criterion to the soak after OI-4, read from the Collector's hourly measurement line (issue #7). Task 6 Step 7 is therefore optional.
 
 ## Review history
 

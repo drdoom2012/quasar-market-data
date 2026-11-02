@@ -2,7 +2,9 @@
 
 - **Status:** Accepted (approved by the user on 2026-11-02: revision 4 as written, including the proposals for the
   open decisions O-1 to O-5). Revisions 2 to 4 answer the user's reviews (listed at the end). The API response
-  schema (P-11) still needs its own contract section approval before OI-5.
+  schema (P-11) still needs its own contract section approval before OI-5. Amendment A-1 (2026-11-02, approved by
+  the user): the 100-row transaction criterion of P-9 is checked from production measurements after OI-4, not by
+  a benchmark in OI-2 (see the revision history).
 - **Date:** 2026-11-02
 - **Scope:** collecting, storing and serving Binance USDT-M open interest history at a 5m period for the
   configured symbols. It is the first extension dataset (`docs/architecture.md` §7); funding, liquidations and
@@ -252,8 +254,10 @@ cut short, and no bound is claimed for how long a `COMMIT` takes.
 What this bounds, and what it does not: the check in rule 2 and the start of a candle write can race, so a candle
 write can still wait for **at most one** open interest transaction of at most 100 rows that has already begun. How
 long that transaction takes, `COMMIT` sync included (`synchronous=FULL`), is **not bounded by this design**; it is
-measured. The acceptance criterion is a measurement on the target disk (OI-2): p99 of a 100-row open interest
-transaction ≤ **50 ms**. If it fails, the plan lowers the 100-row cap; the rules stay.
+measured. The acceptance criterion is p99 of a 100-row open interest transaction ≤ **50 ms** on the target disk,
+taken from the Collector's hourly measurement line (rule 5) during the soak after OI-4 is deployed (amendment A-1;
+until OI-4 nothing writes open interest). If it fails, the 100-row cap is lowered; the rules stay. OI-2 ships a
+standard-library benchmark for a local or optional check.
 
 **Acceptance criterion** for OI-4 [P]: in a test with a fake slow and failing open interest source, the candle
 round's `lateness_ms` and outcomes are the same with open interest enabled and disabled. In the soak test, the
@@ -542,7 +546,7 @@ Each slice adds its tests first. Live tests stay under `make live`, never in `ma
 | Contention | `SQLITE_BUSY` on the open interest connection → that transaction fails, is retried later, no conflict rows, no error reaches the candle loop | OI-2/OI-4 |
 | Contention | yielding until the round deadline → rows dropped unwritten and logged; the next overlapping request stores them | OI-4 |
 | Contention | the hourly measurement line contains yields, open interest transaction p50/p99/max, busy count and candle write p50/p99/max | OI-4 |
-| Contention | measurement (OI-2, target disk): p99 of a 100-row open interest transaction ≤ 50 ms; recorded in the plan with the disk, sample size and date | OI-2 |
+| Contention | measurement (target disk, from the hourly line, amendment A-1): p99 of a 100-row open interest transaction ≤ 50 ms; recorded with the disk, sample size and date | soak |
 | Contention | soak: candle write duration p99 with open interest enabled ≤ the value without it + 100 ms | soak |
 | Independence | candle fatal error ends the process; open interest leaves no half-written page (atomic per page) | OI-4 |
 | Independence | `[open_interest]` absent → no open interest client is created, no request is made, candle behavior is byte-identical in the existing test suite | OI-4 |
@@ -655,3 +659,9 @@ were throwaway in the session scratchpad and are not in the repository.
   3. SQLite: revision 3's `candle_pressure`, batch halving, pause rules and the `Connection.interrupt()` watchdog
      removed; replaced by transactions of ≤ 100 rows, yielding while the candle writer is active, hourly contention
      measurement and a measured acceptance criterion (P-9, P-15).
+- **Amendment A-1** (2026-11-02, approved by the user during OI-2): the user does not run the benchmark on the VPS.
+  The P-9 criterion (p99 ≤ 50 ms for a 100-row transaction on the target disk) moves from OI-2 to the soak after
+  OI-4, where it is read from the Collector's hourly measurement line on production data (P-9 rule 5). Rationale:
+  until OI-4 nothing writes open interest, so candle collection cannot be affected before the measurement exists,
+  and production data measures a grown database instead of an empty one. P-9 and the P-15 row are updated; the
+  rules themselves are unchanged.
