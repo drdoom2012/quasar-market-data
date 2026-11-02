@@ -33,6 +33,26 @@ MAX_SYMBOL_LENGTH: Final = 64
 _VENUE: Final = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}", re.ASCII)
 
 
+def ensure_venue(value: str) -> str:
+    """Return ``value`` if it is a venue name matching ``[a-z0-9][a-z0-9_-]{0,31}``."""
+    if type(value) is not str:
+        raise TypeError(f"venue must be str, got {type(value).__name__}")
+    if _VENUE.fullmatch(value) is None:
+        raise ValueError(f"venue {value!r} must match [a-z0-9][a-z0-9_-]{{0,31}}")
+    return value
+
+
+def ensure_symbol(value: str) -> str:
+    """Return ``value`` if it is a ``str`` of 1-64 characters without whitespace or non-printable ones."""
+    if type(value) is not str:
+        raise TypeError(f"symbol must be str, got {type(value).__name__}")
+    if not 1 <= len(value) <= MAX_SYMBOL_LENGTH:
+        raise ValueError(f"symbol must be 1-{MAX_SYMBOL_LENGTH} characters, got {len(value)}")
+    if any(ch.isspace() or not ch.isprintable() for ch in value):
+        raise ValueError(f"symbol {value!r} contains whitespace or non-printable characters")
+    return value
+
+
 @dataclass(frozen=True)
 class CandleKey:
     venue: str
@@ -41,17 +61,8 @@ class CandleKey:
     open_time_ms: int
 
     def __post_init__(self) -> None:
-        if type(self.venue) is not str:
-            raise TypeError(f"venue must be str, got {type(self.venue).__name__}")
-        if _VENUE.fullmatch(self.venue) is None:
-            raise ValueError(f"venue {self.venue!r} must match [a-z0-9][a-z0-9_-]{{0,31}}")
-
-        if type(self.symbol) is not str:
-            raise TypeError(f"symbol must be str, got {type(self.symbol).__name__}")
-        if not 1 <= len(self.symbol) <= MAX_SYMBOL_LENGTH:
-            raise ValueError(f"symbol must be 1-{MAX_SYMBOL_LENGTH} characters, got {len(self.symbol)}")
-        if any(ch.isspace() or not ch.isprintable() for ch in self.symbol):
-            raise ValueError(f"symbol {self.symbol!r} contains whitespace or non-printable characters")
+        ensure_venue(self.venue)
+        ensure_symbol(self.symbol)
 
         if type(self.timeframe) is not Timeframe:
             raise TypeError(f"timeframe must be Timeframe, got {type(self.timeframe).__name__}")
