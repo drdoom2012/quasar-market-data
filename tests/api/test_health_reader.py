@@ -42,7 +42,7 @@ def foreign_sqlite(path: Path) -> Path:
 def newer_schema(path: Path) -> Path:
     make_database(path, candles=[slot(0)])
     raw = sqlite3.connect(path)
-    raw.execute("INSERT INTO schema_migrations VALUES (2, 'x', 'x', 0)")
+    raw.execute("INSERT INTO schema_migrations VALUES (?, 'x', 'x', 0)", (SCHEMA_VERSION + 1,))
     raw.commit()
     raw.close()
     return path
@@ -81,7 +81,7 @@ def test_missing_empty_foreign_newer_and_corrupt_database_map_to_the_503_reasons
 
 
 def test_ready_returns_the_schema_version(tmp_path: Path) -> None:
-    assert read_ready(make_database(tmp_path / "market.db")) == SCHEMA_VERSION == 1
+    assert read_ready(make_database(tmp_path / "market.db")) == SCHEMA_VERSION == 2
 
 
 @pytest.mark.parametrize("reader", [read_ready, read_ingest])

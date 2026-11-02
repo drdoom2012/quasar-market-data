@@ -11,7 +11,7 @@ from quasar_market_data.api.params import MAX_WINDOW_SLOTS, CandlesRequest
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
-from quasar_market_data.storage.schema import SchemaMismatchError
+from quasar_market_data.storage.schema import SCHEMA_VERSION, SchemaMismatchError
 from tests.api.probe import InterleavingConnection
 from tests.api.seed import (
     AT,
@@ -413,7 +413,7 @@ def test_schema_problems_raise_schema_mismatch_error(tmp_path: Path) -> None:
     raw.close()
     newer = make_database(tmp_path / "newer.db", candles=[slot(0)])
     raw = sqlite3.connect(newer)
-    raw.execute("INSERT INTO schema_migrations VALUES (2, 'x', 'x', 0)")
+    raw.execute("INSERT INTO schema_migrations VALUES (?, 'x', 'x', 0)", (SCHEMA_VERSION + 1,))
     raw.commit()
     raw.close()
 

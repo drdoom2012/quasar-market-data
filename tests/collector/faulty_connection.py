@@ -45,9 +45,11 @@ class FaultyConnection(sqlite3.Connection):
         return super().execute(sql, *args)
 
 
-def open_faulty_writer(path: Path, applied_at_ms: int) -> FaultyConnection:
+def open_faulty_writer(
+    path: Path, applied_at_ms: int, *, factory: type[FaultyConnection] = FaultyConnection
+) -> FaultyConnection:
     """Like ``open_writer`` (WAL, FULL, recursive triggers) on a migrated database; add faults afterwards."""
-    conn = sqlite3.connect(path, factory=FaultyConnection, isolation_level=None)
+    conn = sqlite3.connect(path, factory=factory, isolation_level=None)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=FULL")
     conn.execute("PRAGMA recursive_triggers=ON")

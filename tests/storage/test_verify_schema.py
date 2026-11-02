@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from quasar_market_data.storage.connection import open_reader, open_writer
-from quasar_market_data.storage.migrate import migrate
-from quasar_market_data.storage.schema import EmptyDatabaseError, SchemaMismatchError, verify_schema
+from quasar_market_data.storage.migrate import load_migrations, migrate
+from quasar_market_data.storage.schema import SCHEMA_VERSION, EmptyDatabaseError, SchemaMismatchError, verify_schema
 
 AT = 1_792_677_000_000
 INSERT_CANDLE = "INSERT INTO candles VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', 1792676700000, '1', '2', '1', '2', '3', NULL, 1)"
@@ -93,7 +93,7 @@ def test_older_database_is_a_mismatch(db: Path) -> None:
 
 def test_newer_database_is_a_mismatch(db: Path) -> None:
     writer = migrated(db)
-    writer.execute("INSERT INTO schema_migrations VALUES (2, 'extra', 'x', 1)")
+    writer.execute("INSERT INTO schema_migrations VALUES (?, 'extra', 'x', 1)", (SCHEMA_VERSION + 1,))
     reader = open_reader(db)
     try:
         with pytest.raises(SchemaMismatchError, match="version"):
@@ -113,3 +113,15 @@ def test_verify_schema_never_writes(db: Path) -> None:
     finally:
         reader.close()
     assert hashlib.sha256(db.read_bytes()).hexdigest() == before
+
+
+def test_v2_code_refuses_a_v1_database(db: Path) -> None:
+    writer = open_writer(db)
+    migrate(writer, applied_at_ms=AT, migrations=load_migrations()[:1])
+    reader = open_reader(db)
+    try:
+        with pytest.raises(SchemaMismatchError):
+            verify_schema(reader)
+    finally:
+        reader.close()
+        writer.close()

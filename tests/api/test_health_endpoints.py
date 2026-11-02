@@ -10,6 +10,8 @@ from quasar_market_data.api.app import HEALTH_BEHIND_MAX, create_app
 from quasar_market_data.domain.freshness import Freshness, SeriesFreshness, series_freshness
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_reader, open_writer
+from quasar_market_data.storage.migrate import load_migrations, migrate
+from quasar_market_data.storage.schema import SCHEMA_VERSION
 from tests.api.seed import SAMPLE_RULE, SAMPLE_UNIVERSE, SYMBOL, VENUE, insert_candle, make_database
 from tests.api.test_health_universe import s17_fields
 
@@ -66,7 +68,7 @@ def foreign(path: Path) -> Path:
 def newer(path: Path) -> Path:
     make_database(path, candles=[slot(0)])
     raw = sqlite3.connect(path)
-    raw.execute("INSERT INTO schema_migrations VALUES (2, 'x', 'x', 0)")
+    raw.execute("INSERT INTO schema_migrations VALUES (?, 'x', 'x', 0)", (SCHEMA_VERSION + 1,))
     raw.commit()
     raw.close()
     return path
@@ -122,7 +124,7 @@ def test_readiness_200_with_schema_version(tmp_path: Path) -> None:
     response = client_for(make_database(tmp_path / "market.db"), boom).get("/health/ready")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ready", "schema_version": 1}
+    assert response.json() == {"status": "ready", "schema_version": 2}
 
 
 @pytest.mark.parametrize(("reason", "make"), BROKEN)
@@ -453,3 +455,15 @@ def test_a_locked_database_is_not_ready_within_the_busy_timeout_and_liveness_is_
     assert assert_error(ingest_response, 503, "not_ready")["details"] == {"reason": "database_unreadable"}
     assert ready.headers["retry-after"] == "5"
     assert live.status_code == 200
+
+
+def test_v1_database_answers_503_schema_mismatch(tmp_path: Path) -> None:
+    path = tmp_path / "market.db"
+    conn = open_writer(path)
+    migrate(conn, applied_at_ms=1_792_677_000_000, migrations=load_migrations()[:1])
+    conn.close()
+
+    response = client_for(path, boom).get("/health/ready")
+
+    error = assert_error(response, 503, "not_ready")
+    assert error["details"] == {"reason": "schema_mismatch"}

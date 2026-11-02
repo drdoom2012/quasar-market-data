@@ -82,7 +82,7 @@ from quasar_market_data.domain.reconcile import (
 )
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import StorageError, open_writer
-from quasar_market_data.storage.migrate import migrate, refuse_foreign_file
+from quasar_market_data.storage.migrate import applied_version, migrate, refuse_foreign_file
 
 PROG = "quasar-collector"
 DEFAULT_LIMIT = 100
@@ -500,7 +500,9 @@ def _run_command(settings: Settings, open_source: OpenSource, clock: Clock, slee
         max_concurrency=collector.max_concurrency,
     )
     try:
-        _migrate(settings.database_path, clock)
+        old_version, new_version = _migrate(settings.database_path, clock)
+        if new_version > old_version:
+            _error(f"migrated to version {new_version} (from {old_version})")
         backfill = BackfillConfig(collector.backfill.days) if collector.backfill.enabled else None
         return asyncio.run(
             _run_loop(
@@ -512,11 +514,13 @@ def _run_command(settings: Settings, open_source: OpenSource, clock: Clock, slee
         return EXIT_FAILED
 
 
-def _migrate(db: Path, clock: Clock) -> None:
+def _migrate(db: Path, clock: Clock) -> tuple[int, int]:
+    """Migrate ``db`` and return ``(versions applied before, version after)``."""
     refuse_foreign_file(db)  # read-only, before open_writer switches the file to WAL
     conn = open_writer(db)
     try:
-        migrate(conn, applied_at_ms=clock.wall_ms())
+        before = applied_version(conn)
+        return before, migrate(conn, applied_at_ms=clock.wall_ms())
     finally:
         conn.close()
 

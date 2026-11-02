@@ -135,6 +135,25 @@ def _is_foreign(conn: sqlite3.Connection) -> bool:
     return application_id != 0 or objects > 0
 
 
+def applied_version(conn: sqlite3.Connection) -> int:
+    """Return how many migrations the database has applied: ``0`` for a fresh file. Read-only.
+
+    Raises ``MigrationError`` for a foreign file and for one carrying the project ``application_id`` without a
+    ``schema_migrations`` table. It does not compare the applied migrations with the shipped files; ``migrate`` does.
+    """
+    if _is_foreign(conn):
+        raise MigrationError(_FOREIGN)
+    if conn.execute("PRAGMA application_id").fetchone()[0] == 0:
+        return 0
+    has_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
+    ).fetchone()
+    if has_table is None:
+        raise MigrationError("database carries the project application_id but has no schema_migrations table")
+    count: int = conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0]
+    return count
+
+
 def refuse_foreign_file(path: Path) -> None:
     """Raise ``MigrationError`` if ``path`` exists and is neither fresh nor ours; never writes to the file.
 
