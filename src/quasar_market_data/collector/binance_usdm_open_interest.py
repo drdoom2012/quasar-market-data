@@ -168,13 +168,17 @@ class BinanceUsdmOpenInterestSource:
             self._gate.record_success()
             return result
 
+    def market_id(self, symbol: str) -> str:
+        """The Binance market id of a USDT-M perpetual (the ``symbol`` of every response row), else ``SourceError``."""
+        return usdm_market_id(self._client.markets, symbol)
+
     async def fetch_server_time(self) -> ServerTimeObservation:
         return await self._request("open interest server time request", self._inner.fetch_server_time)
 
     async def fetch_open_interest_hist(
         self, symbol: str, start_time_ms: int, end_time_ms: int, *, as_of_ms: int
     ) -> list[object]:
-        market_id = usdm_market_id(self._client.markets, symbol)
+        market_id = self.market_id(symbol)
         try:
             limit = validate_open_interest_request(start_time_ms, end_time_ms, _PERIOD, as_of_ms)
         except OpenInterestRequestError as error:

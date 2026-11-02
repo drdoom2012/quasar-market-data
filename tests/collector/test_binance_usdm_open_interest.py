@@ -261,6 +261,17 @@ def test_a_1130_answer_is_a_source_error_not_a_crash_and_the_gate_is_unchanged()
     run(scenario)
 
 
+def test_market_id_is_the_response_symbol_and_unsafe_symbols_are_refused() -> None:
+    async def scenario() -> None:
+        rig = Rig()
+        source = await rig.open()
+        assert source.market_id(SYMBOL) == MARKET_ID
+        with pytest.raises(SourceError, match="NOPE/USDT:USDT"):
+            source.market_id("NOPE/USDT:USDT")
+
+    run(scenario)
+
+
 def test_an_unknown_symbol_is_refused_before_any_request() -> None:
     async def scenario() -> None:
         rig = Rig()
