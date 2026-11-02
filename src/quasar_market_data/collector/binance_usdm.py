@@ -53,7 +53,7 @@ def _require_fapi_base_url(url: object) -> None:
         raise SourceError(f"fapiPublic base URL {url!r} is not https://{_FAPI_HOST}{_FAPI_PATH}")
 
 
-def _market_id(markets: object, symbol: str) -> str:
+def usdm_market_id(markets: object, symbol: str) -> str:
     market = markets.get(symbol) if isinstance(markets, dict) else None
     if not isinstance(market, dict):
         raise SourceError(f"unknown symbol {symbol!r}")
@@ -124,7 +124,7 @@ class BinanceUsdmSource:
         start_time_ms: int | None = None,
         end_time_ms: int | None = None,
     ) -> list[object]:
-        market_id = _market_id(self._exchange.markets, symbol)
+        market_id = usdm_market_id(self._exchange.markets, symbol)
         if timeframe.label not in SUPPORTED_TIMEFRAMES:
             raise SourceError(
                 f"timeframe {timeframe.label!r} is not verified (supported: {sorted(SUPPORTED_TIMEFRAMES)})"

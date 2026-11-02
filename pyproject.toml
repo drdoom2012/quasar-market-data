@@ -116,7 +116,10 @@ name = "ccxt is imported only by the Binance adapter"
 type = "forbidden"
 source_modules = ["quasar_market_data.api", "quasar_market_data.collector"]
 forbidden_modules = ["ccxt"]
-ignore_imports = ["quasar_market_data.collector.binance_usdm -> ccxt"]
+ignore_imports = [
+    "quasar_market_data.collector.binance_usdm -> ccxt",
+    "quasar_market_data.collector.binance_usdm_open_interest -> ccxt",
+]
 
 [[tool.importlinter.contracts]]
 name = "api reaches no network client"
