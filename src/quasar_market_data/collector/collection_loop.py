@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import Any
 
 from quasar_market_data.collector.binance_klines import KlineParseError
+from quasar_market_data.collector.candle_write_activity import CandleWriteActivity
 from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown, WriteReport
 from quasar_market_data.collector.clock import Clock, Sleep
 from quasar_market_data.collector.fetch_once import MAX_LIMIT, CandleSink, FetchOnceConfig, fetch_once
@@ -75,24 +76,52 @@ class SymbolResult:
     last_problem: str | None
 
 
+@dataclass(frozen=True)
+class CandleWriteHooks:
+    """What the candle path tells open interest (ADR-0003 P-9): every candle write enters ``activity`` while it is
+    queued or running, and its duration (monotonic ns) goes to ``record_duration_ns``. Optional; ``None`` changes nothing."""
+
+    activity: CandleWriteActivity
+    record_duration_ns: Callable[[int], None]
+
+
 class _WriteWatch:
     """Wraps a sink for a whole process run and remembers that a write's outcome was ever unknown.
 
     ``uncertain`` is set when ``write`` raises ``CandleWriteOutcomeUnknown`` or is interrupted by cancellation
     (the caller cannot know what the worker did). Nothing resets it: a later write may be a different batch, and
     its success proves nothing about the earlier one.
+
+    With ``hooks`` the write also runs inside ``hooks.activity.writing()`` (entered before the inner write is
+    submitted, left on every way out) and reports its duration; a failing callback never reaches the candle path.
     """
 
-    def __init__(self, inner: CandleSink) -> None:
+    def __init__(self, inner: CandleSink, hooks: CandleWriteHooks | None = None, clock: Clock | None = None) -> None:
         self._inner = inner
+        self._hooks = hooks
+        self._clock = clock
         self.uncertain = False
 
-    async def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
+    async def _write(self, candles: Sequence[ValidatedCandle], ingested_at_ms: int) -> WriteReport:
         try:
             return await self._inner.write(candles, ingested_at_ms=ingested_at_ms)
         except (CandleWriteOutcomeUnknown, asyncio.CancelledError):
             self.uncertain = True
             raise
+
+    async def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
+        hooks, clock = self._hooks, self._clock
+        if hooks is None or clock is None:
+            return await self._write(candles, ingested_at_ms)
+        started = clock.monotonic_ns()
+        with hooks.activity.writing():
+            try:
+                return await self._write(candles, ingested_at_ms)
+            finally:
+                try:
+                    hooks.record_duration_ns(clock.monotonic_ns() - started)
+                except Exception:  # noqa: BLE001, S110 - a measurement bug must never reach the candle path
+                    pass
 
 
 async def _sleep_or_stop(sleep: Sleep, ms: int, stop: asyncio.Event) -> bool:
@@ -272,6 +301,7 @@ async def run_collection_loop(
     after_first_round: Callable[[RoundReport], Awaitable[None]] | None = None,
     observe_forming_slot: Callable[[str, int, int], None] | None = None,
     idle_work: Callable[[IdleWindow], Awaitable[None]] | None = None,
+    candle_write_hooks: CandleWriteHooks | None = None,
 ) -> LoopExit:
     """Collect on every boundary until ``stop`` is set; see the S14 plan, Decisions 4 to 9.
 
@@ -288,7 +318,9 @@ async def run_collection_loop(
         ensure_timestamp_ms(oldest, f"first_round_wanted_from[{symbol!r}]")
         if oldest % tf_ms:
             raise ValueError(f"first_round_wanted_from[{symbol!r}] {oldest} is not aligned to the timeframe")
-    watches = {symbol: _WriteWatch(sink) for symbol in config.symbols}  # one per symbol for the whole run
+    watches = {
+        symbol: _WriteWatch(sink, candle_write_hooks, clock) for symbol in config.symbols
+    }  # one per symbol for the whole run
     semaphore = asyncio.Semaphore(config.max_concurrency)
     refresh_after_ms = min(DEFAULT_REFRESH_AFTER_MS, config.time_trust.max_age_ms // 2)  # far from the age gate
     server_time = SharedServerTime(clock, config.time_trust, refresh_after_ms) if refresh_after_ms >= 1 else None

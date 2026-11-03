@@ -48,3 +48,18 @@ class OpenInterestBudget:
                     return
                 remaining_ns = self._starts[0] + _WINDOW_NS - now
                 await self._sleep(-(-remaining_ns // _NS_PER_MS))
+
+    def committed_at(self, at_ns: int, excluding: tuple[int, int] | None = None) -> int:
+        """Counted starts whose 300 s window still covers ``at_ns`` (a start at ``s`` counts while ``at_ns < s + 300 s``).
+
+        ``excluding`` leaves out the starts made inside ``[first_ns, last_ns]`` (inclusive): the catch-up uses it to
+        leave out the previous round, whose starts expire one by one while the next round makes its own, so the two never
+        need room at the same time (ADR-0003 P-10 counts one round's worth per 5 minutes).
+
+        A read-only view for a caller that must leave room for a later request (the catch-up before a round, ADR-0003
+        P-15); it neither removes entries nor reads the clock.
+        """
+        if type(at_ns) is not int:
+            raise TypeError(f"at_ns must be int, got {type(at_ns).__name__}")
+        first, last = excluding if excluding is not None else (1, 0)  # an empty range excludes nothing
+        return sum(1 for start in self._starts if start + _WINDOW_NS > at_ns and not first <= start <= last)

@@ -93,6 +93,8 @@ Every request obeys the P-5 rules (aligned bounds, at most 500 period ends inclu
 
 ### `quasar-collector run`
 
+Optional table `[open_interest]` (ADR-0003 P-13): `enabled` (bool), `period` (only `"5m"`), `publication_delay_ms` (0..300000), `round_offset_ms` (60000..280000), `budget_per_5min` (integer 100..400); all required, unknown keys rejected, and the number of symbols must fit a cadence of at most 12 (432 symbols at 100, 1788 at 400). When enabled, `run` also starts the open interest task described in the README; exit codes are unchanged (the task never changes them).
+
 ```
 quasar-collector run [CONFIG]
 ```

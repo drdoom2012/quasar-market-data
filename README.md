@@ -77,9 +77,24 @@ Details are in [`docs/reference.md`](docs/reference.md): `quasar-api serve` and 
 
 ## Open interest requests (ADR-0003)
 
-`quasar-collector fetch-oi-once --db market.db --symbol BTC/USDT:USDT [--periods 3]` fetches the newest 5m open interest rows of one symbol (Binance USDT-M, `GET /futures/data/openInterestHist`, public, no credentials) and stores the eligible ones; details and exit codes are in [`docs/reference.md`](docs/reference.md). Nothing collects open interest continuously yet (that is OI-4), so this command and the adapter behind it are the only users of the endpoint.
+`quasar-collector fetch-oi-once --db market.db --symbol BTC/USDT:USDT [--periods 3]` fetches the newest 5m open interest rows of one symbol (Binance USDT-M, `GET /futures/data/openInterestHist`, public, no credentials) and stores the eligible ones; details and exit codes are in [`docs/reference.md`](docs/reference.md). `quasar-collector run` collects open interest continuously when the configuration has an enabled `[open_interest]` table (below); without it nothing else uses the endpoint.
 
 **Operational requirement: nothing else on the IP may call `/futures/data/*` more than 600 times per 5 minutes.** Binance documents "IP rate limit 1000 requests/5min" for the endpoint and does not say whether all `/futures/data/*` callers share it. The open interest adapter counts its own request starts (history and server time together) in a sliding 300 s window, at most `budget_per_5min` (400 by default, 40 % of 1000), and has at most 2 requests in flight. A local limiter cannot see other consumers, so the remaining 60 % is reserved for anything else on the IP: do not run a second Collector with open interest enabled, and know what else calls `/futures/data/*` from that address.
+
+**Continuous collection (OI-4).** Add to `config/quasar.toml` (absent or `enabled = false` leaves `run` exactly as before; every key is required, unknown keys are an error):
+
+```toml
+[open_interest]
+enabled = true
+period = "5m"
+publication_delay_ms = 15000   # a row is stored only when its period end + this is behind the server-time lower bound
+round_offset_ms = 200000       # 60000..280000: the round for boundary B wakes at B + this
+budget_per_5min = 400          # 100..400 request starts per 300 s (history and server time together)
+```
+
+`run` starts one extra task after the first candle round and its post-check. Each symbol is asked every `c` rounds (`c` is derived from the number of symbols and the budget: 10 symbols give `c = 1`, 150 give 2 at 400, 600 give 5 at 400 and 9 at 200; a configuration that needs `c > 12` is refused at start) with a range that overlaps the previous request, so a row published late is picked up by the next request without a retry. Between rounds the task fills holes of the stored history (at most 29 days back) in pages of up to 500 period ends, oldest first, only while the next round keeps its budget; a slot Binance answers without its row is asked at most three times per run (after 1 h and 6 h) and never recorded as unavailable. The task never changes the exit status of `run` and never delays candles: an error in it prints one `oi-error` line and ends only the task (restart the Collector to restart it); a `418` ends it too.
+
+Log lines (stdout unless noted): `oi-reconcile` (per series and a total, once at start: `stored`, `holes`, `no_longer_recoverable` = unstored slots between the first stored row and the 29-day horizon, `oldest_hole_leaves_in_ms`), `oi-round` (per round), `oi-catchup` (per idle window that did work), `oi-conflict` (a re-delivered row with a different value, once per new conflict), `oi-measurement` (hourly), and on stderr `oi-warning` and `oi-error`. **Soak (ADR-0003 amendment A-1):** read the hourly `oi-measurement` line: `oi100_p99_ms` (p99 of a transaction of exactly 100 rows) must be at most 50 ms, the candle write p99 (`candle_p99_ms`) with open interest on at most 100 ms above the value without it, and the candle `lateness_ms` p99 at most 1 000 ms above the value without it. Enabling it on the VPS is a configuration change plus a release; nothing in the repository turns it on.
 
 **429 and 418.** A `429` pauses every open interest request of the process for `max(Retry-After, 300 s)`, doubling on consecutive pauses up to 1 hour (a larger `Retry-After` is honoured). A `418` stops open interest until the process restarts and logs an error. Candle collection has its own client and limiter and is not paused by either. Whether a `418` caused by open interest would also ban klines for the IP is not known; the budget exists to make it unlikely.
 

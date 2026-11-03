@@ -5,6 +5,12 @@ source's own client, stores the eligible ones and reports what happened. Exit co
 ``4`` also when a page failed after at least one of its transactions committed (those rows stay stored; re-run
 to complete the page), and ``1`` when server time is untrusted (no request is made, nothing is written).
 
+``run`` also collects open interest when the configuration has an enabled ``[open_interest]`` table (ADR-0003, OI-4):
+one extra asyncio task, started after round one and its post-check, with its own client, writer, budget and gate. It
+never changes the exit status: whatever happens to it is printed as ``oi-warning`` / ``oi-error`` lines (stderr) and
+``oi-round`` / ``oi-reconcile`` / ``oi-catchup`` / ``oi-measurement`` lines (stdout), and ends only that task. Without
+the table (or with ``enabled = false``) no open interest client, writer, task or candle hook is created and the output is unchanged.
+
 ``fetch-once`` fetches the most recent klines of one symbol, stores the confirmed closed candles and reports
 what happened. Exit codes keep apart what is known about persistence:
 
@@ -44,6 +50,7 @@ import sys
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
 
@@ -62,6 +69,7 @@ from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown
 from quasar_market_data.collector.clock import Clock, Sleep, SystemClock, system_sleep
 from quasar_market_data.collector.clock_lead import ClockLeadMonitor
 from quasar_market_data.collector.collection_loop import (
+    CandleWriteHooks,
     FatalLoopError,
     LoopConfig,
     LoopExit,
@@ -86,6 +94,8 @@ from quasar_market_data.collector.fetch_open_interest_once import (
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
 from quasar_market_data.collector.open_interest_gate import OpenInterestGate
+from quasar_market_data.collector.open_interest_measurements import OpenInterestMeasurements
+from quasar_market_data.collector.open_interest_task import OpenInterestTaskConfig, run_open_interest_task
 from quasar_market_data.collector.open_interest_writer import OpenInterestWriteOutcomeUnknown
 from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
 from quasar_market_data.collector.reconcile_reader import (
@@ -117,13 +127,22 @@ EXIT_INTERRUPTED = 130
 POST_CHECK_GRACE_MS = 2_000  # how long shutdown waits for a running post-check before interrupting it
 
 type OpenSource = Callable[[], Awaitable[KlineSource]]
-type OpenInterestOpenSource = Callable[[Clock, Sleep], Awaitable[OpenInterestOnceSource]]
+type OpenInterestOpenSource = Callable[
+    [OpenInterestBudget, OpenInterestGate, Clock], Awaitable[OpenInterestOnceSource]
+]  # BinanceUsdmOpenInterestSource.open in production: its own client, the caller's budget and gate
+
+OPEN_INTEREST_STOP_GRACE_MS = (
+    5_000  # how long shutdown waits (real time) for the open interest task before cancelling it
+)
 
 
-async def open_binance_open_interest_source(clock: Clock, sleep: Sleep) -> OpenInterestOnceSource:
-    """The production factory: its own client, the ADR-0003 default budget (OI-4 reads it from the configuration)."""
-    budget = OpenInterestBudget(DEFAULT_BUDGET_PER_5MIN, clock, sleep)
-    return await BinanceUsdmOpenInterestSource.open(budget, OpenInterestGate(clock), clock)
+@dataclass(frozen=True)
+class OpenInterestRun:
+    """What ``run`` needs to start the open interest task; ``None`` when the table is absent or disabled."""
+
+    config: OpenInterestTaskConfig
+    open_source: OpenInterestOpenSource
+    stop_grace_ms: int = OPEN_INTEREST_STOP_GRACE_MS
 
 
 def _error(message: str) -> None:
@@ -247,7 +266,8 @@ async def _run_open_interest(
     config: FetchOpenInterestOnceConfig, db: Path, open_source: OpenInterestOpenSource, clock: Clock, sleep: Sleep
 ) -> int:
     async with AsyncExitStack() as stack:
-        source = await open_source(clock, sleep)
+        budget = OpenInterestBudget(DEFAULT_BUDGET_PER_5MIN, clock, sleep)
+        source = await open_source(budget, OpenInterestGate(clock), clock)
         stack.push_async_callback(_close_quietly, "the exchange client", source.close)
         writer = await AsyncOpenInterestWriter.open(db, activity=CandleWriteActivity())
         stack.push_async_callback(_close_quietly, "the open interest writer", writer.close)
@@ -418,6 +438,7 @@ async def _run_loop(
     clock: Clock,
     sleep: Sleep,
     backfill: BackfillConfig | None,
+    oi_run: OpenInterestRun | None,
 ) -> int:
     """Handlers first, so that a stop during the pre-start read is honoured; restored on every way out."""
     stop = asyncio.Event()
@@ -426,7 +447,9 @@ async def _run_loop(
     for sig in previous:
         loop.add_signal_handler(sig, stop.set)
     try:
-        return await _reconcile_and_collect(config, db, min_interval_ms, open_source, clock, sleep, stop, backfill)
+        return await _reconcile_and_collect(
+            config, db, min_interval_ms, open_source, clock, sleep, stop, backfill, oi_run
+        )
     finally:
         for sig, handler in previous.items():
             loop.remove_signal_handler(sig)
@@ -453,6 +476,64 @@ async def _finish_post_check(task: "asyncio.Task[None] | None", guard: ReadGuard
         _error(f"warning: the post-check ended with an error: {error!r}")
 
 
+def _emit_open_interest_line(line: str) -> None:
+    """Warnings and errors of the open interest task go to stderr, everything else to stdout."""
+    if line.startswith(("oi-warning", "oi-error")):
+        _error(line)
+    else:
+        print(line, flush=True)
+
+
+async def _wait_for_event_or_stop(event: asyncio.Event, stop: asyncio.Event) -> bool:
+    """Wait until ``event`` is set; ``True`` when ``stop`` came first. Leaves no task behind."""
+    waiting = {asyncio.ensure_future(event.wait()), asyncio.ensure_future(stop.wait())}
+    try:
+        await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for future in waiting:
+            future.cancel()
+        await asyncio.gather(*waiting, return_exceptions=True)
+    return not event.is_set()
+
+
+async def _open_interest_main(
+    oi_run: OpenInterestRun,
+    db: Path,
+    clock: Clock,
+    sleep: Sleep,
+    stop: asyncio.Event,
+    candle_ready: asyncio.Event,
+    activity: CandleWriteActivity,
+    measurements: OpenInterestMeasurements,
+) -> None:
+    """The open interest task of ``run``: starts after round one and its post-check, ends only itself (ADR-0003 P-9)."""
+    try:
+        if await _wait_for_event_or_stop(candle_ready, stop):
+            return
+        config = oi_run.config
+        budget = OpenInterestBudget(config.budget_per_5min, clock, sleep)
+        gate = OpenInterestGate(clock)
+        async with AsyncExitStack() as stack:
+            source = await oi_run.open_source(budget, gate, clock)
+            stack.push_async_callback(_close_quietly, "the open interest client", source.close)
+            writer = await AsyncOpenInterestWriter.open(db, activity=activity)
+            stack.push_async_callback(_close_quietly, "the open interest writer", writer.close)
+            await run_open_interest_task(
+                source, writer, db, config, budget, activity, clock, sleep, stop, _emit_open_interest_line, measurements
+            )
+    except Exception as error:  # noqa: BLE001 - the candle loop is not informed; CancelledError is not an Exception
+        _error(f"oi-error task stopped: {type(error).__name__}: {error}")
+
+
+async def _finish_open_interest(task: "asyncio.Task[None]", stop: asyncio.Event, grace_ms: int) -> None:
+    """Give the task ``grace_ms`` of real time to end after ``stop``, then cancel it and wait for it."""
+    stop.set()
+    await asyncio.wait({task}, timeout=grace_ms / 1000)
+    if not task.done():
+        task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
 async def _reconcile_and_collect(
     config: LoopConfig,
     db: Path,
@@ -462,6 +543,7 @@ async def _reconcile_and_collect(
     sleep: Sleep,
     stop: asyncio.Event,
     backfill: BackfillConfig | None,
+    oi_run: OpenInterestRun | None,
 ) -> int:
     inputs = ReconcileInputs(
         symbols=config.symbols,
@@ -487,6 +569,10 @@ async def _reconcile_and_collect(
     guard = ReadGuard()
     post_check: asyncio.Task[None] | None = None
 
+    candle_ready = asyncio.Event()  # set when round one's post-check has ended: open interest may start (ADR-0003 P-9)
+    activity = CandleWriteActivity()
+    measurements = OpenInterestMeasurements()
+
     async def report_post_check(report: RoundReport, lead_max: int | None, snapshot: asyncio.Event) -> None:
         try:
             after = await reconcile(
@@ -501,6 +587,8 @@ async def _reconcile_and_collect(
             _error(f"reconcile-after status=unverified error={error}")
         else:
             _print_reconcile_after(after, before, lead_max)
+        finally:
+            candle_ready.set()
 
     async def after_first_round(report: RoundReport) -> None:
         """Start the post-check and return once its read holds a snapshot (or has ended): it then sees exactly what
@@ -538,6 +626,14 @@ async def _reconcile_and_collect(
             if backfill is None
             else Backfiller(backfill, config, db, clock, sleep, _print_slice, _report_suspension)
         )
+        hooks = None
+        if oi_run is not None:
+            hooks = CandleWriteHooks(activity, measurements.record_candle_write)
+            oi_task = asyncio.create_task(
+                _open_interest_main(oi_run, db, clock, sleep, stop, candle_ready, activity, measurements),
+                name="open-interest",
+            )
+            stack.push_async_callback(_finish_open_interest, oi_task, stop, oi_run.stop_grace_ms)
         outcome: LoopExit | FatalLoopError
         try:
             outcome = await run_collection_loop(
@@ -554,6 +650,7 @@ async def _reconcile_and_collect(
                 after_first_round=after_first_round,
                 observe_forming_slot=monitor.observe,
                 idle_work=None if backfiller is None else backfiller.run_idle,
+                candle_write_hooks=hooks,
             )
         except FatalLoopError as error:
             outcome = error
@@ -574,7 +671,13 @@ async def _reconcile_and_collect(
     return code
 
 
-def _run_command(settings: Settings, open_source: OpenSource, clock: Clock, sleep: Sleep) -> int:
+def _run_command(
+    settings: Settings,
+    open_source: OpenSource,
+    clock: Clock,
+    sleep: Sleep,
+    open_oi_source: OpenInterestOpenSource,
+) -> int:
     venue, collector = settings.venues[0], settings.collector
     config = LoopConfig(
         symbols=venue.symbols,
@@ -589,14 +692,38 @@ def _run_command(settings: Settings, open_source: OpenSource, clock: Clock, slee
         if new_version > old_version:
             _error(f"migrated to version {new_version} (from {old_version})")
         backfill = BackfillConfig(collector.backfill.days) if collector.backfill.enabled else None
+        oi_run = _open_interest_run(settings, open_oi_source)
         return asyncio.run(
             _run_loop(
-                config, settings.database_path, collector.min_request_interval_ms, open_source, clock, sleep, backfill
+                config,
+                settings.database_path,
+                collector.min_request_interval_ms,
+                open_source,
+                clock,
+                sleep,
+                backfill,
+                oi_run,
             )
         )
     except (SourceError, StorageError, sqlite3.Error) as error:  # raised before the loop started
         _error(f"error: {error}")
         return EXIT_FAILED
+
+
+def _open_interest_run(settings: Settings, open_oi_source: OpenInterestOpenSource) -> OpenInterestRun | None:
+    table = settings.open_interest
+    if table is None or not table.enabled:
+        return None
+    venue = settings.venues[0]
+    config = OpenInterestTaskConfig(
+        venue=venue.id,
+        symbols=venue.symbols,
+        period=Timeframe(table.period),
+        publication_delay_ms=table.publication_delay_ms,
+        round_offset_ms=table.round_offset_ms,
+        budget_per_5min=table.budget_per_5min,
+    )
+    return OpenInterestRun(config, open_oi_source, OPEN_INTEREST_STOP_GRACE_MS)
 
 
 def _migrate(db: Path, clock: Clock) -> tuple[int, int]:
@@ -680,7 +807,7 @@ def main(
     argv: list[str] | None = None,
     *,
     open_source: OpenSource = BinanceUsdmSource.open,
-    open_oi_source: OpenInterestOpenSource = open_binance_open_interest_source,
+    open_oi_source: OpenInterestOpenSource = BinanceUsdmOpenInterestSource.open,
     clock: Clock | None = None,
     sleep: Sleep = system_sleep,
 ) -> int:
@@ -695,7 +822,7 @@ def main(
         except ConfigError as error:
             parser.error(f"config {args.config}: {error}")
         print(loaded.start_line(), flush=True)
-        return _run_command(loaded.settings, open_source, clock or SystemClock(), sleep)
+        return _run_command(loaded.settings, open_source, clock or SystemClock(), sleep, open_oi_source)
     try:
         if args.command == "fetch-oi-once":
             return _fetch_open_interest_once(args, open_oi_source, clock or SystemClock(), sleep)

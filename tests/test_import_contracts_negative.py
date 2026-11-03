@@ -128,6 +128,20 @@ CASES = {
         f"import {PACKAGE}.collector.shared_server_time\n",
         OI_INDEPENDENCE_CONTRACT,
     ),
+    "open_interest_reader_importing_the_candle_rate_limiter_fails_oi_independence": Case(
+        "collector/open_interest_reader.py", f"import {PACKAGE}.collector.rate_limiter\n", OI_INDEPENDENCE_CONTRACT
+    ),
+    "open_interest_measurements_importing_shared_server_time_fails_oi_independence": Case(
+        "collector/open_interest_measurements.py",
+        f"import {PACKAGE}.collector.shared_server_time\n",
+        OI_INDEPENDENCE_CONTRACT,
+    ),
+    "open_interest_task_importing_the_collection_loop_fails_oi_independence": Case(
+        "collector/open_interest_task.py", f"import {PACKAGE}.collector.collection_loop\n", OI_INDEPENDENCE_CONTRACT
+    ),
+    "open_interest_task_importing_the_candle_rate_limiter_fails_oi_independence": Case(
+        "collector/open_interest_task.py", f"import {PACKAGE}.collector.rate_limiter\n", OI_INDEPENDENCE_CONTRACT
+    ),
     "open_interest_budget_importing_the_clock_is_allowed": Case(
         "collector/open_interest_budget.py", f"import {PACKAGE}.collector.clock\n", None
     ),
