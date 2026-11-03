@@ -171,6 +171,7 @@ GET /v1/instruments
 GET /v1/candles
 GET /v1/indicators
 GET /v1/coverage
+GET /v1/open-interest
 GET /health
 ```
 
