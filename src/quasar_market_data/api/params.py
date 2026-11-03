@@ -1,4 +1,4 @@
-"""Raw query string -> request objects (contract sections 1, 5.1, 6.1.1, 6.3.1 and 6.5.2), strict and free of I/O."""
+"""Raw query string -> request objects (contract sections 1, 5.1, 6.1.1, 6.3.1, 6.5.2 and 6.6.1), strict and free of I/O."""
 
 import re
 from dataclasses import dataclass
@@ -31,6 +31,8 @@ _INDICATORS_NAMES: Final = ("venue", "symbol", "timeframe", "start", "end", "ind
 _INDICATORS_REQUIRED: Final = ("venue", "symbol", "timeframe", "start", "indicators")
 _OPEN_INTEREST_NAMES: Final = ("venue", "symbol", "period", "start", "end", "limit")
 _OPEN_INTEREST_REQUIRED: Final = ("venue", "symbol", "period", "start")
+_OPEN_INTEREST_COVERAGE_NAMES: Final = ("venue", "symbol", "period", "start", "end")
+_OPEN_INTEREST_COVERAGE_REQUIRED: Final = ("venue", "symbol", "period", "start", "end")
 _MALFORMED_ESCAPE: Final = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
@@ -73,6 +75,15 @@ class OpenInterestRequest:
     limit: int
 
 
+@dataclass(frozen=True)
+class OpenInterestCoverageRequest:
+    venue: str
+    symbol: str
+    period: Timeframe
+    start: int
+    end: int
+
+
 def parse_candles_request(raw_query: bytes) -> CandlesRequest:
     values = _parse(raw_query, _NAMES, _REQUIRED)
     venue, symbol, start = _series_and_start(values)
@@ -93,6 +104,15 @@ def parse_open_interest_request(raw_query: bytes) -> OpenInterestRequest:
         _check_window(start, end)
 
     return OpenInterestRequest(venue, symbol, SERVED_TIMEFRAME, start, end, limit)
+
+
+def parse_open_interest_coverage_request(raw_query: bytes) -> OpenInterestCoverageRequest:
+    values = _parse(raw_query, _OPEN_INTEREST_COVERAGE_NAMES, _OPEN_INTEREST_COVERAGE_REQUIRED)
+    venue, symbol, start = _series_and_start(values, "period")
+    end = _end_timestamp(values["end"], "period")
+    _check_window(start, end)
+
+    return OpenInterestCoverageRequest(venue, symbol, SERVED_TIMEFRAME, start, end)
 
 
 def parse_coverage_request(raw_query: bytes) -> CoverageRequest:

@@ -54,3 +54,32 @@ def test_the_proxy_profile_runs_and_prints_the_ac_fields(
     assert result["evaluate"]["AC3"]["value"]["candle"]["n"] == 6  # 3 symbols x 2 refreshes
     assert result["evaluate"]["AC3"]["value"]["oi"]["n"] == 6
     assert result["sustained"] is None  # --sustained-minutes 0 skips it
+
+
+def test_the_real_mode_runs_against_the_endpoint(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lift_the_network_guard(monkeypatch)
+
+    assert (
+        main(
+            [
+                "--series",
+                "3",
+                "--profile",
+                "smoke",
+                "--oi-mode",
+                "real",
+                "--refreshes",
+                "2",
+                "--sustained-minutes",
+                "0",
+            ]
+        )
+        == 0
+    )
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["parameters"]["oi_mode"] == "real"
+    assert result["evaluate"]["AC2"]["pass"] is True  # every call of both phases answered 200
+    assert result["evaluate"]["AC3"]["value"]["oi"]["n"] == 6
