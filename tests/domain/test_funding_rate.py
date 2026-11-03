@@ -2,12 +2,17 @@ import pytest
 
 from quasar_market_data.domain.decimal_text import InvalidDecimalError
 from quasar_market_data.domain.funding_rate import (
+    DEFAULT_FUNDING_RATE_PUBLICATION_DELAY_MS,
     FundingRate,
     FundingRateKey,
     RateType,
     count_off_hour_rows,
+    forward_end_bound_ms,
+    is_funding_rate_eligible,
     is_off_hour,
+    select_eligible_funding_rates,
 )
+from quasar_market_data.domain.server_time import TimeRejection, TrustedTime, UntrustedTime
 from quasar_market_data.domain.timestamps import MAX_TIMESTAMP_MS
 from tests.typing_helpers import untyped
 
@@ -109,3 +114,79 @@ def test_count_off_hour_rows() -> None:
     rows = [make_row(offset=0), make_row(offset=26), make_row(offset=5_001), make_row(offset=1_800_000)]
     assert count_off_hour_rows(rows) == 2
     assert count_off_hour_rows([]) == 0
+
+
+# --- eligibility (ADR-0004 P-4) ---
+
+DELAY = 30_000
+
+
+def test_default_publication_delay() -> None:
+    assert DEFAULT_FUNDING_RATE_PUBLICATION_DELAY_MS == 30_000
+
+
+def test_boundary_is_eligible_and_one_millisecond_earlier_is_not() -> None:
+    row = make_row(offset=0)
+    assert is_funding_rate_eligible(T, DELAY, T + DELAY) is True
+    assert is_funding_rate_eligible(T, DELAY, T + DELAY - 1) is False
+    assert select_eligible_funding_rates([row], DELAY, TrustedTime(T + DELAY)).eligible == (row,)
+    assert select_eligible_funding_rates([row], DELAY, TrustedTime(T + DELAY - 1)).pending == (row,)
+    assert is_funding_rate_eligible(T, 0, T) is True
+    assert is_funding_rate_eligible(T, 0, T - 1) is False
+
+
+def test_forward_end_bound_makes_every_row_up_to_it_eligible() -> None:
+    lower_bound = T + 123_456
+    bound = forward_end_bound_ms(DELAY, lower_bound)
+    assert bound == lower_bound - DELAY
+    assert is_funding_rate_eligible(bound, DELAY, lower_bound) is True
+    assert is_funding_rate_eligible(bound + 1, DELAY, lower_bound) is False
+
+
+def test_mixed_rows_are_split_in_order() -> None:
+    early, on_time, late = make_row(offset=-3_600_000), make_row(offset=0), make_row(offset=3_600_000)
+    selection = select_eligible_funding_rates([early, on_time, late], DELAY, TrustedTime(T + DELAY))
+    assert selection.eligible == (early, on_time)
+    assert selection.pending == (late,)
+    assert selection.untrusted_reason is None
+
+
+@pytest.mark.parametrize("reason", list(TimeRejection))
+def test_untrusted_time_selects_nothing(reason: TimeRejection) -> None:
+    rows = [make_row(offset=-3_600_000), make_row(offset=0)]
+    selection = select_eligible_funding_rates(rows, DELAY, UntrustedTime(reason))
+    assert selection.eligible == ()
+    assert selection.pending == tuple(rows)
+    assert selection.untrusted_reason == reason
+
+
+def test_empty_rows() -> None:
+    trusted = select_eligible_funding_rates([], DELAY, TrustedTime(T))
+    untrusted = select_eligible_funding_rates([], DELAY, UntrustedTime(TimeRejection.NO_OBSERVATION))
+    assert (trusted.eligible, trusted.pending) == ((), ())
+    assert (untrusted.eligible, untrusted.pending) == ((), ())
+
+
+def test_delay_is_validated_before_the_trust_branch() -> None:
+    with pytest.raises(ValueError):
+        select_eligible_funding_rates([], -1, UntrustedTime(TimeRejection.NO_OBSERVATION))
+    with pytest.raises(ValueError):
+        is_funding_rate_eligible(T, -1, T)
+    with pytest.raises(ValueError):
+        forward_end_bound_ms(-1, T)
+
+
+def test_eligibility_argument_type_checks() -> None:
+    for bad in (True, 1.5):
+        with pytest.raises(TypeError):
+            is_funding_rate_eligible(T, untyped(bad), T)
+        with pytest.raises(TypeError):
+            is_funding_rate_eligible(T, DELAY, untyped(bad))
+        with pytest.raises(TypeError):
+            forward_end_bound_ms(untyped(bad), T)
+        with pytest.raises(TypeError):
+            forward_end_bound_ms(DELAY, untyped(bad))
+    with pytest.raises(ValueError):
+        is_funding_rate_eligible(MAX_TIMESTAMP_MS + 1, DELAY, T)
+    with pytest.raises(TypeError):
+        select_eligible_funding_rates([], DELAY, untyped(object()))
