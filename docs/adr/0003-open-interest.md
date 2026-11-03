@@ -4,8 +4,7 @@
   open decisions O-1 to O-5). Revisions 2 to 4 answer the user's reviews (listed at the end). The API response
   schema (P-11) is contract section 6.5 of `docs/contracts/api-v1.md`, approved by the user on 2026-11-03 and implemented by OI-5. Amendment A-1 (2026-11-02, approved by
   the user): the 100-row transaction criterion of P-9 is checked from production measurements after OI-4, not by
-  a benchmark in OI-2 (see the revision history). Amendment A-2 (2026-11-03, **proposed** with contract section 6.6;
-  becomes part of this ADR when the user approves that text): a per-run gap listing for open interest and the split
+  a benchmark in OI-2 (see the revision history). Amendment A-2 (2026-11-03, approved by the user with contract section 6.6): a per-run gap listing for open interest and the split
   of the OI-6 slice (see the revision history).
 - **Date:** 2026-11-02
 - **Scope:** collecting, storing and serving Binance USDT-M open interest history at a 5m period for the
@@ -671,8 +670,8 @@ were throwaway in the session scratchpad and are not in the repository.
   until OI-4 nothing writes open interest, so candle collection cannot be affected before the measurement exists,
   and production data measures a grown database instead of an empty one. P-9 and the P-15 row are updated; the
   rules themselves are unchanged.
-- **Amendment A-2** (2026-11-03, **proposed** with contract section 6.6; the OI-6 design was approved by the user on
-  2026-11-03, the contract text awaits approval): decision OA7 left a per-run gap listing for open interest "for a
+- **Amendment A-2** (2026-11-03, approved by the user together with contract section 6.6; the OI-6 design was approved
+  on the same day): decision OA7 left a per-run gap listing for open interest "for a
   later section if wanted". The user asked for it when approving the OI-6 design (a strip with the position of holes
   on the symbol overview page, issue #6). P-11 gains `GET /v1/open-interest/coverage` (counts and runs of the P-7
   states for at most 10 000 slots, no values). The P-16 row OI-6 is split into OI-6a (the endpoint, its contract text
