@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck imports check live bench bench-health bench-health-oi bench-indicators bench-oi-write images compose-test
+.PHONY: test lint typecheck imports check live bench bench-health bench-health-oi bench-indicators bench-oi-write bench-overview images compose-test
 
 test:
 	uv run pytest
@@ -41,6 +41,18 @@ bench-indicators:
 # On the VPS run it in the Dockerfile's runtime image instead (README, "Open interest write benchmark").
 bench-oi-write:
 	uv run python tools/bench_open_interest_write.py --schema src/quasar_market_data/storage/migrations/002_open_interest.sql --max-p99-ms 50
+
+# One refresh of the symbol overview against a served API on a generated database in a fresh temp dir (OI-6 spec 7); not part of `check`.
+# SERIES symbols; OVERVIEW_PROFILE smoke | target (target = 100 000 candle rows per series, the size of bench-health's target:
+# at 600 series tens of minutes and several GB of temp disk); OI_MODE proxy (G0: /v1/coverage stands in for the open interest
+# call) | real (/v1/open-interest/coverage). ARGS carries the rest, for example ARGS="--stress", ARGS="--l-tunnel-ms 40",
+# ARGS="--refreshes 3 --sustained-minutes 0".
+SERIES ?= 300
+OVERVIEW_PROFILE ?= smoke
+OI_MODE ?= real
+ARGS ?=
+bench-overview:
+	uv run python -m tests.api.bench_overview_refresh --series $(SERIES) --profile $(OVERVIEW_PROFILE) --oi-mode $(OI_MODE) $(ARGS)
 
 # Builds the collector and api images (linux/amd64) with local tags; needs Docker, not part of `check`.
 images:

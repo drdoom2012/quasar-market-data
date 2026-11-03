@@ -50,6 +50,7 @@ Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned in `.python-ver
 | `make check` | `lint`, `typecheck`, `imports`, `test` |
 | `make bench-indicators` | the worst-case `GET /v1/indicators` request on a generated database, in process and against a served process with 1, 2, 4 and 8 concurrent requests and a `/health` probe (informative, no criterion; not part of `make check`) |
 | `make bench-health` | `/health/ingest` read benchmark on a generated database (`PROFILE=smoke`, `medium` or `target`; not part of `make check`; S17 HARD STOP 2) |
+| `make bench-overview` | one refresh of the symbol overview against a served API on a generated database (`SERIES`, `OVERVIEW_PROFILE=smoke` or `target`, `OI_MODE=proxy` or `real`, `ARGS`; not part of `make check`; see "Overview refresh benchmark") |
 | `make live` | live check of `fetch-once` against Binance USDT-M public endpoints (uses the network; not part of `make check`) |
 | `make images` | build the `collector` and `api` images for `linux/amd64` with local tags (needs Docker; not part of `make check`) |
 | `make compose-test` | `make images`, then the `compose`-marked tests: images, the Compose file, and the isolation test against the running production project (needs a stock Linux Docker Engine, not OrbStack or Docker Desktop; not part of `make check`) |
@@ -138,6 +139,8 @@ docker run --rm -v <empty dir>:/bench -v "$PWD":/src:ro python:3.12-slim-bookwor
 ```
 
 The image is the Dockerfile's pinned runtime base, so SQLite is the production library. It prints one `oi_write …` line and removes its files. Locally: `make bench-oi-write` (on macOS the number is optimistic: SQLite does not force the write to the medium there).
+
+**Overview refresh benchmark (optional).** `make bench-overview SERIES=300 OVERVIEW_PROFILE=target OI_MODE=proxy` times what one refresh of the symbol overview costs the API (OI-6 design, section 7): it generates a database (never production data) in a fresh temp dir, starts `quasar-api serve` on 127.0.0.1 with open interest enabled, and reproduces the overview tool's call order (`/health/ingest`, `/v1/instruments`, a candle phase of one `/v1/coverage` call per symbol, then an open interest phase), 4 workers, a new connection per call, the 60 s deadline checked before every call. It prints one JSON line: per-call latency per endpoint, the wall time of each refresh, the acceptance criteria AC1 to AC7 and, unless `ARGS="--sustained-minutes 0"`, the sustained run (refreshes every 15 s for 10 minutes with a concurrent writer and a `/health/ready` probe; AC4, AC5). `OI_MODE=proxy` asks `/v1/coverage` for the open interest slot and is the G0 stand-in used before `/v1/open-interest/coverage` exists. `ARGS="--l-tunnel-ms <n>"` takes the one measurement only you can make: the median of at least 20 trivial calls (for example `/health/ready`) through your real SSH tunnel; it turns the loopback numbers into the prediction AC7. `target` at 600 symbols builds about 60 million candle rows (tens of minutes, several GB of temp disk). One machine, a warm file cache, a modelled writer: not a VPS figure.
 
 ## Symbol overview (tool)
 
