@@ -5,7 +5,7 @@
   schema (P-11) is contract section 6.5 of `docs/contracts/api-v1.md`, approved by the user on 2026-11-03 and implemented by OI-5. Amendment A-1 (2026-11-02, approved by
   the user): the 100-row transaction criterion of P-9 is checked from production measurements after OI-4, not by
   a benchmark in OI-2 (see the revision history). Amendment A-2 (2026-11-03, approved by the user with contract section 6.6): a per-run gap listing for open interest and the split
-  of the OI-6 slice (see the revision history). OI-6a (the endpoint, contract section 6.6) is implemented; OI-6b (the overview page) is pending its own gate.
+  of the OI-6 slice (see the revision history). OI-6a (the endpoint, contract section 6.6) and OI-6b (the overview page) are implemented on one branch at the user's request (one pull request, not two); the OI-6b gate of P-16 (the benchmark numbers read and approved by the user) is recorded in the OI-6 design, section 14: the numbers are measured, the user's reading of them is pending.
 - **Date:** 2026-11-02
 - **Scope:** collecting, storing and serving Binance USDT-M open interest history at a 5m period for the
   configured symbols. It is the first extension dataset (`docs/architecture.md` §7); funding, liquidations and
