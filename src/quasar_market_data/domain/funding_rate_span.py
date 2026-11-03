@@ -129,5 +129,9 @@ def next_history_chunk(span: Interval, backfill_days: int) -> Interval | None:
 
 
 def is_behind(b_now_ms: int, span: Interval) -> bool:
-    """True when the span's end lags ``b_now_ms`` by at least two hours (ADR-0004 P-10)."""
+    """True when the span's end lags ``b_now_ms`` by at least two hours (ADR-0004 P-10, boundary inclusive).
+
+    The API's ``behind`` (P-13) must reuse this with ``b_now_ms = as_of - publication_delay_ms`` rather than
+    derive it again, so the two agree to the millisecond.
+    """
     return ensure_timestamp_ms(b_now_ms, "b_now_ms") - span.through_ms >= BEHIND_THRESHOLD_MS

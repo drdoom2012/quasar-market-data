@@ -79,8 +79,6 @@ class FundingRate:
     def __post_init__(self) -> None:
         if type(self.key) is not FundingRateKey:
             raise TypeError(f"key must be FundingRateKey, got {type(self.key).__name__}")
-        if type(self.funding_rate) is not str:
-            raise TypeError(f"funding_rate must be str, got {type(self.funding_rate).__name__}")
         object.__setattr__(self, "funding_rate", canonical_decimal(self.funding_rate))
         object.__setattr__(self, "mark_price", _mark_price_text(self.mark_price))
 

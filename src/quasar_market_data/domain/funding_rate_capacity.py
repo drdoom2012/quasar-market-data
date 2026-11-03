@@ -79,13 +79,20 @@ def isolated_round_capacity(budget_per_5min: int, round_offset_ms: int) -> int:
 
 
 def sustained_capacity(budget_per_5min: int, round_offset_ms: int) -> int:
-    """``S_sustained = Q * m - 1``: the largest symbol count whose hourly rounds never skip a series."""
+    """``S_sustained = Q * m - 1``: a lower bound on the symbol count whose hourly rounds start every series.
+
+    It holds for an ideal run (ADR-0004 P-10): not a guarantee under errors or slow requests, and not a hard
+    maximum (a greedy policy sustained about 7 % more in the simulation).
+    """
     return full_groups_per_round(round_offset_ms) * round_share(budget_per_5min) - 1
 
 
 def warning_threshold(sustained: int) -> int:
     """``floor(0.9 * sustained)``: above it less than 10 % of the capacity is left for retries and slow requests."""
-    return _ensure_int(sustained, "sustained") * 9 // 10
+    value = _ensure_int(sustained, "sustained")
+    if value < 0:
+        raise ValueError(f"sustained must be >= 0, got {value}")
+    return value * 9 // 10
 
 
 @dataclass(frozen=True)
@@ -103,7 +110,7 @@ def assess_capacity(symbol_count: int, budget_per_5min: int, round_offset_ms: in
     sustained = sustained_capacity(budget_per_5min, round_offset_ms)
     if count > sustained:
         raise CapacityError(
-            f"symbol_count {count} exceeds the sustainable capacity {sustained} at "
+            f"symbol_count {count} exceeds the sustainable capacity S_sustained {sustained} at "
             f"budget_per_5min {budget_per_5min} and round_offset_ms {round_offset_ms}"
         )
     threshold = warning_threshold(sustained)
@@ -113,7 +120,8 @@ def assess_capacity(symbol_count: int, budget_per_5min: int, round_offset_ms: in
 def planned_start_offset_ms(index: int, budget_per_5min: int) -> int:
     """Planned start of request ``index`` after the wake of an isolated round (index 0 is the server-time call).
 
-    The planned latency from a settlement to the request is ``round_offset_ms`` plus this value.
+    The planned latency from a settlement to the request is ``round_offset_ms`` plus this value. It is the
+    plan of an ideal run (no errors, no ``429``, no yielding): no latency is guaranteed (ADR-0004 P-10).
     """
     position = _ensure_int(index, "index")
     if position < 0:

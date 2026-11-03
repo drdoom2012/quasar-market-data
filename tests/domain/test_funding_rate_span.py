@@ -266,3 +266,5 @@ def test_backfill_days_bounds() -> None:
             history_target_from_ms(X, untyped(wrong))
     with pytest.raises(ValueError):
         history_target_from_ms(MIN_TIMESTAMP_MS - 1, 365)
+    with pytest.raises(TypeError):
+        history_target_from_ms(untyped(True), 365)

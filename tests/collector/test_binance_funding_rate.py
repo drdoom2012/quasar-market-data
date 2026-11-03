@@ -124,6 +124,7 @@ MALFORMED = [
     _case("rateType-lowercase", [make_row(rateType="regular")], 0, "Regular or Special"),
     _case("rateType-unknown", [make_row(rateType="Other")], 0, "Regular or Special"),
     _case("rateType-none", [make_row(rateType=None)], 0, "Regular or Special"),
+    _case("rateType-list", [make_row(rateType=["Regular"])], 0, "Regular or Special"),
     _case("rate-float", [make_row(fundingRate=0.0001)], 0, "decimal string"),
     _case("rate-int", [make_row(fundingRate=1)], 0, "decimal string"),
     _case("rate-none", [make_row(fundingRate=None)], 0, "decimal string"),
@@ -184,6 +185,13 @@ def test_non_list_response_is_rejected(response: object) -> None:
     assert "list" in str(error.value)
 
 
+def test_an_error_object_inside_a_list_is_rejected_as_a_row() -> None:
+    error_object = {"status": "ERROR", "type": "GENERAL", "code": "99099990", "errorData": "illegal params."}
+    with pytest.raises(FundingRateParseError, match="missing key") as error:
+        parse([error_object])
+    assert error.value.row_index == 0
+
+
 def test_row_count_is_checked_before_rows() -> None:
     response = [make_row(fundingTime=str(START)), make_row(fundingTime=START + 1), make_row(fundingTime=START + 2)]
     with pytest.raises(FundingRateParseError, match="more than") as error:
@@ -208,6 +216,7 @@ def test_argument_errors_are_not_parse_errors() -> None:
         ({"symbol": ""}, ValueError),
         ({"market_id": untyped(1)}, TypeError),
         ({"start_time_ms": untyped(True)}, TypeError),
+        ({"end_time_ms": untyped(True)}, TypeError),
         ({"limit": 0}, ValueError),
         ({"limit": 1_001}, ValueError),
         ({"limit": untyped(True)}, TypeError),

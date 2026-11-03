@@ -29,7 +29,6 @@ from quasar_market_data.domain.funding_rate import (
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
 
 _REQUIRED_KEYS: Final = ("symbol", "fundingTime", "fundingRate", "markPrice", "rateType")
-_RATE_TYPES: Final = {"Regular": RateType.REGULAR, "Special": RateType.SPECIAL}
 
 
 class FundingRateParseError(ValueError):
@@ -71,9 +70,9 @@ def _parse_row(
     if funding_time > end:
         raise ValueError(f"fundingTime {funding_time} is after end_time_ms {end}")
     raw_type = row["rateType"]
-    if type(raw_type) is not str or raw_type not in _RATE_TYPES:
+    if type(raw_type) is not str or raw_type not in (RateType.REGULAR.value, RateType.SPECIAL.value):
         raise ValueError(f"rateType must be Regular or Special, got {raw_type!r}")
-    rate_type = _RATE_TYPES[raw_type]
+    rate_type = RateType(raw_type)
     if previous_time is not None:
         if funding_time < previous_time:
             raise ValueError(

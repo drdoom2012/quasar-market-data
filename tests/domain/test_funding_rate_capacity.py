@@ -23,6 +23,8 @@ from quasar_market_data.domain.funding_rate_capacity import (
 from tests.typing_helpers import untyped
 
 OFFSET_BOUNDARIES = (60_000, 200_000, 200_001, 300_000, 505_000, 505_001, 600_000)
+# Q at each boundary, written out by hand from the ADR (P-10, E-14) so the checks below do not reuse the code.
+Q_AT = {60_000: 11, 200_000: 11, 200_001: 11, 300_000: 11, 505_000: 11, 505_001: 10, 600_000: 10}
 
 
 def test_constants() -> None:
@@ -81,7 +83,8 @@ def test_offset_range(offset: int) -> None:
 def test_accept_and_refuse_at_the_boundary_for_every_share() -> None:
     for budget in range(MIN_BUDGET_PER_5MIN, MAX_BUDGET_PER_5MIN + 1):
         for offset in OFFSET_BOUNDARIES:
-            sustained = sustained_capacity(budget, offset)
+            sustained = Q_AT[offset] * (budget // 2) - 1
+            assert sustained_capacity(budget, offset) == sustained
             assessment = assess_capacity(sustained, budget, offset)
             assert assessment.sustained == sustained
             with pytest.raises(CapacityError):
@@ -158,6 +161,10 @@ def test_argument_checks() -> None:
     assert type(zero.value) is not CapacityError
     with pytest.raises(ValueError):
         planned_start_offset_ms(-1, 150)
+    with pytest.raises(ValueError):
+        warning_threshold(-1)
+    with pytest.raises(TypeError):
+        warning_threshold(untyped(True))
 
 
 def test_planned_start_offset_uses_the_round_share_not_the_other_share() -> None:
