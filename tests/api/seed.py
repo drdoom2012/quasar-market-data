@@ -91,6 +91,48 @@ def insert_unavailable(
     )
 
 
+def open_interest_values(time_ms: int) -> tuple[str, str]:
+    """Deterministic canonical decimal text: ``open_interest`` (base asset) and ``open_interest_value`` (USDT)."""
+    n = time_ms // _TF_MS
+    return f"{90000 + n % 997}.125", f"{7_000_000_000 + n % 100_000}.5"
+
+
+def insert_open_interest(
+    conn: sqlite3.Connection,
+    time_ms: int,
+    *,
+    symbol: str = SYMBOL,
+    venue: str = VENUE,
+    period: str = TIMEFRAME,
+    open_interest: str | None = None,
+    open_interest_value: str | None = None,
+) -> None:
+    """A stored open interest row; ``time_ms`` is the period END."""
+    default_oi, default_value = open_interest_values(time_ms)
+    conn.execute(
+        "INSERT INTO open_interest (venue, symbol, period, time_ms, open_interest, open_interest_value, ingested_at_ms)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (venue, symbol, period, time_ms, open_interest or default_oi, open_interest_value or default_value, AT),
+    )
+
+
+def insert_open_interest_conflict(
+    conn: sqlite3.Connection,
+    time_ms: int,
+    variant: int,
+    *,
+    symbol: str = SYMBOL,
+    venue: str = VENUE,
+    period: str = TIMEFRAME,
+) -> None:
+    """Record a conflicting observation; a different ``variant`` is a different observation."""
+    conn.execute(
+        "INSERT INTO open_interest_conflicts (venue, symbol, period, time_ms, open_interest, open_interest_value,"
+        " first_seen_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (venue, symbol, period, time_ms, f"{91000 + variant}.5", f"{8_000_000_000 + variant}.5", AT),
+    )
+
+
 def make_database(
     path: Path,
     *,
@@ -98,6 +140,8 @@ def make_database(
     unavailable: Iterable[int] = (),
     conflicts: Iterable[int] = (),
     symbol: str = SYMBOL,
+    open_interest: Iterable[int] = (),
+    open_interest_conflicts: Iterable[int] = (),
 ) -> Path:
     conn = open_writer(path)
     try:
@@ -108,6 +152,10 @@ def make_database(
             insert_unavailable(conn, open_time_ms, symbol=symbol)
         for open_time_ms in conflicts:
             insert_conflict(conn, open_time_ms, 0, symbol=symbol)
+        for time_ms in open_interest:
+            insert_open_interest(conn, time_ms, symbol=symbol)
+        for time_ms in open_interest_conflicts:
+            insert_open_interest_conflict(conn, time_ms, 0, symbol=symbol)
     finally:
         conn.close()
     return path

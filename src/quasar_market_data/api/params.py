@@ -1,4 +1,4 @@
-"""Raw query string -> ``CandlesRequest`` / ``CoverageRequest`` (contract sections 1, 5.1 and 6.1.1), strict and free of I/O."""
+"""Raw query string -> request objects (contract sections 1, 5.1, 6.1.1, 6.3.1 and 6.5.2), strict and free of I/O."""
 
 import re
 from dataclasses import dataclass
@@ -29,6 +29,8 @@ _COVERAGE_NAMES: Final = ("venue", "symbol", "timeframe", "start", "end")
 _COVERAGE_REQUIRED: Final = ("venue", "symbol", "timeframe", "start", "end")
 _INDICATORS_NAMES: Final = ("venue", "symbol", "timeframe", "start", "end", "indicators")
 _INDICATORS_REQUIRED: Final = ("venue", "symbol", "timeframe", "start", "indicators")
+_OPEN_INTEREST_NAMES: Final = ("venue", "symbol", "period", "start", "end", "limit")
+_OPEN_INTEREST_REQUIRED: Final = ("venue", "symbol", "period", "start")
 _MALFORMED_ESCAPE: Final = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
@@ -61,6 +63,16 @@ class IndicatorsRequest:
     indicators: tuple[IndicatorSpec, ...]
 
 
+@dataclass(frozen=True)
+class OpenInterestRequest:
+    venue: str
+    symbol: str
+    period: Timeframe
+    start: int
+    end: int | None
+    limit: int
+
+
 def parse_candles_request(raw_query: bytes) -> CandlesRequest:
     values = _parse(raw_query, _NAMES, _REQUIRED)
     venue, symbol, start = _series_and_start(values)
@@ -70,6 +82,17 @@ def parse_candles_request(raw_query: bytes) -> CandlesRequest:
         _check_window(start, end)
 
     return CandlesRequest(venue, symbol, SERVED_TIMEFRAME, start, end, limit)
+
+
+def parse_open_interest_request(raw_query: bytes) -> OpenInterestRequest:
+    values = _parse(raw_query, _OPEN_INTEREST_NAMES, _OPEN_INTEREST_REQUIRED)
+    venue, symbol, start = _series_and_start(values, "period")
+    end = _end(values, "period")
+    limit = _limit(values["limit"]) if "limit" in values else DEFAULT_LIMIT
+    if end is not None:
+        _check_window(start, end)
+
+    return OpenInterestRequest(venue, symbol, SERVED_TIMEFRAME, start, end, limit)
 
 
 def parse_coverage_request(raw_query: bytes) -> CoverageRequest:
@@ -144,8 +167,11 @@ def _parse(raw_query: bytes, names: tuple[str, ...], required: tuple[str, ...]) 
     return values
 
 
-def _series_and_start(values: dict[str, str]) -> tuple[str, str, int]:
-    """Validate venue, symbol, timeframe and start, in that order; the timeframe is not returned (always served)."""
+def _series_and_start(values: dict[str, str], label_name: str = "timeframe") -> tuple[str, str, int]:
+    """Validate venue, symbol, the timeframe (``period`` for open interest) and start, in that order.
+
+    The timeframe label is not returned (always served); ``label_name`` is the parameter's name in the request.
+    """
     venue = values["venue"]
     if venue != SERVED_VENUE:
         raise invalid_parameter(f"venue must be {SERVED_VENUE}", parameter="venue", received=venue)
@@ -159,16 +185,16 @@ def _series_and_start(values: dict[str, str]) -> tuple[str, str, int]:
             "symbol must not contain whitespace or control characters", parameter="symbol", received=symbol
         )
 
-    if values["timeframe"] != SERVED_TIMEFRAME.label:
+    if values[label_name] != SERVED_TIMEFRAME.label:
         raise invalid_parameter(
-            f"timeframe must be {SERVED_TIMEFRAME.label}", parameter="timeframe", received=values["timeframe"]
+            f"{label_name} must be {SERVED_TIMEFRAME.label}", parameter=label_name, received=values[label_name]
         )
 
-    return venue, symbol, _timestamp("start", values["start"])
+    return venue, symbol, _timestamp("start", values["start"], unit=label_name)
 
 
-def _end(values: dict[str, str]) -> int | None:
-    return _end_timestamp(values["end"]) if "end" in values else None
+def _end(values: dict[str, str], unit: str = "timeframe") -> int | None:
+    return _end_timestamp(values["end"], unit) if "end" in values else None
 
 
 def _check_window(start: int, end: int, maximum: int = MAX_WINDOW_SLOTS) -> None:
@@ -227,17 +253,17 @@ def _integer(name: str, text: str) -> int:
     return int(text)
 
 
-def _end_timestamp(text: str) -> int:
+def _end_timestamp(text: str, unit: str = "timeframe") -> int:
     """``end`` is exclusive, so it may be one timeframe past the last valid open time (the slot at the maximum)."""
-    return _timestamp("end", text, maximum=MAX_TIMESTAMP_MS + SERVED_TIMEFRAME.milliseconds)
+    return _timestamp("end", text, maximum=MAX_TIMESTAMP_MS + SERVED_TIMEFRAME.milliseconds, unit=unit)
 
 
-def _timestamp(name: str, text: str, *, maximum: int = MAX_TIMESTAMP_MS) -> int:
+def _timestamp(name: str, text: str, *, maximum: int = MAX_TIMESTAMP_MS, unit: str = "timeframe") -> int:
     value = _integer(name, text)
     if not MIN_TIMESTAMP_MS <= value <= maximum:
         raise invalid_parameter(f"{name} must be within [{MIN_TIMESTAMP_MS}, {maximum}]", parameter=name, received=text)
     if value % SERVED_TIMEFRAME.milliseconds != 0:
-        raise invalid_parameter(f"{name} must be aligned to the timeframe", parameter=name, received=text)
+        raise invalid_parameter(f"{name} must be aligned to the {unit}", parameter=name, received=text)
     return value
 
 

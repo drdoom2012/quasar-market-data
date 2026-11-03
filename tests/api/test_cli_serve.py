@@ -7,7 +7,9 @@ import uvicorn
 from quasar_market_data.api import cli
 from quasar_market_data.api.rule import MAX_LAG_THRESHOLD_MS, MAX_PUBLICATION_DELAY_MS
 from quasar_market_data.config.settings import Instrument
+from quasar_market_data.domain.open_interest_coverage import OpenInterestRule
 from quasar_market_data.domain.timed_coverage import ExpectationRule
+from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import UnsupportedSqliteError
 from tests.config_files import write_config
 
@@ -168,3 +170,36 @@ def test_the_database_path_does_not_depend_on_the_working_directory(
     assert cli.main(["serve", str(cfg)]) == 0
 
     assert seen == [cfg_dir.resolve() / "m.db"]
+
+
+OPEN_INTEREST_TABLE = (
+    '\n[open_interest]\nenabled = {enabled}\nperiod = "5m"\npublication_delay_ms = 15000\n'
+    "round_offset_ms = 250000\nbudget_per_5min = 400\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [
+        (None, None),
+        (OPEN_INTEREST_TABLE.format(enabled="false"), None),
+        (OPEN_INTEREST_TABLE.format(enabled="true"), OpenInterestRule(1, 550_000, 2000, Timeframe("5m"))),
+    ],
+)
+def test_serve_passes_the_open_interest_rule_of_the_file_to_the_app(
+    tmp_path: Path, run_calls: RunCalls, monkeypatch: pytest.MonkeyPatch, table: str | None, expected: object
+) -> None:
+    cfg = write_config(tmp_path, database_path="m.db", lag_threshold_ms=2000)
+    if table is not None:
+        cfg.write_text(cfg.read_text(encoding="utf-8") + table, encoding="utf-8")
+    seen: list[Any] = []
+
+    def recorder(db_path: Path, **kwargs: Any) -> str:
+        seen.append(kwargs["open_interest"])
+        return "app"
+
+    monkeypatch.setattr(cli, "create_app", recorder)
+
+    assert cli.main(["serve", str(cfg)]) == 0
+
+    assert seen == [expected]

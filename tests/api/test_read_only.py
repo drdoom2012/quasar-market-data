@@ -25,6 +25,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from quasar_market_data.api.app import create_app
+from quasar_market_data.domain.open_interest_coverage import OpenInterestRule
+from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_reader
 from tests.api.seed import SAMPLE_RULE, SAMPLE_UNIVERSE, make_database
 
@@ -143,7 +145,14 @@ def test_the_api_package_has_no_violations() -> None:
         assert find_violations(path.read_text()) == [], path.name
 
 
+OI_RULE = OpenInterestRule(cadence=1, expected_after_ms=500_000, lag_threshold_ms=60_000, period=Timeframe("5m"))
+OI_Q = f"venue=binance-usdm&symbol=BTC/USDT:USDT&period=5m&start={S}"
+
+
 def _exercise(client: TestClient) -> None:
+    assert client.get(f"/v1/open-interest?{OI_Q}").status_code == 200  # open interest rows, a conflict, a gap
+    assert client.get(f"/v1/open-interest?{OI_Q}&end={S + 8 * TF}&limit=2").status_code == 200  # a cut page
+    assert client.get(f"/v1/open-interest?{OI_Q.replace('BTC/USDT:USDT', 'X/Y')}").status_code == 404
     assert client.get(f"/v1/candles?{Q}").status_code == 200  # success
     assert client.get(f"/v1/candles?{Q.replace('BTC/USDT:USDT', 'X/Y')}").status_code == 404  # unknown series
     assert client.get(f"/v1/candles?{Q.replace(str(S), str(S + 100 * TF))}").status_code == 200  # beyond stored
@@ -159,6 +168,8 @@ def test_every_statement_the_api_issues_is_read_only(tmp_path: Path) -> None:
         candles=[S, S + TF, S + 5 * TF],
         conflicts=[S + TF],
         unavailable=[S + 3 * TF],
+        open_interest=[S, S + TF, S + 5 * TF],
+        open_interest_conflicts=[S + TF],
     )
     log: list[str] = []
 
@@ -169,7 +180,7 @@ def test_every_statement_the_api_issues_is_read_only(tmp_path: Path) -> None:
 
     _exercise(
         TestClient(
-            create_app(path, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE, open_connection=traced),
+            create_app(path, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE, open_interest=OI_RULE, open_connection=traced),
             raise_server_exceptions=False,
         )
     )
@@ -184,10 +195,21 @@ def test_every_statement_the_api_issues_is_read_only(tmp_path: Path) -> None:
 
 
 def test_the_main_database_file_is_unchanged_by_requests(tmp_path: Path) -> None:
-    path = make_database(tmp_path / "market.db", candles=[S, S + TF, S + 5 * TF], conflicts=[S + TF])
+    path = make_database(
+        tmp_path / "market.db",
+        candles=[S, S + TF, S + 5 * TF],
+        conflicts=[S + TF],
+        open_interest=[S, S + TF, S + 5 * TF],
+        open_interest_conflicts=[S + TF],
+    )
     before = hashlib.sha256(path.read_bytes()).hexdigest()
 
-    _exercise(TestClient(create_app(path, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE), raise_server_exceptions=False))
+    _exercise(
+        TestClient(
+            create_app(path, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE, open_interest=OI_RULE),
+            raise_server_exceptions=False,
+        )
+    )
 
     assert (
         hashlib.sha256(path.read_bytes()).hexdigest() == before

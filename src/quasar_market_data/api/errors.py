@@ -4,7 +4,13 @@ from collections.abc import Mapping
 from typing import Final, Literal
 
 type ErrorCode = Literal[
-    "invalid_parameter", "unknown_series", "not_found", "method_not_allowed", "internal_error", "not_ready"
+    "invalid_parameter",
+    "unknown_series",
+    "not_found",
+    "method_not_allowed",
+    "internal_error",
+    "not_ready",
+    "open_interest_disabled",
 ]
 type NotReadyReason = Literal["database_missing", "schema_mismatch", "database_unreadable"]
 
@@ -55,6 +61,21 @@ def unknown_series(venue: str, symbol: str, timeframe: str) -> ApiError:
         "no candle of this series has been stored",
         {"venue": venue, "symbol": symbol, "timeframe": timeframe},
     )
+
+
+def unknown_open_interest_series(venue: str, symbol: str, period: str) -> ApiError:
+    """Contract 6.5.5 (decision OA11): the series of this endpoint has a ``period``, not a ``timeframe``."""
+    return ApiError(
+        404,
+        "unknown_series",
+        "no open interest row of this series has been stored",
+        {"venue": venue, "symbol": symbol, "period": period},
+    )
+
+
+def open_interest_disabled() -> ApiError:
+    """Contract 6.5.5 (decision OA1): the configuration does not collect open interest."""
+    return ApiError(404, "open_interest_disabled", "open interest is not enabled in the configuration")
 
 
 def not_found() -> ApiError:

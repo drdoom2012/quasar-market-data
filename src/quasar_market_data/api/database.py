@@ -14,12 +14,26 @@ from typing import Final, Literal
 
 from quasar_market_data.api.candle_reader import CandlesPage, UnknownSeries, read_candles_page
 from quasar_market_data.api.coverage_reader import CoverageReport, read_coverage_report
-from quasar_market_data.api.errors import ApiError, NotReadyReason, not_ready, unknown_series
-from quasar_market_data.api.health_reader import StoredSeries, check_ready, read_stored_series
+from quasar_market_data.api.errors import (
+    ApiError,
+    NotReadyReason,
+    not_ready,
+    unknown_open_interest_series,
+    unknown_series,
+)
+from quasar_market_data.api.health_reader import (
+    OpenInterestFacts,
+    StoredSeries,
+    check_ready,
+    read_ingest_snapshot,
+    read_stored_series,
+)
 from quasar_market_data.api.indicator_reader import IndicatorInputs, read_indicator_inputs
 from quasar_market_data.api.instrument_reader import InstrumentNewest, read_instrument_newest
-from quasar_market_data.api.params import CandlesRequest, CoverageRequest, IndicatorsRequest
+from quasar_market_data.api.open_interest_page import OpenInterestPage, read_open_interest_page
+from quasar_market_data.api.params import CandlesRequest, CoverageRequest, IndicatorsRequest, OpenInterestRequest
 from quasar_market_data.config.settings import Instrument
+from quasar_market_data.domain.open_interest_coverage import OpenInterestRule
 from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.storage.connection import StorageError, open_reader
 from quasar_market_data.storage.schema import EmptyDatabaseError, SchemaMismatchError
@@ -76,6 +90,22 @@ def read_indicators(
     )
 
 
+def read_open_interest(
+    db_path: Path,
+    request: OpenInterestRequest,
+    *,
+    as_of_ms: int,
+    rule: OpenInterestRule,
+    open_connection: ConnectionFactory = open_reader,
+) -> OpenInterestPage:
+    return _with_reader(
+        db_path,
+        open_connection,
+        lambda conn: read_open_interest_page(conn, request, as_of_ms=as_of_ms, rule=rule),
+        request,
+    )
+
+
 def read_ready(db_path: Path, *, open_connection: ConnectionFactory = open_reader) -> int:
     """The schema version when the database can be served; the contract's ``503`` otherwise."""
     return _with_reader(db_path, open_connection, check_ready, None)
@@ -83,6 +113,13 @@ def read_ready(db_path: Path, *, open_connection: ConnectionFactory = open_reade
 
 def read_ingest(db_path: Path, *, open_connection: ConnectionFactory = open_reader) -> tuple[StoredSeries, ...]:
     return _with_reader(db_path, open_connection, read_stored_series, None)
+
+
+def read_ingest_open_interest(
+    db_path: Path, *, conflicts_after_ms: int, open_connection: ConnectionFactory = open_reader
+) -> tuple[tuple[StoredSeries, ...], OpenInterestFacts]:
+    """The candle series and the open interest facts of ``/health/ingest`` in one read transaction."""
+    return _with_reader(db_path, open_connection, lambda conn: read_ingest_snapshot(conn, conflicts_after_ms), None)
 
 
 def read_instruments(
@@ -95,7 +132,7 @@ def _with_reader[T](
     db_path: Path,
     open_connection: ConnectionFactory,
     read: Callable[[sqlite3.Connection], T],
-    request: CandlesRequest | CoverageRequest | IndicatorsRequest | None,
+    request: CandlesRequest | CoverageRequest | IndicatorsRequest | OpenInterestRequest | None,
 ) -> T:
     try:
         conn = open_connection(db_path)
@@ -109,6 +146,8 @@ def _with_reader[T](
     except UnknownSeries:
         if request is None:
             raise  # only the series readers raise it: a bug, not a 404
+        if isinstance(request, OpenInterestRequest):
+            raise unknown_open_interest_series(request.venue, request.symbol, request.period.label) from None
         raise unknown_series(request.venue, request.symbol, request.timeframe.label) from None
     except EmptyDatabaseError as error:  # before its parent: a file the Collector has not initialised yet is a retry
         raise _not_ready("database_unreadable", error) from None
