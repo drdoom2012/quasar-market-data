@@ -5,6 +5,7 @@ that only the wiring is under test: when it starts, what it receives, what happe
 """
 
 import asyncio
+import signal
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -21,9 +22,9 @@ from quasar_market_data.collector.clock import Clock
 from quasar_market_data.collector.fetch_open_interest_once import OpenInterestOnceSource
 from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
 from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestGate
-from tests.collector.fetch_fakes import SYMBOL, FakeClock, FakeSource, forming_rows
+from tests.collector.fetch_fakes import SYMBOL, AdvancingSleep, FakeClock, FakeSource, forming_rows
 from tests.collector.open_interest_fakes import FakeOiSource
-from tests.collector.test_cli_run import candle_count, stop_on_sleep
+from tests.collector.test_cli_run import candle_count
 from tests.config_files import write_config
 
 TABLE = (
@@ -101,7 +102,26 @@ def oi_opener(
     return open_oi
 
 
-def run_cli(db: Path, rec: Recorder, table: str | None, *, error: BaseException | None = None, sleep_n: int = 2) -> int:
+def stop_when_started(clock: FakeClock, rec: Recorder, *, wait: bool) -> AdvancingSleep:
+    """SIGTERM on the second sleep, or, with ``wait``, on the first sleep after the open interest task has started.
+
+    The task starts when round one's post-check (a real worker thread) has ended; on a slow machine that is later than
+    the loop's second sleep, and a stop before that start is correct behaviour but not what these tests look at.
+    """
+    sleeps = [0]
+
+    def hook(ms: int) -> None:
+        sleeps[0] += 1
+        started = any(event in rec.events for event in ("open", "task"))
+        if sleeps[0] >= 2 and (not wait or started or sleeps[0] > 20_000):
+            signal.raise_signal(signal.SIGTERM)
+
+    return AdvancingSleep(clock, on_sleep=hook)
+
+
+def run_cli(
+    db: Path, rec: Recorder, table: str | None, *, error: BaseException | None = None, wait: bool = True
+) -> int:
     clock = FakeClock()
     source = FakeSource(clock, forming_rows(), on_klines=lambda: rec.events.append("klines"))
 
@@ -113,7 +133,7 @@ def run_cli(db: Path, rec: Recorder, table: str | None, *, error: BaseException 
         open_source=open_source,
         open_oi_source=oi_opener(rec, clock, error),
         clock=clock,
-        sleep=stop_on_sleep(clock, sleep_n),
+        sleep=stop_when_started(clock, rec, wait=wait and table is not None),
     )
 
 
@@ -125,7 +145,7 @@ def test_absent_or_disabled_table_creates_nothing_and_prints_nothing_new(
     for index, table in enumerate((None, TABLE.replace("enabled = true", "enabled = false"))):
         folder = db.parent / f"d{index}"
         folder.mkdir()
-        assert run_cli(folder / "market.db", rec, table) == 0
+        assert run_cli(folder / "market.db", rec, table, wait=False) == 0
         captured = capsys.readouterr()
         outputs.append((captured.out, captured.err))
     assert rec.events.count("open") == 0 and rec.events.count("task") == 0
@@ -158,7 +178,7 @@ def test_the_task_is_not_started_when_round_one_is_fatal(
         raise CandleWriteError("batch rolled back; nothing was written: refused")
 
     monkeypatch.setattr(AsyncCandleWriter, "write", refuse)
-    assert run_cli(db, rec, TABLE) == 1
+    assert run_cli(db, rec, TABLE, wait=False) == 1
     assert "open" not in rec.events and "task" not in rec.events
 
 
