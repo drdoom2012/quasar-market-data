@@ -9,7 +9,7 @@ to complete the page), and ``1`` when server time is untrusted (no request is ma
 one extra asyncio task, started after round one and its post-check, with its own client, writer, budget and gate. It
 never changes the exit status: whatever happens to it is printed as ``oi-warning`` / ``oi-error`` lines (stderr) and
 ``oi-round`` / ``oi-reconcile`` / ``oi-catchup`` / ``oi-measurement`` lines (stdout), and ends only that task. Without
-the table (or with ``enabled = false``) no open interest object is created and the output is unchanged.
+the table (or with ``enabled = false``) no open interest client, writer, task or candle hook is created and the output is unchanged.
 
 ``fetch-once`` fetches the most recent klines of one symbol, stores the confirmed closed candles and reports
 what happened. Exit codes keep apart what is known about persistence:

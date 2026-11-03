@@ -219,3 +219,22 @@ def test_committed_at_rejects_non_int() -> None:
     t = ManualTime()
     with pytest.raises(TypeError):
         OpenInterestBudget(1, t, t.sleep).committed_at(1.5)  # type: ignore[arg-type]
+
+
+def test_committed_at_can_leave_out_the_starts_of_a_range() -> None:
+    async def scenario() -> None:
+        t = ManualTime()
+        budget = OpenInterestBudget(10, t, t.sleep)
+        origin = t.monotonic_ns()
+        await budget.acquire()  # before the range
+        await t.advance(10_000)
+        for _ in range(3):  # inside the range
+            await budget.acquire()
+        await t.advance(10_000)
+        await budget.acquire()  # after the range
+        span = (origin + 10_000 * NS_PER_MS, origin + 10_000 * NS_PER_MS)
+        assert budget.committed_at(origin) == 5
+        assert budget.committed_at(origin, excluding=span) == 2
+        assert budget.committed_at(origin, excluding=(span[0], span[0] - 1)) == 5  # an empty range excludes nothing
+
+    run(scenario)

@@ -66,6 +66,7 @@ class ManualOiSource:
         self.hang_hist = False
         self.hang_after_calls: int | None = None  # hist calls beyond this number hang for ever
         self.hist_delay_ms = 0
+        self.round_delay_ms = 0  # ManualTime ms every round request takes: real requests are never instantaneous
         self.hang_time = False
         self.active = 0
         self.max_active = 0
@@ -110,6 +111,8 @@ class ManualOiSource:
             self.hist_calls.append(HistCall(symbol, start_time_ms, end_time_ms, as_of_ms, self.t.monotonic_ns()))
             if self.hang_hist or (self.hang_after_calls is not None and len(self.hist_calls) > self.hang_after_calls):
                 await asyncio.Event().wait()
+            if self.round_delay_ms and end_time_ms - start_time_ms == 2 * STEP:
+                await self.t.sleep(self.round_delay_ms)
             if self.hist_delay_ms and end_time_ms - start_time_ms != 2 * STEP:  # catch-up pages only
                 await self.t.sleep(self.hist_delay_ms)
             if self.hold is not None:

@@ -412,7 +412,9 @@ def test_a_hole_that_failed_rounds_leave_is_found_by_the_very_next_window(tmp_pa
     run(scenario)
 
 
-def test_a_served_but_pending_row_is_not_a_try_and_is_stored_when_it_becomes_eligible(tmp_path: Path) -> None:
+def test_a_served_but_pending_row_is_not_a_try_is_asked_once_per_window_and_stored_when_it_becomes_eligible(
+    tmp_path: Path,
+) -> None:
     async def scenario() -> None:
         rig = await make_rig(tmp_path, symbols=(BTC,), publication_delay_ms=1_500_000, publish_lag_ms=0)
         prefill(
@@ -421,19 +423,26 @@ def test_a_served_but_pending_row_is_not_a_try_and_is_stored_when_it_becomes_eli
         never = START_WALL // STEP * STEP - 11 * STEP  # a hole Binance really does not serve, in the same page
         rig.source.never.add((BTC, never))
         await first_window(rig)
+        pages_per_window = [len(page_calls(rig))]
+        assert pages_per_window[0] <= 2  # the pending page comes back once, not until the window's share is used up
         pending_slot = max(c.end_ms for c in page_calls(rig))  # the newest slot of the first page: Binance serves it
         assert pending_slot not in stored_times(rig.db, BTC)  # but it is not yet eligible, so it is not stored
         stored_at = None
         for rounds in range(2, 12):
+            before = len(page_calls(rig))
             await next_cycle(rig, rounds)
+            pages_per_window.append(len(page_calls(rig)) - before)
             if pending_slot in stored_times(rig.db, BTC):
                 stored_at = rounds
                 break
-        # asked in four or more windows: had a pending answer counted as a try, three tries would have ended it
-        asked = [c for c in page_calls(rig) if c.start_ms <= pending_slot <= c.end_ms]
-        assert stored_at is not None and len(asked) >= 4
-        # while a page holds a row we could not judge yet, nothing in it is tried: the absent slot is asked every window
-        assert len([c for c in asked if c.start_ms <= never <= c.end_ms]) >= 4
+        assert stored_at is not None and stored_at >= 5
+        assert all(count <= 2 for count in pages_per_window)  # at most one page per window while it is pending
+        # four or more distinct windows asked: had a pending answer counted as a try, three tries would have ended it
+        assert len([count for count in pages_per_window if count]) >= 4
+        asked = [c for c in page_calls(rig) if c.start_ms <= never <= c.end_ms]
+        assert (
+            len(asked) >= 4
+        )  # the absent slot is asked every window too: nothing in a page with a pending row is tried
         await rig.stop_and_wait()
 
     run(scenario)
@@ -704,6 +713,46 @@ def test_a_successful_page_resets_the_failure_count(tmp_path: Path) -> None:
         await next_cycle(rig, 3)
         await rig.until_lines("oi-catchup", 3)
         assert gaps[1] in stored_times(rig.db, BTC)
+        await rig.stop_and_wait()
+
+    run(scenario)
+
+
+def test_with_realistic_request_latency_the_catch_up_still_gets_its_share(tmp_path: Path) -> None:
+    """149 symbols at b = 400 (ADR-0003 P-10 table): the previous round's starts must not starve the catch-up."""
+
+    async def scenario() -> None:
+        symbols = tuple(f"S{index:03d}/USDT:USDT" for index in range(149))
+        rig = await make_rig(tmp_path, symbols=symbols, count_budget_in_source=True)
+        assert rig.config.cadence == 1 and rig.config.round_cost == 300
+        rig.source.round_delay_ms = 100
+        rig.source.rtt_ms = 50
+        rig.align_to_next_wake()
+        rig.start()
+        for _ in range(120):  # the round takes about 8 s of fake time (149 requests of 100 ms, two in flight)
+            await rig.t.settle()
+            if rig.lines_with("oi-catchup"):
+                break
+            await rig.t.advance(1_000)
+        await rig.until_lines("oi-catchup", 1)
+        line = rig.lines_with("oi-catchup")[0]
+        assert int(field(line, "pages")) >= 90  # the share is b - round cost = 100; zero before the fix
+        await rig.stop_and_wait()
+
+    run(scenario)
+
+
+def test_rounds_past_their_deadline_are_skipped_counted_and_logged(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        rig = await make_rig(tmp_path, symbols=(BTC,), recording=True)
+        rig.start()
+        await rig.until_lines("oi-round", 1)
+        await rig.t.settle()
+        await rig.t.advance(3 * STEP + 100_000, late=True)  # a stall: time jumps over several rounds
+        await rig.until_lines("oi-round", 2)
+        assert int(field(rig.lines_with("oi-round")[1], "skipped_rounds")) >= 2
+        warning = rig.lines_with("oi-warning rounds-skipped")[0]
+        assert "skipped=" in warning
         await rig.stop_and_wait()
 
     run(scenario)

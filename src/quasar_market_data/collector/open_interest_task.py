@@ -49,7 +49,7 @@ from quasar_market_data.collector.candle_write_activity import CandleWriteActivi
 from quasar_market_data.collector.clock import Clock, Sleep
 from quasar_market_data.collector.fetch_open_interest_once import OpenInterestOnceSource, OpenInterestSink
 from quasar_market_data.collector.kline_source import SourceError
-from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
+from quasar_market_data.collector.open_interest_budget import WINDOW_MS, OpenInterestBudget
 from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestPaused
 from quasar_market_data.collector.open_interest_measurements import OpenInterestMeasurements
 from quasar_market_data.collector.open_interest_reader import SeriesFacts, read_series
@@ -100,6 +100,8 @@ PROBLEM_MAX_CHARS: Final = 200
 _NS_PER_MS: Final = 1_000_000
 _FAR_FUTURE_MS: Final = 2**62
 URGENT_SLOTS_LOGGED: Final = 5
+YIELD_EVERY_SYMBOLS: Final = 16
+ON_SCHEDULE_TOLERANCE_MS: Final = 5_000
 
 type Emit = Callable[[str], None]
 
@@ -248,6 +250,9 @@ class _OpenInterestTask:
         self.measurements = measurements
         self._measure_started_ns = clock.monotonic_ns()
         self.cycle = 0
+        self._last_round_span: tuple[int, int] | None = (
+            None  # monotonic ns of the previous round's first and last instant
+        )
         self.holes: dict[str, list[int]] = {}
         self._scanned_newest: dict[str, int] = {}
         self.tries = OpenInterestTryBook(config.period)
@@ -269,12 +274,24 @@ class _OpenInterestTask:
             now = self.clock.wall_ms()
             nxt = next_round(now, last, config.round_offset_ms, config.period)
             wake_ns = self.clock.monotonic_ns() + (nxt.wake_ms - now) * _NS_PER_MS
-            if nxt.wake_ms > now and await self._wait_until(wake_ns, nxt.wake_ms):
-                break
+            if nxt.wake_ms > now:
+                if await self._wait_until(wake_ns, nxt.wake_ms):
+                    break
+                # the wait may have lasted far longer than planned (a stalled process, a stepped clock): decide again,
+                # so a round whose deadline passed meanwhile is skipped and counted instead of run
+                now = self.clock.wall_ms()
+                nxt = next_round(now, last, config.round_offset_ms, config.period)
+                if nxt.wake_ms > now:
+                    continue
+                wake_ns = self.clock.monotonic_ns() + (nxt.wake_ms - now) * _NS_PER_MS
             started_ns = self.clock.monotonic_ns()
             deadline_ms = round_deadline_ms(nxt.boundary_ms, config.round_offset_ms, config.period)
             deadline_ns = started_ns + (deadline_ms - self.clock.wall_ms()) * _NS_PER_MS
             late_ms = max(0, (started_ns - wake_ns) // _NS_PER_MS)
+            if nxt.skipped:
+                self.emit(
+                    f"oi-warning rounds-skipped skipped={nxt.skipped} before boundary={nxt.boundary_ms} past their deadline"
+                )
             report = await self._round(nxt.boundary_ms, deadline_ns, nxt.skipped, late_ms)
             last = nxt.boundary_ms
             self.emit(report.line())
@@ -332,6 +349,17 @@ class _OpenInterestTask:
                 f" tries={window.tries} failures={window.failures} end={window.end}"
             )
 
+    def _previous_round_if_on_schedule(self, wake_ns: int) -> tuple[int, int] | None:
+        """The previous round's span when its starts will have expired, one by one, as the next round makes its own.
+
+        That holds when the previous round began about 300 s before this wake (it ran on schedule). A round that ran
+        late, for instance the first one after a start, is still in the window when the next round begins, so it counts.
+        """
+        span = self._last_round_span
+        if span is not None and span[0] + WINDOW_MS * _NS_PER_MS <= wake_ns + ON_SCHEDULE_TOLERANCE_MS * _NS_PER_MS:
+            return span
+        return None
+
     def _grantable_now(self) -> bool:
         return self.budget.committed_at(self.clock.monotonic_ns()) + 1 <= self.config.budget_per_5min
 
@@ -356,9 +384,14 @@ class _OpenInterestTask:
             return
         as_of = trust.lower_bound_ms
         await self._derive(as_of)
-        heads = {symbol: page for symbol in config.symbols if (page := self._next_page(symbol)) is not None}
+        heads: dict[str, Page] = {}
+        for index, symbol in enumerate(config.symbols):
+            if index % YIELD_EVERY_SYMBOLS == 0:
+                await asyncio.sleep(0)  # planning 600 series is CPU work: let the candle loop run in between
+            if (page := self._next_page(symbol)) is not None:
+                heads[symbol] = page
         window.queued = len(heads)
-        self._warn_slots_at_risk(as_of)
+        await self._warn_slots_at_risk(as_of)
         self._log_exhausted()
         share = backfill_share(len(config.symbols), config.budget_per_5min)  # P-10: the catch-up's requests per cycle
         while heads and not self.stop.is_set():
@@ -371,7 +404,7 @@ class _OpenInterestTask:
                 return
             if not backfill_may_start(
                 self.budget.committed_at(now_ns),
-                self.budget.committed_at(wake_ns),
+                self.budget.committed_at(wake_ns, excluding=self._previous_round_if_on_schedule(wake_ns)),
                 config.budget_per_5min,
                 config.round_cost,
             ):
@@ -382,6 +415,9 @@ class _OpenInterestTask:
             if status == "paused":
                 window.end = "paused"
                 return
+            if status == "pending":
+                del heads[page.symbol]
+                continue
             if status == "ok":
                 await self._derive_symbol(page.symbol, as_of)  # a hole a round filled meanwhile is not asked again
             following = self._next_page(page.symbol)
@@ -490,12 +526,14 @@ class _OpenInterestTask:
         pages = plan_pages({symbol: window}, self.config.period)
         return pages[0] if pages else None
 
-    def _warn_slots_at_risk(self, as_of: int) -> None:
+    async def _warn_slots_at_risk(self, as_of: int) -> None:
         config = self.config
         step = config.period.milliseconds
         threshold = as_of - RETRIEVAL_HORIZON_MS + DAY_MS  # only slots that leave within a day are judged
         reachable: dict[str, tuple[int, ...]] = {}
-        for symbol in config.symbols:
+        for index, symbol in enumerate(config.symbols):
+            if index % YIELD_EVERY_SYMBOLS == 0:
+                await asyncio.sleep(0)
             holes = self.holes.get(symbol, ())
             if symbol in self._suspended or not holes:
                 continue
@@ -550,11 +588,12 @@ class _OpenInterestTask:
             return "failed"
         window.pages += 1
         self._failures.pop(symbol, None)
-        if not selection.pending:  # a row Binance served but we could not yet judge must never use up a try
-            served = {row.key.time_ms for row in rows}
-            absent = [slot for slot in page.slots if slot not in served]
-            self.tries.record_tries(symbol, absent, self.clock.monotonic_ns() // _NS_PER_MS)
-            window.tries += len(absent)
+        if selection.pending:  # a row Binance served but we could not yet judge must never use up a try
+            return "pending"  # ... and the symbol is not asked again in this window (the same page would come back)
+        served = {row.key.time_ms for row in rows}
+        absent = [slot for slot in page.slots if slot not in served]
+        self.tries.record_tries(symbol, absent, self.clock.monotonic_ns() // _NS_PER_MS)
+        window.tries += len(absent)
         return "ok"
 
     def _page_failed(self, page: Page, window: _Window, problem: str) -> None:
@@ -579,7 +618,9 @@ class _OpenInterestTask:
         config = self.config
         symbols = symbols_for_round(config.symbols, boundary, config.cadence, config.period)
         state = _RoundState(symbols)
+        span_start = self.clock.monotonic_ns()
         status, _ = await self._run_until(self._round_work(boundary, state, deadline_ns), deadline_ns)
+        self._last_round_span = (span_start, self.clock.monotonic_ns())
         if status != "done":
             self._close_unfinished(boundary, state, status)
         return OpenInterestRoundReport(
