@@ -626,7 +626,7 @@ Two consequences of the order, both different from candle coverage (section 6.1.
 
 ```json
 "open_interest": {
-  "as_of_ms": 1792677000000,
+  "as_of_ms": 1792677530000,
   "rule": { "cadence": 1, "expected_after_ms": 500000, "lag_threshold_ms": 60000 },
   "scope": "stored_series",
   "status": "degraded",
@@ -640,6 +640,7 @@ Two consequences of the order, both different from candle coverage (section 6.1.
 }
 ```
 
+- The example is **illustrative and computed by hand**: ten series; nine hold the row for the newest expected slot `1792677000000` (`current`); the tenth, `ETH/USDT:USDT`, ends at `1792676700000`, so `x = 1792676700000 + 300000 + 500000 = 1792677500000` is 30 000 ms before `as_of_ms` (`due`, `lag_slots` 1); one series has a conflict in a slot of the last 24 hours, hence `degraded`.
 - **`null`** (the key is present) when the configuration has no enabled `[open_interest]` table. Otherwise an object, judged in the **same read transaction** and at the same `as_of_ms` (repeated inside the object) as the candle fields.
 - **A series** is a `(venue, symbol, period)` with at least one row in `open_interest`; `scope` is always `"stored_series"`, like the candle part: a configured symbol whose first row never arrived is invisible here, and `no_series` does not mean the open interest task is healthy, idle, broken or not started.
 - **A series that cannot be judged** (decision OA9): its `period` is not the configured open interest period, or its newest `time_ms` is not aligned to the period (the Collector cannot write either; a hand-edited row can). It is counted in `series_count` and in `unjudged_series`, in none of `current`, `due`, `stale`, and not listed in `behind`; the answer is never a `500`, so open interest cannot change the candle part of the answer. `series_count = current + due + stale + unjudged_series`.

@@ -66,13 +66,16 @@ def assert_error(response: Any, status: int, code: str) -> dict[str, Any]:
     return error
 
 
-def contract_example(heading: str) -> dict[str, Any]:
-    """The first ```json block after ``heading`` in the contract: the example the server must reproduce."""
+def contract_example(heading: str, *, fragment: bool = False) -> dict[str, Any]:
+    """The first ```json block after ``heading`` in the contract: the example the server must reproduce.
+
+    ``fragment=True`` wraps a block that is a single ``"key": {...}`` member in braces.
+    """
     text = CONTRACT.read_text(encoding="utf-8")
     after = text[text.index(heading) :]
     block = re.search(r"```json\n(.*?)\n```", after, re.DOTALL)
     assert block is not None
-    return json.loads(block.group(1))  # type: ignore[no-any-return]
+    return json.loads("{" + block.group(1) + "}" if fragment else block.group(1))  # type: ignore[no-any-return]
 
 
 def example_database(path: Path) -> Path:

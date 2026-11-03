@@ -21,7 +21,13 @@ from quasar_market_data.api.errors import (
     unknown_open_interest_series,
     unknown_series,
 )
-from quasar_market_data.api.health_reader import StoredSeries, check_ready, read_stored_series
+from quasar_market_data.api.health_reader import (
+    OpenInterestFacts,
+    StoredSeries,
+    check_ready,
+    read_ingest_snapshot,
+    read_stored_series,
+)
 from quasar_market_data.api.indicator_reader import IndicatorInputs, read_indicator_inputs
 from quasar_market_data.api.instrument_reader import InstrumentNewest, read_instrument_newest
 from quasar_market_data.api.open_interest_page import OpenInterestPage, read_open_interest_page
@@ -107,6 +113,13 @@ def read_ready(db_path: Path, *, open_connection: ConnectionFactory = open_reade
 
 def read_ingest(db_path: Path, *, open_connection: ConnectionFactory = open_reader) -> tuple[StoredSeries, ...]:
     return _with_reader(db_path, open_connection, read_stored_series, None)
+
+
+def read_ingest_open_interest(
+    db_path: Path, *, conflicts_after_ms: int, open_connection: ConnectionFactory = open_reader
+) -> tuple[tuple[StoredSeries, ...], OpenInterestFacts]:
+    """The candle series and the open interest facts of ``/health/ingest`` in one read transaction."""
+    return _with_reader(db_path, open_connection, lambda conn: read_ingest_snapshot(conn, conflicts_after_ms), None)
 
 
 def read_instruments(
