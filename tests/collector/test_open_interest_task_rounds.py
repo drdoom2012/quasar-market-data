@@ -13,7 +13,7 @@ from quasar_market_data.collector.async_open_interest_writer import OpenInterest
 from quasar_market_data.collector.binance_usdm_open_interest import OpenInterestRequestRefused
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestPaused
-from quasar_market_data.collector.open_interest_task import OpenInterestWriterUnusable
+from quasar_market_data.collector.open_interest_task import OpenInterestWriterUnusable, _OpenInterestTask
 from quasar_market_data.collector.open_interest_writer import (
     OpenInterestWriteBusy,
     OpenInterestWriteError,
@@ -32,6 +32,16 @@ from tests.collector.open_interest_task_fakes import (
 )
 
 OFFSET = 200_000
+
+
+@pytest.fixture(autouse=True)
+def no_catch_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests are about rounds: the idle window (catch-up) has its own file."""
+
+    async def nothing(self: Any, wake_ns: int, wake_ms: int) -> None:
+        return None
+
+    monkeypatch.setattr(_OpenInterestTask, "_idle_window", nothing)
 
 
 def run(scenario: Callable[[], Coroutine[Any, Any, None]]) -> None:

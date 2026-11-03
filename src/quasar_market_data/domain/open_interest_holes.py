@@ -111,8 +111,9 @@ def slots_at_risk(
     """Holes that will leave the horizon before the plan can reach them within the backfill share.
 
     Only slots within ``margin_ms`` of leaving are judged. The page at position ``p`` (1-based, the order of
-    ``pages``) is reached in cycle ``ceil(p / share)``; a slot ``T`` has ``(T - (as_of - H)) // period`` cycles left.
-    The share is optimistic (every cycle's whole share is used), so a slot named here is lost even then.
+    ``pages``) is reached in window ``ceil(p / share)``, window 1 being now and window ``k`` ``(k - 1)`` periods from now;
+    a slot ``T`` can still be fetched in windows up to ``(T - (as_of - H)) // period + 1``. The share is optimistic
+    (every window's whole share is used), so a slot named here is lost even then.
     """
     as_of = ensure_timestamp_ms(as_of_ms, "as_of_ms")
     share = _int(share_per_cycle, "share_per_cycle")
@@ -126,6 +127,6 @@ def slots_at_risk(
             if slot >= horizon_start + margin:
                 continue
             cycles_left = (slot - horizon_start) // period.milliseconds
-            if position > cycles_left * share:
+            if position > (cycles_left + 1) * share:
                 lost.setdefault(page.symbol, []).append(slot)
     return {symbol: tuple(sorted(slots)) for symbol, slots in sorted(lost.items())}

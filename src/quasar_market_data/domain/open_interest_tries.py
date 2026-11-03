@@ -24,6 +24,18 @@ type _State = tuple[int, int]  # tries, next allowed monotonic ms
 type _Run = tuple[int, int, _State]  # first slot, last slot (inclusive), state
 
 
+def _bisect_right(values: list[int], target: int) -> int:
+    """``bisect.bisect_right`` (the domain may import only a short list of standard modules)."""
+    low, high = 0, len(values)
+    while low < high:
+        middle = (low + high) // 2
+        if target < values[middle]:
+            high = middle
+        else:
+            low = middle + 1
+    return low
+
+
 def _int(value: int, name: str) -> int:
     if type(value) is not int:
         raise TypeError(f"{name} must be int, got {type(value).__name__}")
@@ -65,13 +77,20 @@ class OpenInterestTryBook:
             checked.append(slot)
         return checked
 
+    def _state_of(self, runs: list[_Run], starts: list[int], slot: int) -> _State | None:
+        index = _bisect_right(starts, slot) - 1
+        if index >= 0 and slot <= runs[index][1]:
+            return runs[index][2]
+        return None
+
     def available(self, symbol: str, slots: Iterable[int], now_ms: int) -> tuple[int, ...]:
         """The slots that may be planned now: fewer than 3 tries and the cooldown over (at its end, inclusive)."""
         now = _int(now_ms, "now_ms")
-        states = self._expand(symbol)
+        runs = self._runs.get(symbol, [])
+        starts = [run[0] for run in runs]
         out = []
         for slot in self._check(slots):
-            state = states.get(slot)
+            state = self._state_of(runs, starts, slot) if runs else None
             if state is None or (state[0] < MAX_TRIES and now >= state[1]):
                 out.append(slot)
         return tuple(out)

@@ -126,7 +126,7 @@ def test_a_hole_that_cannot_be_reached_before_it_leaves_is_at_risk() -> None:
     slot = horizon_start + 10 * STEP  # leaves in 10 cycles
     pages = pages_of_one(12, slot)
     one = slots_at_risk(pages, as_of, 1, P)
-    assert set(one) == {"S10/USDT:USDT", "S11/USDT:USDT"}  # positions 11 and 12 exceed 10 cycles x 1
+    assert set(one) == {"S11/USDT:USDT"}  # window 1 is now: 10 cycles left means 11 windows; position 12 is the 12th
     assert slots_at_risk(pages, as_of, 2, P) == {}
 
 

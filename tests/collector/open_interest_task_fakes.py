@@ -12,7 +12,8 @@ from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
 from quasar_market_data.collector.open_interest_measurements import OpenInterestMeasurements
 from quasar_market_data.collector.open_interest_task import OpenInterestTaskConfig, run_open_interest_task
-from quasar_market_data.domain.open_interest import OpenInterest
+from quasar_market_data.collector.open_interest_writer import OpenInterestWriter
+from quasar_market_data.domain.open_interest import OpenInterest, OpenInterestKey
 from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_reader, open_writer
@@ -63,12 +64,16 @@ class ManualOiSource:
         self.time_error: BaseException | None = None
         self.hold: asyncio.Event | None = None  # when set (an Event), hist calls wait for it
         self.hang_hist = False
+        self.hang_after_calls: int | None = None  # hist calls beyond this number hang for ever
+        self.hist_delay_ms = 0
         self.hang_time = False
         self.active = 0
         self.max_active = 0
         self.closed = False
         self.values: Callable[[int], tuple[str, str]] = values_for
         self.value_override: dict[tuple[str, int], tuple[str, str]] = {}
+        self.page_error: tuple[str, BaseException] | None = None  # raised for the symbol's catch-up pages only
+        self.page_script: list[bool] = []  # per catch-up page call, in order: True fails it (then pages succeed)
         self.fail_first = False  # the first request of every (symbol, range end) raises a SourceError
         self._seen: set[tuple[str, int]] = set()
         self.mutate_rows: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None
@@ -103,13 +108,19 @@ class ManualOiSource:
         try:
             await self._count()
             self.hist_calls.append(HistCall(symbol, start_time_ms, end_time_ms, as_of_ms, self.t.monotonic_ns()))
-            if self.hang_hist:
+            if self.hang_hist or (self.hang_after_calls is not None and len(self.hist_calls) > self.hang_after_calls):
                 await asyncio.Event().wait()
+            if self.hist_delay_ms and end_time_ms - start_time_ms != 2 * STEP:  # catch-up pages only
+                await self.t.sleep(self.hist_delay_ms)
             if self.hold is not None:
                 await self.hold.wait()
             if self.fail_first and (symbol, end_time_ms) not in self._seen:
                 self._seen.add((symbol, end_time_ms))
                 raise SourceError("scripted first-attempt failure")
+            if self.page_script and end_time_ms - start_time_ms != 2 * STEP and self.page_script.pop(0):
+                raise SourceError("scripted page failure")
+            if self.page_error is not None and symbol == self.page_error[0] and end_time_ms - start_time_ms != 2 * STEP:
+                raise self.page_error[1]
             if self.errors:
                 error = self.errors.pop(0)
                 if error is not None:
@@ -168,12 +179,32 @@ class RecordingWriter:
         return OpenInterestWriteReport(new, len(rows) - new, (), (1,), (1_000_000,), 0, 0)
 
 
-def migrated_db(tmp_path: Path, at_ms: int) -> Path:
-    path = tmp_path / "market.db"
+def migrated_db(tmp_path: Path, at_ms: int, name: str = "market.db") -> Path:
+    path = tmp_path / name
     conn = open_writer(path)
     migrate(conn, applied_at_ms=at_ms)
     conn.close()
     return path
+
+
+def prefill(
+    db: Path,
+    symbols: Sequence[str],
+    slots: Sequence[int],
+    at_ms: int,
+    *,
+    values: Callable[[int], tuple[str, str]] = values_for,
+) -> None:
+    """Store ``slots`` for every symbol through the sync writer, 100 rows per transaction."""
+    conn = open_writer(db)
+    writer = OpenInterestWriter(conn)
+    try:
+        for symbol in symbols:
+            rows = [OpenInterest(OpenInterestKey(VENUE, symbol, P5, slot), *values(slot)) for slot in slots]
+            for start in range(0, len(rows), 100):
+                writer.write_transaction(rows[start : start + 100], ingested_at_ms=at_ms)
+    finally:
+        writer.close()
 
 
 def stored_times(db: Path, symbol: str | None = None) -> list[int]:
@@ -256,11 +287,14 @@ class Rig:
         raise AssertionError(f"expected {count} {prefix!r} lines, have {self.lines_with(prefix)}")
 
     async def advance_to_next_wake(self) -> None:
-        """Advance fake time to the next round's wake (the task must be waiting)."""
+        """Advance fake time to the next round's wake: the last round's boundary + 5 min + the offset.
+
+        Not "the earliest waiter": while a catch-up window is still running that waiter is the window's deadline.
+        """
         await self.t.settle()
-        waits = self.t.waiting
-        assert waits, "the task is not waiting for anything"
-        await self.t.advance_ns(min(waits) - self.t.monotonic_ns())
+        last = int(self.lines_with("oi-round")[-1].split()[1].split("=")[1])
+        wake = last + STEP + self.config.round_offset_ms
+        await self.t.advance(wake - self.t.wall_ms())
 
 
 async def make_rig(
@@ -275,9 +309,12 @@ async def make_rig(
     recording: bool = False,
     publish_lag_ms: int = 60_000,
     count_budget_in_source: bool = False,
+    db: Path | None = None,
+    connect: Any = None,
+    t: ManualTime | None = None,
 ) -> Rig:
-    t = ManualTime()
-    db = migrated_db(tmp_path, t.wall_ms())
+    t = t or ManualTime()
+    db = db or migrated_db(tmp_path, t.wall_ms())
     activity = CandleWriteActivity()
     budget = OpenInterestBudget(budget_per_5min, t, t.sleep)
     source = ManualOiSource(t, budget=budget if count_budget_in_source else None, publish_lag_ms=publish_lag_ms)
@@ -287,7 +324,7 @@ async def make_rig(
         writer = sink
     else:
         assert real_writer
-        writer = await AsyncOpenInterestWriter.open(db, activity=activity)
+        writer = await AsyncOpenInterestWriter.open(db, activity=activity, connect=connect)
         t.track_executor(writer._executor)
     config = OpenInterestTaskConfig(
         venue=VENUE,
