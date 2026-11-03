@@ -1,13 +1,13 @@
-"""The only code that talks to the API: read-only GETs of three paths (spec 5.1)."""
+"""The only code that talks to the API: read-only GETs of four paths (spec 5.1, OI-6 design 8.1)."""
 
 import http.client
 from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
 
-from tools.symbol_overview.model import MAX_BODY_BYTES, InstrumentRow, Window
+from tools.symbol_overview.model import MAX_BODY_BYTES, OI_PATH, InstrumentRow, Window
 
-ALLOWED_PATHS = frozenset({"/health/ingest", "/v1/instruments", "/v1/coverage"})
+ALLOWED_PATHS = frozenset({"/health/ingest", "/v1/instruments", "/v1/coverage", OI_PATH})
 
 
 @dataclass(frozen=True)
@@ -40,8 +40,16 @@ def coverage_path(instrument: InstrumentRow, window: Window) -> str:
     )
 
 
+def open_interest_path(instrument: InstrumentRow, oi_window: Window) -> str:
+    """The open interest coverage request with exactly the documented parameters (C§6.6.1); same encoding as above."""
+    return (
+        f"{OI_PATH}?venue={quote(instrument.venue, safe='')}&symbol={quote(instrument.symbol, safe='/:')}"
+        f"&period={quote(instrument.timeframe, safe='')}&start={oi_window.start}&end={oi_window.end}"
+    )
+
+
 def http_fetch(base_url: str, timeout_s: float = 10.0) -> Fetch:
-    """A ``Fetch`` for the API at ``base_url``: GET only, three allowed paths, no redirects, capped body.
+    """A ``Fetch`` for the API at ``base_url``: GET only, four allowed paths, no redirects, capped body.
 
     ``timeout_s`` applies to each socket operation, not to the whole call; the refresh deadline bounds the total.
     """
