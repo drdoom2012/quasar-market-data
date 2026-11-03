@@ -1,12 +1,17 @@
+from typing import get_args
+
 from quasar_market_data.api.errors import (
     RECEIVED_MAX_CHARS,
     ApiError,
+    ErrorCode,
     cut_received,
     internal_error,
     invalid_parameter,
     method_not_allowed,
     not_found,
     not_ready,
+    open_interest_disabled,
+    unknown_open_interest_series,
     unknown_series,
 )
 
@@ -63,3 +68,30 @@ def test_the_other_constructors() -> None:
     assert unknown_series("binance-usdm", "X/Y", "5m").status == 404
     assert (not_found().status, not_found().code, not_found().details) == (404, "not_found", {})
     assert (internal_error().status, internal_error().code, internal_error().details) == (500, "internal_error", {})
+
+
+def test_open_interest_disabled_is_a_404_with_no_details() -> None:
+    error = open_interest_disabled()
+
+    assert (error.status, error.code, error.details, error.headers) == (404, "open_interest_disabled", {}, {})
+
+
+def test_unknown_open_interest_series_names_the_period_and_not_the_timeframe() -> None:
+    error = unknown_open_interest_series("binance-usdm", "BTC/USDT:USDT", "5m")
+
+    assert (error.status, error.code) == (404, "unknown_series")
+    assert error.message == "no open interest row of this series has been stored"
+    assert error.details == {"venue": "binance-usdm", "symbol": "BTC/USDT:USDT", "period": "5m"}
+    assert unknown_series("v", "s", "5m").message == "no candle of this series has been stored"
+
+
+def test_the_closed_list_of_error_codes() -> None:
+    assert set(get_args(ErrorCode.__value__)) == {
+        "invalid_parameter",
+        "unknown_series",
+        "not_found",
+        "method_not_allowed",
+        "internal_error",
+        "not_ready",
+        "open_interest_disabled",
+    }
