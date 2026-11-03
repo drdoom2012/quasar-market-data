@@ -1,5 +1,5 @@
 """The HTTP application: ``GET /v1/candles``, ``GET /v1/coverage``, ``GET /v1/indicators``, ``GET /v1/instruments``,
-health and the one error body (contract api-v1 sections 1, 2, 5, 6.1, 6.2, 6.3 and 6.4).
+``GET /v1/open-interest``, health and the one error body (contract api-v1 sections 1, 2, 5, 6.1 to 6.5).
 
 The handler parses the raw query string by hand so the contract's strictness holds (``400``, not FastAPI's ``422``;
 repeated, unknown and empty parameters are visible). Documentation endpoints and redirects are off, so an unknown
@@ -29,19 +29,28 @@ from quasar_market_data.api.database import (
     read_indicators,
     read_ingest,
     read_instruments,
+    read_open_interest,
     read_ready,
 )
-from quasar_market_data.api.errors import ApiError, internal_error, method_not_allowed, not_found
+from quasar_market_data.api.errors import (
+    ApiError,
+    internal_error,
+    method_not_allowed,
+    not_found,
+    open_interest_disabled,
+)
 from quasar_market_data.api.float_text import float_text
 from quasar_market_data.api.health_reader import StoredSeries
 from quasar_market_data.api.indicator_reader import IndicatorInputs
 from quasar_market_data.api.indicator_results import indicator_results
 from quasar_market_data.api.instrument_reader import InstrumentNewest
+from quasar_market_data.api.open_interest_page import OpenInterestPage
 from quasar_market_data.api.params import (
     indicators_window_end,
     parse_candles_request,
     parse_coverage_request,
     parse_indicators_request,
+    parse_open_interest_request,
     require_no_query,
 )
 from quasar_market_data.api.rule import checked_rule
@@ -49,6 +58,7 @@ from quasar_market_data.config.settings import Instrument
 from quasar_market_data.domain.freshness import Freshness, series_freshness
 from quasar_market_data.domain.indicator_series import IndicatorPoint, IndicatorSeries, read_start_ms
 from quasar_market_data.domain.indicators import IndicatorSpec
+from quasar_market_data.domain.open_interest_coverage import OpenInterestRule
 from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
@@ -72,6 +82,7 @@ def create_app(
     *,
     rule: ExpectationRule,
     universe: Sequence[Instrument],
+    open_interest: OpenInterestRule | None = None,
     open_connection: ConnectionFactory = open_reader,
     now_ms: Callable[[], int] = system_now_ms,
 ) -> FastAPI:
@@ -107,6 +118,18 @@ def create_app(
         )
         series = await run_in_threadpool(indicator_results, inputs, parsed.indicators, as_of_ms=as_of_ms, rule=rule)
         return await run_in_threadpool(_indicators_response, inputs, parsed.indicators, series, as_of_ms, rule)
+
+    @app.get("/v1/open-interest")
+    async def open_interest_endpoint(request: Request) -> Response:
+        # contract 6.5.5: parameters -> enabled in the configuration -> host clock -> database -> series
+        parsed = parse_open_interest_request(request.scope["query_string"])
+        if open_interest is None:
+            raise open_interest_disabled()
+        as_of_ms = ensure_timestamp_ms(now_ms(), "as_of_ms")  # a wrong host clock is a 500, not a 503
+        page = await run_in_threadpool(
+            read_open_interest, db_path, parsed, as_of_ms=as_of_ms, rule=open_interest, open_connection=open_connection
+        )
+        return _json(200, _open_interest_body(page, as_of_ms, open_interest))
 
     @app.get("/v1/instruments")
     async def instruments(request: Request) -> Response:
@@ -209,6 +232,49 @@ def _page_body(page: CandlesPage) -> dict[str, object]:
             "missing_slots": coverage.missing,
             "beyond_stored_slots": coverage.beyond_stored,
             "gap_free": coverage.gap_free,
+        },
+    }
+
+
+def _open_interest_body(page: OpenInterestPage, as_of_ms: int, rule: OpenInterestRule) -> dict[str, object]:
+    """Keys in the order of contract 6.5.4."""
+    c = page.coverage
+    return {
+        "venue": page.venue,
+        "symbol": page.symbol,
+        "period": page.period,
+        "time_semantics": "period_end",
+        "start": page.start,
+        "end": page.end,
+        "as_of_ms": as_of_ms,
+        "rule": {
+            "cadence": rule.cadence,
+            "expected_after_ms": rule.expected_after_ms,
+            "lag_threshold_ms": rule.lag_threshold_ms,
+            "retrieval_horizon_ms": rule.retrieval_horizon_ms,
+        },
+        "series": {"oldest_time_ms": page.oldest_time_ms, "newest_time_ms": page.newest_time_ms},
+        "rows": [
+            {
+                "time_ms": row.time_ms,
+                "open_interest": row.open_interest,
+                "open_interest_value": row.open_interest_value,
+                "conflicted": row.conflicted,
+            }
+            for row in page.rows
+        ],
+        "next": page.next,
+        "coverage": {
+            "span": {"start": page.span_start, "end": page.span_end},
+            "slots": c.slots,
+            "present_slots": c.present,
+            "conflicted_slots": c.conflicted,
+            "not_yet_expected_slots": c.not_yet_expected,
+            "no_longer_recoverable_slots": c.no_longer_recoverable,
+            "due_slots": c.due,
+            "stale_slots": c.stale,
+            "missing_slots": c.missing,
+            "gap_free": c.gap_free,
         },
     }
 
