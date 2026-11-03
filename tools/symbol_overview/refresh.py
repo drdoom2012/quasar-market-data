@@ -10,18 +10,28 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
-from tools.symbol_overview.fetch import Fetch, RawResponse, TransportError, coverage_path
-from tools.symbol_overview.judge import build_overview, judge_symbol, page_error
+from tools.symbol_overview.fetch import Fetch, RawResponse, TransportError, coverage_path, open_interest_path
+from tools.symbol_overview.judge import OiPart, build_overview, judge_open_interest, judge_symbol, page_error
 from tools.symbol_overview.model import (
     TIMEFRAME,
     VENUE,
     Coverage,
+    Health,
     InstrumentRow,
     Invalid,
+    OiHealth,
+    OiReport,
     SymbolReport,
+    Window,
 )
-from tools.symbol_overview.validate import coverage_result, health_result, instruments_result
-from tools.symbol_overview.window import window_for
+from tools.symbol_overview.validate import (
+    coverage_result,
+    health_result,
+    instruments_result,
+    open_interest_coverage_result,
+    open_interest_health,
+)
+from tools.symbol_overview.window import open_interest_window, window_for
 
 
 @dataclass(frozen=True)
@@ -83,8 +93,10 @@ class Overviewer:
     def _refresh(self) -> Snapshot:
         started = self._monotonic()
 
-        raw = self._call("/health/ingest")
-        health = raw if isinstance(raw, Invalid) else health_result(raw.status, raw.content_type, raw.body)
+        health_raw = self._call("/health/ingest")
+        if isinstance(health_raw, Invalid):
+            return Snapshot(502, page_error(health_raw))
+        health = health_result(health_raw.status, health_raw.content_type, health_raw.body)
         if isinstance(health, Invalid):
             return Snapshot(502, page_error(health))
         raw = self._call("/v1/instruments")
@@ -123,7 +135,69 @@ class Overviewer:
         reports: list[SymbolReport] = [
             judge_symbol(instrument, outcome, window) for instrument, outcome in zip(instruments, outcomes, strict=True)
         ]
+        candle_not_asked = sum(1 for outcome in outcomes if outcome == Invalid("deadline"))
+
+        # The open interest phase starts only when every candle outcome is final (design 8.1): whatever it costs,
+        # the candle part above is what a candle-only refresh produces. One deadline, measured from `started`.
+        oi_health = open_interest_health(health_raw.status, health_raw.content_type, health_raw.body, health=health)
+        open_interest = self._open_interest_phase(
+            instruments, oi_health, open_interest_window(window), health, started, candle_not_asked
+        )
         duration_ms = int((self._monotonic() - started) * 1000)
         return Snapshot(
-            200, build_overview(health, window, reports, duration_ms=duration_ms, deadline_hit=deadline_hit.is_set())
+            200,
+            build_overview(
+                health,
+                window,
+                reports,
+                duration_ms=duration_ms,
+                deadline_hit=deadline_hit.is_set(),
+                open_interest=open_interest,
+            ),
         )
+
+    def _open_interest_phase(
+        self,
+        instruments: tuple[InstrumentRow, ...],
+        oi_health: OiHealth | None | Invalid,
+        oi_window: Window,
+        health: Health,
+        started: float,
+        candle_not_asked: int,
+    ) -> OiPart:
+        if oi_health is None:  # the key is present and null: disabled, no call is made
+            return OiPart("disabled", "", (), False, candle_not_asked, 0)
+        if isinstance(oi_health, Invalid):  # absent or malformed: unknown for every symbol, no call is made
+            detail = f"{oi_health.code}:{oi_health.detail}" if oi_health.detail else oi_health.code
+            reports = tuple(judge_open_interest(instrument, oi_health, oi_window) for instrument in instruments)
+            return OiPart("unknown", detail, reports, False, candle_not_asked, 0)
+
+        deadline_hit = threading.Event()
+        not_asked: list[str] = []  # appended from the workers; a list append is atomic
+
+        def one(instrument: InstrumentRow) -> OiReport:
+            if instrument.venue != VENUE or instrument.timeframe != TIMEFRAME:
+                return judge_open_interest(instrument, Invalid("schema", "unsupported_series"), oi_window)
+            if self._monotonic() - started > self._deadline_s:
+                deadline_hit.set()
+                not_asked.append(instrument.symbol)
+                return judge_open_interest(instrument, Invalid("deadline"), oi_window)
+            answer = self._call(open_interest_path(instrument, oi_window))
+            outcome = (
+                answer
+                if isinstance(answer, Invalid)
+                else open_interest_coverage_result(
+                    answer.status,
+                    answer.content_type,
+                    answer.body,
+                    instrument=instrument,
+                    oi_window=oi_window,
+                    health=health,
+                    oi_health=oi_health,
+                )
+            )
+            return judge_open_interest(instrument, outcome, oi_window)  # the runs are dropped here
+
+        with ThreadPoolExecutor(max_workers=self._concurrency) as pool:
+            reports = tuple(pool.map(one, instruments))
+        return OiPart("enabled", "", reports, deadline_hit.is_set(), candle_not_asked, len(not_asked))

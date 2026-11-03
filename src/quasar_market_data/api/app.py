@@ -31,6 +31,7 @@ from quasar_market_data.api.database import (
     read_ingest_open_interest,
     read_instruments,
     read_open_interest,
+    read_open_interest_coverage,
     read_ready,
 )
 from quasar_market_data.api.errors import (
@@ -45,12 +46,14 @@ from quasar_market_data.api.health_reader import OpenInterestFacts, StoredOpenIn
 from quasar_market_data.api.indicator_reader import IndicatorInputs
 from quasar_market_data.api.indicator_results import indicator_results
 from quasar_market_data.api.instrument_reader import InstrumentNewest
+from quasar_market_data.api.open_interest_coverage_reader import OpenInterestCoverageReport
 from quasar_market_data.api.open_interest_page import OpenInterestPage
 from quasar_market_data.api.params import (
     indicators_window_end,
     parse_candles_request,
     parse_coverage_request,
     parse_indicators_request,
+    parse_open_interest_coverage_request,
     parse_open_interest_request,
     require_no_query,
 )
@@ -132,6 +135,23 @@ def create_app(
             read_open_interest, db_path, parsed, as_of_ms=as_of_ms, rule=open_interest, open_connection=open_connection
         )
         return _json(200, _open_interest_body(page, as_of_ms, open_interest))
+
+    @app.get("/v1/open-interest/coverage")
+    async def open_interest_coverage_endpoint(request: Request) -> Response:
+        # contract 6.6.5, the order of 6.5.5: parameters -> enabled -> host clock -> database -> series
+        parsed = parse_open_interest_coverage_request(request.scope["query_string"])
+        if open_interest is None:
+            raise open_interest_disabled()
+        as_of_ms = ensure_timestamp_ms(now_ms(), "as_of_ms")  # a wrong host clock is a 500, not a 503
+        report = await run_in_threadpool(
+            read_open_interest_coverage,
+            db_path,
+            parsed,
+            as_of_ms=as_of_ms,
+            rule=open_interest,
+            open_connection=open_connection,
+        )
+        return _json(200, _open_interest_coverage_body(report, as_of_ms, open_interest))
 
     @app.get("/v1/instruments")
     async def instruments(request: Request) -> Response:
@@ -286,6 +306,50 @@ def _open_interest_body(page: OpenInterestPage, as_of_ms: int, rule: OpenInteres
             "missing_slots": c.missing,
             "gap_free": c.gap_free,
         },
+    }
+
+
+def _open_interest_coverage_body(
+    report: OpenInterestCoverageReport, as_of_ms: int, rule: OpenInterestRule
+) -> dict[str, object]:
+    """Keys in the order of contract 6.6.3; the counts and the runs come from one slot sequence."""
+    c = report.runs.coverage
+    step = rule.period.milliseconds
+    return {
+        "venue": report.venue,
+        "symbol": report.symbol,
+        "period": report.period,
+        "time_semantics": "period_end",
+        "start": report.start,
+        "end": report.end,
+        "as_of_ms": as_of_ms,
+        "rule": {
+            "cadence": rule.cadence,
+            "expected_after_ms": rule.expected_after_ms,
+            "lag_threshold_ms": rule.lag_threshold_ms,
+            "retrieval_horizon_ms": rule.retrieval_horizon_ms,
+        },
+        "series": {"oldest_time_ms": report.oldest_time_ms, "newest_time_ms": report.newest_time_ms},
+        "coverage": {
+            "slots": c.slots,
+            "present_slots": c.present,
+            "conflicted_slots": c.conflicted,
+            "not_yet_expected_slots": c.not_yet_expected,
+            "no_longer_recoverable_slots": c.no_longer_recoverable,
+            "due_slots": c.due,
+            "stale_slots": c.stale,
+            "missing_slots": c.missing,
+            "gap_free": c.gap_free,
+        },
+        "runs": [
+            {
+                "state": run.state.value,
+                "start": run.start_ms,
+                "end": run.end_ms,
+                "slots": (run.end_ms - run.start_ms) // step,
+            }
+            for run in report.runs.runs
+        ],
     }
 
 

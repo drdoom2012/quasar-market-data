@@ -30,8 +30,18 @@ from quasar_market_data.api.health_reader import (
 )
 from quasar_market_data.api.indicator_reader import IndicatorInputs, read_indicator_inputs
 from quasar_market_data.api.instrument_reader import InstrumentNewest, read_instrument_newest
+from quasar_market_data.api.open_interest_coverage_reader import (
+    OpenInterestCoverageReport,
+    read_open_interest_coverage_report,
+)
 from quasar_market_data.api.open_interest_page import OpenInterestPage, read_open_interest_page
-from quasar_market_data.api.params import CandlesRequest, CoverageRequest, IndicatorsRequest, OpenInterestRequest
+from quasar_market_data.api.params import (
+    CandlesRequest,
+    CoverageRequest,
+    IndicatorsRequest,
+    OpenInterestCoverageRequest,
+    OpenInterestRequest,
+)
 from quasar_market_data.config.settings import Instrument
 from quasar_market_data.domain.open_interest_coverage import OpenInterestRule
 from quasar_market_data.domain.timed_coverage import ExpectationRule
@@ -106,6 +116,22 @@ def read_open_interest(
     )
 
 
+def read_open_interest_coverage(
+    db_path: Path,
+    request: OpenInterestCoverageRequest,
+    *,
+    as_of_ms: int,
+    rule: OpenInterestRule,
+    open_connection: ConnectionFactory = open_reader,
+) -> OpenInterestCoverageReport:
+    return _with_reader(
+        db_path,
+        open_connection,
+        lambda conn: read_open_interest_coverage_report(conn, request, as_of_ms=as_of_ms, rule=rule),
+        request,
+    )
+
+
 def read_ready(db_path: Path, *, open_connection: ConnectionFactory = open_reader) -> int:
     """The schema version when the database can be served; the contract's ``503`` otherwise."""
     return _with_reader(db_path, open_connection, check_ready, None)
@@ -132,7 +158,12 @@ def _with_reader[T](
     db_path: Path,
     open_connection: ConnectionFactory,
     read: Callable[[sqlite3.Connection], T],
-    request: CandlesRequest | CoverageRequest | IndicatorsRequest | OpenInterestRequest | None,
+    request: CandlesRequest
+    | CoverageRequest
+    | IndicatorsRequest
+    | OpenInterestRequest
+    | OpenInterestCoverageRequest
+    | None,
 ) -> T:
     try:
         conn = open_connection(db_path)
@@ -146,7 +177,7 @@ def _with_reader[T](
     except UnknownSeries:
         if request is None:
             raise  # only the series readers raise it: a bug, not a 404
-        if isinstance(request, OpenInterestRequest):
+        if isinstance(request, OpenInterestRequest | OpenInterestCoverageRequest):
             raise unknown_open_interest_series(request.venue, request.symbol, request.period.label) from None
         raise unknown_series(request.venue, request.symbol, request.timeframe.label) from None
     except EmptyDatabaseError as error:  # before its parent: a file the Collector has not initialised yet is a retry

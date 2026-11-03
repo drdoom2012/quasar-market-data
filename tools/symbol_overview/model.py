@@ -32,6 +32,22 @@ STATE_CHARS: Final = {
 STRIP_RANK: Final = "_.ndumcs"  # lowest to highest; the worst state of a bucket wins
 
 
+# Open interest (OI-6b, design 8; contract 6.6). A slot is a period END, so the window is shifted by one period.
+OI_PATH: Final = "/v1/open-interest/coverage"
+OI_STATE_CHARS: Final = {
+    "not_yet_expected": "n",
+    "no_longer_recoverable": "r",
+    "due": "d",
+    "missing": "m",
+    "conflicted": "c",
+    "stale": "s",
+}
+OI_STRIP_RANK: Final = "_.rndmcs"  # lowest to highest; "r" outranks "." so a permanent hole stays visible
+OI_RUN_STATES: Final = ("conflicted", "no_longer_recoverable", "missing", "not_yet_expected", "due", "stale")
+# Contract 6.6.4, P8: among slots without a row the state never decreases along the time axis (conflicted excepted).
+OI_STATE_RANK: Final = {"no_longer_recoverable": 0, "missing": 1, "stale": 2, "due": 3, "not_yet_expected": 4}
+
+
 # The closed set of reasons an answer is not trusted (spec 5.6, 5.9, 5.10). ``api_error`` carries the API's own
 # ``error.code`` as its detail.
 INVALID_CODES: Final = frozenset(
@@ -133,4 +149,47 @@ class SymbolReport:
     oldest_open_time_ms: int | None
     newest_open_time_ms: int | None
     as_of_ms: int | None
+    strip: str | None
+
+
+@dataclass(frozen=True)
+class OiRule:
+    cadence: int
+    expected_after_ms: int
+    lag_threshold_ms: int
+
+
+@dataclass(frozen=True)
+class OiHealth:
+    """``health.open_interest``, validated: the rule every open interest answer must repeat."""
+
+    rule: OiRule
+
+
+@dataclass(frozen=True)
+class OiCoverage:
+    as_of_ms: int
+    retrieval_horizon_ms: int
+    oldest_time_ms: int
+    newest_time_ms: int
+    present_slots: int
+    conflicted_slots: int
+    not_yet_expected_slots: int
+    no_longer_recoverable_slots: int
+    due_slots: int
+    stale_slots: int
+    missing_slots: int
+    runs: tuple[Run, ...]
+
+
+@dataclass(frozen=True)
+class OiReport:
+    """One symbol's open interest, judged. It keeps no runs: the worker judges and drops them."""
+
+    state: str
+    reasons: tuple[Reason, ...]
+    oldest_time_ms: int | None
+    newest_time_ms: int | None
+    as_of_ms: int | None
+    retrieval_horizon_ms: int | None
     strip: str | None

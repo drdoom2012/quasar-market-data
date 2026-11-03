@@ -4,7 +4,8 @@
   open decisions O-1 to O-5). Revisions 2 to 4 answer the user's reviews (listed at the end). The API response
   schema (P-11) is contract section 6.5 of `docs/contracts/api-v1.md`, approved by the user on 2026-11-03 and implemented by OI-5. Amendment A-1 (2026-11-02, approved by
   the user): the 100-row transaction criterion of P-9 is checked from production measurements after OI-4, not by
-  a benchmark in OI-2 (see the revision history).
+  a benchmark in OI-2 (see the revision history). Amendment A-2 (2026-11-03, approved by the user with contract section 6.6): a per-run gap listing for open interest and the split
+  of the OI-6 slice (see the revision history). OI-6a (the endpoint, contract section 6.6) and OI-6b (the overview page) are implemented on one branch at the user's request (one pull request, not two); the OI-6b gate of P-16 (the benchmark numbers read and approved by the user) is recorded in the OI-6 design, section 14: the numbers are measured, the user's reading of them is pending.
 - **Date:** 2026-11-02
 - **Scope:** collecting, storing and serving Binance USDT-M open interest history at a 5m period for the
   configured symbols. It is the first extension dataset (`docs/architecture.md` §7); funding, liquidations and
@@ -387,6 +388,9 @@ the backfill. Revision 2 removes the dependence on "absent yet" retries:
   `stale`, `behind`, `conflicted_series` (P-8). Existing fields keep their meaning (contract: new fields may be added
   within `/v1`).
 - `GET /v1/coverage`, `GET /v1/candles` and `GET /v1/indicators` are unchanged.
+- **Amendment A-2:** `GET /v1/open-interest/coverage` (contract section 6.6) lists the gaps that the page `coverage`
+  block only counts: counts and runs of the P-7 states for a window of at most 10 000 slots, from stored times, no
+  values. `GET /v1/open-interest` does not change.
 - The exact schema is written as a new section of `docs/contracts/api-v1.md` and approved before OI-5.
 
 ### P-12 Restart reconcile and bounded catch-up
@@ -562,7 +566,8 @@ Each slice adds its tests first. Live tests stay under `make live`, never in `ma
 | OI-3 | adapter method on its own CCXT client, request rules (P-5), sliding-window budget and `429`/`418` handling (P-10); `fetch-oi-once` CLI command | this ADR |
 | OI-4 | open interest task: rounds with overlapping range, restart reconcile, catch-up, config table, isolation (P-9, P-10, P-12, P-13) | this ADR |
 | OI-5 | `GET /v1/open-interest`, `/health/ingest` extension | contract section approval |
-| OI-6 | symbol overview page shows open interest coverage (optional) | user's call |
+| OI-6a | `GET /v1/open-interest/coverage` (counts and runs), its contract section 6.6, a refresh benchmark harness (amendment A-2) | the user approves the contract text first |
+| OI-6b | symbol overview page shows open interest coverage (strip, summary, reasons) | OI-6a merged and the benchmark at 300 and 600 symbols read and approved by the user |
 
 New invariant register rows mirror INV-007/008/009/012 for open interest and add: "open interest never delays or
 stops candle collection" (evidence: the independence tests above) and "open interest requests stay within the
@@ -665,3 +670,11 @@ were throwaway in the session scratchpad and are not in the repository.
   until OI-4 nothing writes open interest, so candle collection cannot be affected before the measurement exists,
   and production data measures a grown database instead of an empty one. P-9 and the P-15 row are updated; the
   rules themselves are unchanged.
+- **Amendment A-2** (2026-11-03, approved by the user together with contract section 6.6; the OI-6 design was approved
+  on the same day): decision OA7 left a per-run gap listing for open interest "for a
+  later section if wanted". The user asked for it when approving the OI-6 design (a strip with the position of holes
+  on the symbol overview page, issue #6). P-11 gains `GET /v1/open-interest/coverage` (counts and runs of the P-7
+  states for at most 10 000 slots, no values). The P-16 row OI-6 is split into OI-6a (the endpoint, its contract text
+  and a benchmark harness) and OI-6b (the page); OI-6b is gated by a refresh benchmark at 300 and 600 symbols. Rules
+  P-1 to P-15 are unchanged; no schema change, no migration, no configuration key. Design:
+  `docs/superpowers/specs/2026-11-03-oi-6-open-interest-overview-design.md`.

@@ -163,6 +163,26 @@ def open_interest_slot_states(
     return tuple(states)
 
 
+def _count(states: tuple[tuple[int, OpenInterestSlotState], ...], slots: int) -> OpenInterestCoverage:
+    counts: dict[OpenInterestSlotState, int] = dict.fromkeys(OpenInterestSlotState, 0)
+    conflicted_times: set[int] = set()
+    for time_ms, state in states:
+        counts[state] += 1
+        if state is OpenInterestSlotState.CONFLICTED:
+            conflicted_times.add(time_ms)
+    return OpenInterestCoverage(
+        slots=slots,
+        present=counts[OpenInterestSlotState.PRESENT],
+        conflicted=counts[OpenInterestSlotState.CONFLICTED],
+        not_yet_expected=counts[OpenInterestSlotState.NOT_YET_EXPECTED],
+        no_longer_recoverable=counts[OpenInterestSlotState.NO_LONGER_RECOVERABLE],
+        due=counts[OpenInterestSlotState.DUE],
+        stale=counts[OpenInterestSlotState.STALE],
+        missing=counts[OpenInterestSlotState.MISSING],
+        conflicted_times=frozenset(conflicted_times),
+    )
+
+
 def classify_open_interest_span(
     *,
     start: int,
@@ -174,9 +194,7 @@ def classify_open_interest_span(
     rule: OpenInterestRule,
 ) -> OpenInterestCoverage:
     """Count the states of the slots of ``[start, end)`` (see ``open_interest_slot_states``)."""
-    counts: dict[OpenInterestSlotState, int] = dict.fromkeys(OpenInterestSlotState, 0)
-    conflicted_times: set[int] = set()
-    for time_ms, state in open_interest_slot_states(
+    states = open_interest_slot_states(
         start=start,
         end=end,
         stored=stored,
@@ -184,21 +202,61 @@ def classify_open_interest_span(
         newest_time_ms=newest_time_ms,
         as_of_ms=as_of_ms,
         rule=rule,
-    ):
-        counts[state] += 1
-        if state is OpenInterestSlotState.CONFLICTED:
-            conflicted_times.add(time_ms)
-    return OpenInterestCoverage(
-        slots=(end - start) // rule.period.milliseconds,
-        present=counts[OpenInterestSlotState.PRESENT],
-        conflicted=counts[OpenInterestSlotState.CONFLICTED],
-        not_yet_expected=counts[OpenInterestSlotState.NOT_YET_EXPECTED],
-        no_longer_recoverable=counts[OpenInterestSlotState.NO_LONGER_RECOVERABLE],
-        due=counts[OpenInterestSlotState.DUE],
-        stale=counts[OpenInterestSlotState.STALE],
-        missing=counts[OpenInterestSlotState.MISSING],
-        conflicted_times=frozenset(conflicted_times),
     )
+    return _count(states, (end - start) // rule.period.milliseconds)
+
+
+@dataclass(frozen=True)
+class OpenInterestRun:
+    """A maximal run of consecutive slots in one state other than ``present``; ``end_ms`` is exclusive."""
+
+    state: OpenInterestSlotState
+    start_ms: int
+    end_ms: int
+
+
+@dataclass(frozen=True)
+class OpenInterestRunCoverage:
+    """The counts and the runs of one slot sequence: they describe the same slots, so they always agree."""
+
+    coverage: OpenInterestCoverage
+    runs: tuple[OpenInterestRun, ...]
+
+
+def _group_runs(states: tuple[tuple[int, OpenInterestSlotState], ...], step: int) -> tuple[OpenInterestRun, ...]:
+    runs: list[OpenInterestRun] = []
+    for time_ms, state in states:
+        if state is OpenInterestSlotState.PRESENT:
+            continue
+        if runs and runs[-1].state is state and runs[-1].end_ms == time_ms:
+            runs[-1] = OpenInterestRun(state, runs[-1].start_ms, time_ms + step)
+        else:
+            runs.append(OpenInterestRun(state, time_ms, time_ms + step))
+    return tuple(runs)
+
+
+def classify_open_interest_runs(
+    *,
+    start: int,
+    end: int,
+    stored: AbstractSet[int],
+    conflicts: AbstractSet[int],
+    newest_time_ms: int,
+    as_of_ms: int,
+    rule: OpenInterestRule,
+) -> OpenInterestRunCoverage:
+    """Counts and runs of ``[start, end)`` from one call of ``open_interest_slot_states`` (contract 6.6)."""
+    states = open_interest_slot_states(
+        start=start,
+        end=end,
+        stored=stored,
+        conflicts=conflicts,
+        newest_time_ms=newest_time_ms,
+        as_of_ms=as_of_ms,
+        rule=rule,
+    )
+    step = rule.period.milliseconds
+    return OpenInterestRunCoverage(_count(states, (end - start) // step), _group_runs(states, step))
 
 
 def open_interest_freshness(newest_time_ms: int, as_of_ms: int, rule: OpenInterestRule) -> SeriesFreshness:
