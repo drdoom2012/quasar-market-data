@@ -455,3 +455,29 @@ The contract text (6.6 and the edits of 6.5) is approved separately, as text, be
 - **The tunnel is the open term.** With the measured means, the criterion `D_pred ≤ 45 s` allows an extra latency per call of at most about 82 ms at 600 symbols (149.0 − 67.0) and about 203 ms at 300 (296.1 − 92.7). A real SSH tunnel with a new connection per call may or may not fit; only `L_tunnel` answers that.
 - One machine, a warm file cache, a modelled writer with two bursts in ten minutes: contention is sampled, not stress-tested; the VPS is slower and is not measured (ADR-0003 A-1). The stress profile (every answer with the largest number of runs) was not run at G0; it needs the real endpoint.
 - **G0 is informative and gates nothing.** Nothing in it reopens 6.1 (a per-symbol endpoint) or 7.4.
+
+### G1 — the refresh against the real endpoint (2026-11-03)
+
+**What was run:** `make bench-overview SERIES=<N> OVERVIEW_PROFILE=target OI_MODE=real` for `N = 300` and `N = 600`, one after the other, then the same with `ARGS="--stress --sustained-minutes 0"` (every open interest answer has the largest number of runs). The branch `oi-6a-open-interest-coverage` at the commit that holds the endpoint and its review fixes; the second call of every symbol is `GET /v1/open-interest/coverage` with the shifted window `[S + tf, E + tf)`. The machine was left alone during the runs. Setup as in G0 (Apple M5, 10 cores, 32 GiB, APFS, macOS 27.0.1, Python 3.12.15, SQLite 3.53.1, loopback, no SSH tunnel); cadence `c` was 3 at 300 symbols and 5 at 600.
+
+| | N = 300 | N = 600 | N = 300 stress | N = 600 stress |
+|---|---|---|---|---|
+| refresh wall time, 10 refreshes (AC1, limit 45 s) | 7.2 to 11.0 s | 20.5 to 22.6 s | 12.4 to 13.0 s | 23.1 to 28.1 s |
+| failed calls, symbols not asked (AC2) | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+| candle call: p50 / p95 / p99 / max / mean (ms) | 56 / 78 / 100 / 166 / 58 | 72 / 91 / 102 / 130 / 74 | 71 / 82 / 87 / 100 / 71 | 68 / 88 / 100 / 112 / 69 |
+| open interest call: p50 / p95 / p99 / max / mean (ms) | 54 / 73 / 81 / 101 / 55 | 69 / 86 / 97 / 130 / 70 | 91 / 105 / 117 / 147 / 93 | 87 / 120 / 144 / 227 / 91 |
+| `/health/ingest` mean, `/v1/instruments` mean (10 calls, ms) | 5.6, 2.2 | 12.5, 4.1 | 7.8, 2.7 | 14.5, 4.1 |
+| largest body (AC6, limit 1 MB), its decode time | 32 117 B, 0.2 ms | 64 217 B, 0.3 ms | 637 620 B, 5.5 ms | 637 559 B, 20.8 ms |
+| sustained: refreshes, refresh time, calls failed or not asked (AC2) | 25, 7.6 to 11.4 s, 0 | 17, 19.2 to 24.6 s, 0 | not run | not run |
+| `/health/ready` p99 during the sustained run, `503` count (AC4, limit 1 s) | 9.0 ms, 0 | 13.6 ms, 0 | not run | not run |
+| API peak resident set (AC5, limit 432 MiB) | 77.4 MiB | 77.4 MiB | 80.3 MiB | 81.9 MiB |
+| writer: rows attempted, errors | 1 200, 0 | 2 400, 0 | not run | not run |
+
+**Evaluation:** AC1, AC2 (also over the sustained refreshes), AC4, AC5 and AC6 pass at both sizes and on the stress profile where it was run; AC3 is diagnostic; **AC7 is open** until the user supplies `L_tunnel`.
+
+**What this shows and does not show**
+- **The proxy of G0 was close.** The real open interest call costs about the same as the candle call on the normal profile (55 against 58 ms at 300, 70 against 74 ms at 600). The G0 doubt that the per-call mean fell from 300 to 600 symbols is answered: it **rises** (about 58 to 74 ms), the G0 300 run was disturbed by other work on the machine.
+- **The stress profile costs more per call but fits.** A 10 000-run answer is 637 KB (the contract's estimate was about 0.86 MB; the limit is 1 MB), its decode takes 5 to 21 ms, and the open interest call averages 91 to 93 ms. The longest stress refresh at 600 symbols was 28.1 s, under the 45 s criterion on loopback.
+- **The tunnel is still the open term.** With the measured means `(L_candle + L_oi) / 2` of 56.6 ms (300), 71.7 ms (600), 82.0 ms (300 stress) and 80.3 ms (600 stress), the criterion `(2 + ⌈N/4⌉ · 2) · (L + L_tunnel) <= 45 s` allows an extra latency per call of at most about 239 ms (300), 77 ms (600), 214 ms (300 stress) and 69 ms (600 stress). Only `L_tunnel` decides it; **the prediction for the VPS stays open.**
+- One machine, a warm file cache, a modelled writer: contention is sampled, not stress-tested; the VPS is slower and is not measured (ADR-0003 A-1).
+- **The rule of 7.4** (per-symbol or batch endpoint) is not triggered by loopback numbers: no batch endpoint is added.
