@@ -410,7 +410,7 @@ def test_the_database_path_does_not_depend_on_the_working_directory(
     config = write_config(tmp_path / "conf", symbols=(SYMBOL,))
     seen: list[Path] = []
 
-    def spy(settings: Any, open_source: Any, clock: Any, sleep: Any) -> int:
+    def spy(settings: Any, open_source: Any, clock: Any, sleep: Any, *_: Any) -> int:
         seen.append(settings.database_path)
         return 0
 
