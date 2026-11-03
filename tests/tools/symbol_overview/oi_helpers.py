@@ -1,13 +1,17 @@
 """Shared constants and builders for the open interest tests of the symbol overview tool (OI-6b)."""
 
 import json
-from collections.abc import Collection, Mapping
+import threading
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from quasar_market_data.domain.open_interest_coverage import OpenInterestRule, classify_open_interest_runs
 from quasar_market_data.domain.timeframe import Timeframe
-from tests.tools.symbol_overview.helpers import RULE, SYMBOL, T0, health_doc
-from tools.symbol_overview.model import TF_MS, TIMEFRAME, VENUE, OiHealth, OiRule, Window
+from tests.tools.symbol_overview.fake_api import FakeReply
+from tests.tools.symbol_overview.helpers import RULE, SYMBOL, T0, coverage_doc, health_doc
+from tools.symbol_overview.fetch import RawResponse, TransportError
+from tools.symbol_overview.model import TF_MS, TIMEFRAME, VENUE, InstrumentRow, OiHealth, OiRule, Window
 from tools.symbol_overview.window import open_interest_window, window_for
 
 WINDOW = window_for(T0)  # the candle window [S, E)
@@ -210,3 +214,104 @@ def doc_from_states(
         counts=counts,
         runs=runs,
     )
+
+
+# --- a fake API for the refresh tests --------------------------------------------------------------------------------
+
+Reply = FakeReply | TransportError
+OiRoute = Callable[[dict[str, str]], Reply]
+
+
+def json_reply(doc: object) -> FakeReply:
+    return FakeReply(200, json.dumps(doc).encode())
+
+
+def error_reply(status: int, code: str) -> FakeReply:
+    return FakeReply(status, json.dumps({"error": {"code": code, "message": "x", "details": {}}}).encode())
+
+
+def default_open_interest_doc(query: dict[str, str]) -> dict[str, Any]:
+    """A healthy answer for the requested window: rows from its first slot up to near its end."""
+    window = Window(int(query["start"]), int(query["end"]))
+    return doc_from_states(oldest=window.start, newest=window.end - 10 * TF_MS, symbol=query["symbol"], window=window)
+
+
+def stub_routes(
+    rows: Sequence[InstrumentRow],
+    *,
+    health_open_interest: object = ABSENT,
+    candle: Mapping[str, Reply] | None = None,
+    open_interest: Mapping[str, Reply | Callable[[dict[str, str]], Reply]] | None = None,
+) -> dict[str, OiRoute]:
+    """Consistent routes: both coverage answers are built from the request, so the echo always matches."""
+    by_symbol = {r.symbol: r for r in rows}
+
+    def coverage(query: dict[str, str]) -> Reply:
+        symbol = query["symbol"]
+        if candle and symbol in candle:
+            return candle[symbol]
+        window = Window(int(query["start"]), int(query["end"]))
+        newest = by_symbol[symbol].newest_open_time_ms
+        assert newest is not None
+        return json_reply(coverage_doc(window, oldest=window.start, newest=newest, symbol=symbol))
+
+    def oi(query: dict[str, str]) -> Reply:
+        symbol = query["symbol"]
+        override = (open_interest or {}).get(symbol)
+        if override is not None:
+            return override(query) if callable(override) else override
+        if by_symbol[symbol].newest_open_time_ms is None:
+            return error_reply(404, "unknown_series")
+        return json_reply(default_open_interest_doc(query))
+
+    return {
+        "/health/ingest": lambda query: FakeReply(200, health_with(health_open_interest)),
+        "/v1/instruments": lambda query: json_reply(
+            {
+                "instruments": [
+                    {
+                        "venue": r.venue,
+                        "symbol": r.symbol,
+                        "timeframe": r.timeframe,
+                        "newest_open_time_ms": r.newest_open_time_ms,
+                    }
+                    for r in rows
+                ]
+            }
+        ),
+        "/v1/coverage": coverage,
+        "/v1/open-interest/coverage": oi,
+    }
+
+
+class StubFetch:
+    """A ``Fetch`` without sockets: canned answers by path, every call recorded, a hook that may move a fake clock."""
+
+    def __init__(self, routes: Mapping[str, OiRoute], *, on_call: Callable[[str], None] | None = None) -> None:
+        self.routes = routes
+        self.on_call = on_call
+        self.paths: list[str] = []
+        self._lock = threading.Lock()
+
+    def __call__(self, path_and_query: str) -> RawResponse:
+        with self._lock:
+            self.paths.append(path_and_query)
+        if self.on_call is not None:
+            self.on_call(path_and_query)
+        split = urlsplit(path_and_query)
+        route = self.routes.get(split.path)
+        reply: Reply = route(dict(parse_qsl(split.query, keep_blank_values=True))) if route else FakeReply(404, b"{}")
+        if isinstance(reply, TransportError):
+            raise reply
+        return RawResponse(reply.status, reply.content_type, reply.body)
+
+    def count(self, path: str) -> int:
+        return sum(1 for p in self.paths if urlsplit(p).path == path)
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
