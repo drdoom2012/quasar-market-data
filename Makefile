@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck imports check live bench bench-health bench-indicators bench-oi-write images compose-test
+.PHONY: test lint typecheck imports check live bench bench-health bench-health-oi bench-indicators bench-oi-write images compose-test
 
 test:
 	uv run pytest
@@ -28,6 +28,10 @@ bench:
 # PROFILE: smoke | medium | target. medium and target are slow and large; run them by hand (S17 HARD STOP 2).
 bench-health:
 	uv run python -m tests.api.bench_health --profile $(PROFILE)
+
+# /health/ingest with 600 candle and 600 open interest series, open interest off and on, in a fresh temp dir; not part of `check`.
+bench-health-oi:
+	uv run python -m tests.api.bench_health_open_interest
 
 # The largest /v1/indicators request on a generated database in a fresh temp dir; informative, not part of `check`.
 bench-indicators:
