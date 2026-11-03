@@ -425,3 +425,33 @@ The contract text (6.6 and the edits of 6.5) is approved separately, as text, be
 16. Wording: six non-present counts plus `present_slots`; eight integers plus `gap_free` (P7, 6.3).
 17. The reason code of each new check named from the existing closed set; no new code (8.5).
 18. Where open interest is judged (in the worker) stated (8.2).
+
+## 14. Measurements
+
+### G0 — the refresh against `/v1/coverage` as a stand-in (2026-11-03)
+
+**What was run:** `make bench-overview SERIES=<N> OVERVIEW_PROFILE=target OI_MODE=proxy` for `N = 300` and `N = 600`, one after the other. `proxy` means the second call of every symbol is `GET /v1/coverage` with the candle window instead of `GET /v1/open-interest/coverage`, which does not exist yet; **the assumption that the two cost about the same is not verified** (same cost class: a primary-key range read of at most 10 000 slots; the open interest endpoint reads two tables). G1 replaces it with the real endpoint.
+
+**Setup:** Apple M5, 10 cores, 32 GiB, internal SSD (APFS), macOS 27.0.1 arm64, Python 3.12, SQLite 3.53.1, loopback only (no SSH tunnel). A generated database in a fresh temp dir: `N` candle series of 100 000 rows (the `bench-health` depth) and `N` open interest series of 8 640 rows (every 7th series with a few holes and one conflict record, one series with three days of open interest); `quasar-api serve` with open interest enabled, budget 400, so the cadence is `c = 3` at 300 symbols and `c = 5` at 600. The operating system's file cache is warm after the build; nothing was dropped. Tool constants unchanged: 4 workers, a new connection per call, deadline 60 s. 10 fresh refreshes (the first is not discarded), then a sustained run of 10 minutes: a refresh, a 15 s pause, a refresh, … with a `/health/ready` probe every 0.5 s and a concurrent writer inserting one candle and one open interest row per symbol every 300 s (two ticks in the run). The raw JSON lines are not committed; the tables below are the record.
+
+| | N = 300 | N = 600 |
+|---|---|---|
+| refresh wall time, 10 refreshes (AC1, limit 45 s) | 12.6 to 16.6 s | 19.7 to 21.4 s |
+| failed calls, symbols not asked (AC2) | 0, 0 | 0, 0 |
+| candle call: p50 / p95 / p99 / max / mean | 93 / 118 / 129 / 186 / 94 ms | 66 / 78 / 85 / 108 / 67 ms |
+| second call (proxy): p50 / p95 / p99 / max / mean | 89 / 122 / 132 / 145 / 92 ms | 66 / 78 / 86 / 115 / 67 ms |
+| `/health/ingest` mean, `/v1/instruments` mean (10 calls) | 8.1 ms, 3.2 ms | 12.0 ms, 4.0 ms |
+| largest body (AC6, limit 1 MB), decode time | 32 117 bytes, 0.2 ms | 64 217 bytes, 0.3 ms |
+| sustained: refreshes, refresh time, calls failed or not asked | 25, 8.3 to 16.0 s, 0 | 19, 16.9 to 20.0 s, 0 |
+| `/health/ready` p99 during the sustained run, `503` count (AC4) | 12.0 ms, 0 | 11.0 ms, 0 |
+| API peak resident set (AC5, limit 432 MiB) | 77.9 MiB | 76.9 MiB |
+| writer: rows attempted, errors | 1 200, 0 | 2 400, 0 |
+
+**Evaluation:** AC1, AC2, AC4, AC5 and AC6 pass at both sizes; AC3 is diagnostic; **AC7 is open** until the user supplies `L_tunnel`.
+
+**What this shows and does not show**
+- The paper model of 7.1 agrees with the measurement: `(2 + ⌈N/4⌉·2) · L` gives 152 × 92.7 ms ≈ 14.1 s at 300 and 302 × 67 ms ≈ 20.2 s at 600, against 12.6 to 16.6 s and 19.7 to 21.4 s measured. At 600 the longest refresh (21.4 s) is 2.1 times under the 45 s criterion on loopback.
+- **The per-call mean was lower at 600 (67 ms) than at 300 (93 ms).** I have no explanation. The 300 run overlapped with light work on the same machine (editing documents and one test run of about 2 s); I do not claim that explains a 40 % difference. The latency is therefore **not** safe to extrapolate from `N`; G1 repeats both sizes with the real endpoint.
+- **The tunnel is the open term.** With the measured means, the criterion `D_pred ≤ 45 s` allows an extra latency per call of at most about 82 ms at 600 symbols (149.0 − 67.0) and about 203 ms at 300 (296.1 − 92.7). A real SSH tunnel with a new connection per call may or may not fit; only `L_tunnel` answers that.
+- One machine, a warm file cache, a modelled writer with two bursts in ten minutes: contention is sampled, not stress-tested; the VPS is slower and is not measured (ADR-0003 A-1). The stress profile (every answer with the largest number of runs) was not run at G0; it needs the real endpoint.
+- **G0 is informative and gates nothing.** Nothing in it reopens 6.1 (a per-symbol endpoint) or 7.4.
