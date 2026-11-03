@@ -1,6 +1,6 @@
 # Quasar Market Data API v1 — contract
 
-- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). `GET /v1/candles` (section 5) is implemented by S10. `GET /v1/coverage` (section 6.1) was APPROVED by the user on 2026-10-25 (decisions S1–S5 as proposed, including the bounds 300 000 ms and 900 000 ms) and is implemented by S12. Sections for the other reserved endpoints (section 6) still need their own approval before their slices. `GET /v1/indicators` (section 6.3) was APPROVED by the user on 2026-10-28 (decisions I1–I6 as proposed) and is implemented by S18.
+- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). `GET /v1/candles` (section 5) is implemented by S10. `GET /v1/coverage` (section 6.1) was APPROVED by the user on 2026-10-25 (decisions S1–S5 as proposed, including the bounds 300 000 ms and 900 000 ms) and is implemented by S12. Sections for the other reserved endpoints (section 6) still need their own approval before their slices. `GET /v1/indicators` (section 6.3) was APPROVED by the user on 2026-10-28 (decisions I1–I6 as proposed) and is implemented by S18. `GET /v1/open-interest` and the `open_interest` object of `GET /health/ingest` (section 6.5) were APPROVED by the user on 2026-11-03 for OI-5 (ADR-0003 P-11), decisions OA1–OA11 as proposed (section 9), and are implemented by OI-5.
 - **Scope of this draft:** the conventions shared by every `/v1` endpoint (sections 1–4, 7) and the full specification of `GET /v1/candles` (section 5), which is what S10 implements. The other endpoints are only reserved (section 6) and get their own sections, approved before their slices.
 - **Inputs:** `docs/architecture.md` §4.2, §8; spec `docs/superpowers/specs/2026-10-20-market-data-v1-design.md` (§6.3, §11.3–11.5, D5); ADR-0001 (P-3, P-6, P-8); ADR-0002 (C-3, C-5, P-2, P-5, P-6, P-7, P-8); `docs/invariants.md` (INV-007, INV-009, INV-013, INV-014, INV-028).
 
@@ -23,7 +23,7 @@ What the API does **not** promise: that a closed candle can never be revised by 
 | Methods | `GET` only. `HEAD`, `OPTIONS` and everything else is `405 method_not_allowed` with an `Allow: GET` header and the standard error body. |
 | Request target | Origin form only (`/v1/candles?...`). The absolute form (`GET http://host/v1/candles?...`) is not supported and answers `404 not_found`; clients and proxies are expected to send the origin form. |
 | Encoding | `application/json; charset=utf-8`, UTF-8. Symbols may contain non-ASCII characters (ADR-0001 P-8). In a query string `/` and `:` are legal unencoded; `%`, `+`, `&`, `#`, spaces and non-ASCII characters must be percent-encoded. |
-| Time | Integer epoch **milliseconds**, UTC (`open_time_ms`, `start`, `end`, `next`, `series.*`, `span.*`, `as_of_ms`, `rule.*_ms`, `runs[*].start`, `runs[*].end`). No ISO strings, no time zones. A candle covers `[open_time_ms, open_time_ms + timeframe)`. Valid times are `946684800000 <= t <= 4102444800000` (the range the schema accepts); anything else is `400`. The one exception is the exclusive `end`, which may be up to one timeframe past that maximum (`4102445100000` for `5m`), so the slot at the maximum can be requested and an echoed `end` is always valid as the next `start` or `end`. |
+| Time | Integer epoch **milliseconds**, UTC (`open_time_ms`, `time_ms`, `start`, `end`, `next`, `series.*`, `span.*`, `as_of_ms`, `rule.*_ms`, `runs[*].start`, `runs[*].end`). No ISO strings, no time zones. A candle covers `[open_time_ms, open_time_ms + timeframe)`; an open interest row with `time_ms = T` covers `[T - period, T)` (section 6.5.1). Valid times are `946684800000 <= t <= 4102444800000` (the range the schema accepts); anything else is `400`. The one exception is the exclusive `end`, which may be up to one timeframe past that maximum (`4102445100000` for `5m`), so the slot at the maximum can be requested and an echoed `end` is always valid as the next `start` or `end`. |
 | Decimals | JSON **strings** in the canonical stored form: digits and at most one `.`, no sign, no exponent, no leading zero (except `0.x`), no trailing fractional zero (`"82709"`, not `"82709.0"`). Consumers must parse them as decimals, never as floats. `turnover` is `null` when the venue did not provide it; it is never computed. |
 | Integers | Counts and times are JSON integers. Integer query parameters must match `^[0-9]{1,16}$` (ASCII digits only, no sign, no `_`, no spaces, no decimal point); anything else is `400`. |
 | Strings | `venue` and `timeframe` are matched exactly. `symbol` is 1–64 characters, no whitespace or control characters, valid UTF-8 after percent-decoding, matched case-sensitively and without Unicode normalization (ADR-0001 P-8). A syntactically invalid symbol is `400`; a valid but unknown one is `404`. |
@@ -53,15 +53,16 @@ Out of this contract: errors the HTTP server itself produces before the applicat
 | HTTP | `code` | When | `details` |
 |---|---|---|---|
 | 400 | `invalid_parameter` | A parameter is missing, malformed, out of range, repeated, empty, or unknown; `start`/`end` is not aligned to the timeframe or outside the valid time range; an explicit `end <= start`; the window is longer than 10 000 slots; the timeframe or venue is not served; the symbol is syntactically invalid | `parameter`, `received` (omitted when missing), `maximum` (for limits and window length) |
-| 404 | `unknown_series` | No **candle** of this `(venue, symbol, timeframe)` has ever been stored. A typo and a not-yet-ingested symbol look the same, and a newly configured instrument answers 404 until its first candle is stored. An *existing* series with nothing in the window is a `200` with an empty list | `venue`, `symbol`, `timeframe` |
+| 404 | `unknown_series` | No **candle** of this `(venue, symbol, timeframe)` has ever been stored. A typo and a not-yet-ingested symbol look the same, and a newly configured instrument answers 404 until its first candle is stored. An *existing* series with nothing in the window is a `200` with an empty list. For `GET /v1/open-interest` (section 6.5) the series is `(venue, symbol, period)` and the test is "no open interest row has ever been stored" and the message says so (decision OA11) | `venue`, `symbol`, `timeframe` (`period` instead of `timeframe` for `/v1/open-interest`) |
 | 404 | `not_found` | Unknown path | none |
+| 404 | `open_interest_disabled` | `GET /v1/open-interest` while the configuration file has no `[open_interest]` table or it has `enabled = false` (section 6.5.5). The deployment does not collect open interest, so the endpoint cannot judge its slots | none |
 | 405 | `method_not_allowed` | Not `GET` | `allow` |
 | 500 | `internal_error` | A bug | none (a correlation id is logged, not returned) |
 | 503 | `not_ready` | The database file is missing, is empty (the Collector has not initialised it yet), is not this project's, has a schema version other than the one this API was built for, or cannot be read. The API stays up and answers every `/v1` request this way until the condition clears (INV-028) | `reason`: `database_missing`, `schema_mismatch` or `database_unreadable` |
 
 Rules:
 
-- **Order of checks:** parameter validation (`400`) comes first because it needs no database; then database readiness (`503`); then the series lookup (`404`). A request that is both malformed and hits a broken database answers `400`.
+- **Order of checks:** parameter validation (`400`) comes first because it needs no database; then database readiness (`503`); then the series lookup (`404`). A request that is both malformed and hits a broken database answers `400`. `GET /v1/open-interest` adds `404 open_interest_disabled` between the parameters and the database (section 6.5.5).
 - **Readiness is checked on every request** (the file exists, the project's `application_id`, the schema version), not only at startup, so a deleted or replaced file is noticed.
 - `database_unreadable` also covers a file that exists but holds nothing yet (no application id, no tables), which is a normal moment while the Collector starts, corruption, I/O errors, a busy timeout and a WAL database that cannot be opened read-only. `500` is reserved for bugs.
 - `503` carries `Retry-After: 5` for `database_missing` and `database_unreadable`, and **no** `Retry-After` for `schema_mismatch` (it needs a deployment, not a retry). Clients must treat `503` as "no data", never as "empty data".
@@ -229,6 +230,7 @@ Each is specified in its own section of this document and approved before its sl
 | `GET /v1/coverage` | S12 | Specified in section 6.1 below. |
 | `GET /v1/instruments` | S20 | The configured universe and, per instrument, the newest stored candle. Specified in section 6.4 below. |
 | `GET /v1/indicators` | S18 | Specified in section 6.3 below (indicators computed on demand from stored closed candles; no value across a gap, a conflicted or unavailable slot, or before warm-up; says why). |
+| `GET /v1/open-interest` | OI-5 | Specified in section 6.5 below (open interest history at 5m from stored rows, with the slot states of ADR-0003 P-7; no value is inferred for an absent row). |
 | Health | S17 | Specified in section 6.2 below (`/health`, `/health/ready`, `/health/ingest`). |
 
 ## 6.1 `GET /v1/coverage`
@@ -366,6 +368,7 @@ Information, never a gate: `200` whenever the database is readable, `503 not_rea
   - **What `missing` means and does not mean.** Zero rows for a configured series at the snapshot. It does not say why (never started, first write failed, a symbol the exchange does not serve, a Collector running on another file or database) and it does not judge time: a configured series with any row is never missing, however stale. It never changes `status`, any HTTP status or the order of checks of section 6.2. All configured instruments missing gives `status: no_series`, `series_count: 0` and `missing_count == configured_count`.
   - One read transaction serves both the fields above and `universe`. The API holds the universe in memory from the file it read at start; a change of the file takes effect after a restart.
 - **What it cannot tell.** It reads only the newest stored candle per series. A series with holes behind its newest candle is `current` (`/v1/coverage` reports holes). A stopped Collector, an exchange outage, a halted or delisted symbol and a wrong publication delay all show as `stale`; the endpoint does not know the cause or whether the Collector runs. A retired symbol stays a stored series and keeps `status` at `behind`. A mismatch between the API's rule and the Collector's delay shifts `current`/`due` by the difference.
+- **`open_interest`** (added by OI-5, ADR-0003 P-11; an additive amendment, section 6.2 compatibility): an object about the stored open interest series, or `null` when open interest is not enabled in the configuration. Specified in section 6.5.8. It is the **last key** of the body, after `universe`. Every field above keeps its meaning and its value; a request before and a request after OI-5 on the same database give the same values for them.
 - The answer reflects one read transaction, like every other endpoint.
 - A series that cannot be judged (a timeframe label this software does not know, or an open time not aligned to its timeframe; the Collector cannot write either, a hand-edited row can) makes the whole answer `500 internal_error`, never a made-up status.
 - **A round longer than the lag threshold shows up as `stale`.** The Collector serves its symbols one after another through one rate limiter, so with a large universe the last symbols of a round can be written more than `lag_threshold_ms` after their slot was expected; those series are `stale`, and `status` is `behind`, for part of every cycle. This is not a fault of the Collector. Set `rule.lag_threshold_ms` in `config/quasar.toml` above the Collector's round duration for the universe, and alert on `behind` that persists for more than one cycle, not on a single answer. (The size of the effect depends on the Collector's request spacing and was not measured.)
@@ -501,6 +504,151 @@ No parameter. Any query parameter, known or not, is `400 invalid_parameter` (sec
 - **Unpaginated:** the size is bounded by the file (target 300 to 600 entries), not by data.
 - Section 1 conventions apply (`GET` only, `Cache-Control: no-store`, UTF-8 JSON). All reads run in one read transaction (section 5.6) and take the newest candle per configured series by primary key, never a scan. A database that cannot be read is `503 not_ready` with the reason and headers of section 2, never an empty list.
 
+## 6.5 `GET /v1/open-interest` and the `open_interest` object of `GET /health/ingest`
+
+- **Status:** APPROVED by the user on 2026-11-03, decisions OA1 to OA11 as proposed (section 9). Implemented by OI-5 (issue #5, ADR-0003 P-7, P-8, P-10, P-11). Plan: `docs/superpowers/plans/2026-11-03-oi-5-open-interest-api.md`.
+- **What it answers:** for one series `(venue, symbol, period)` and a window of at most 10 000 slots, the open interest rows Binance reported and the Collector stored, and for every slot of the page the state of ADR-0003 P-7. It reads stored rows, the server clock and the configuration file only; it never contacts an exchange and never writes.
+- **Sections 1 to 4 and 5.6 apply** (conventions, error body, pagination by time, one read transaction, work off the event loop), with the differences stated below.
+
+### 6.5.1 What a row is
+
+- A slot is one `time_ms`, the **end** of a 5m period, aligned to 5 minutes. The row with `time_ms = T` belongs to the period `[T - 5m, T)`, that is to the candle with `open_time_ms = T - 5m`. **Never join a row to a candle by equal timestamps.** This is why the field is called `time_ms` and the response states `"time_semantics": "period_end"`.
+- `open_interest` and `open_interest_value` are decimal strings in the canonical form of section 1, exactly as stored (Binance's own figures; `open_interest_value` is never computed here). Binance does not document the units; the project inferred them from one sample (ADR-0003 P-2, E-3): `open_interest` in the base asset (BTC for `BTC/USDT:USDT`), `open_interest_value` in USDT. Whether a value is the open interest at the instant `T` or a statistic over the period is not documented, and this API claims only "the value Binance reports for the period ending at `T`".
+- Identity is `(venue, symbol, period, time_ms)`. The response carries no `ingested_at_ms` (diagnostic, as for candles, decision Q5).
+
+### 6.5.2 Request
+
+| Parameter | Required | Meaning |
+|---|---|---|
+| `venue` | yes | `binance-usdm` in v1. |
+| `symbol` | yes | CCXT unified symbol, exactly as stored, e.g. `BTC/USDT:USDT`. |
+| `period` | yes | `5m` in v1. |
+| `start` | yes | Inclusive window start, epoch ms, aligned to the period. It selects rows by `time_ms` (the period **end**): to read the open interest that belongs to the candle opening at `O`, ask for `start = O + 5m`. |
+| `end` | no | **Exclusive** window end, epoch ms, aligned, `> start`, at most one period past the maximum valid time (as in section 5.1). Default: see below. |
+| `limit` | no | Maximum rows in this response, `1` to `1000`, default `1000` (fixed, as in section 5.1, decision R6). |
+
+A row is selected when `start <= time_ms < end`. The window never exceeds **10 000 slots**; the effective window, the defaulting of `end` (`newest + period` capped at `start + 10 000 x period`, or one slot when `start` is after the newest stored row), `next` and the paging rules are those of sections 3 and 5.1 with `time_ms` in the place of `open_time_ms` and the newest stored `time_ms` of the series in the place of the newest candle. With a defaulted `end` the span stops at the newest stored row (or is one slot after it), so a series that stopped long ago still answers `gap_free: true` for that window: **a defaulted window cannot show `due`, `stale` or `not_yet_expected` at the newest edge.** Freshness is judged by `GET /health/ingest` (section 6.5.8); to see the states after the newest row, pass an explicit `end` (decision OA10). Parameter rules of section 1 (unknown, repeated, empty values) apply; `timeframe` is not a parameter of this endpoint.
+
+Example:
+
+```text
+GET /v1/open-interest?venue=binance-usdm&symbol=BTC/USDT:USDT&period=5m&start=1792672500000&end=1792674600000
+```
+
+### 6.5.3 Slot states
+
+For a slot `T` at `as_of_ms`, the **first** matching state wins (ADR-0003 P-7). `rule` is the one stated in the response (section 6.5.4); `H` is `rule.retrieval_horizon_ms`, 29 days.
+
+| Order | State | Condition |
+|---|---|---|
+| 1 | `conflicted` | One or more `open_interest_conflicts` records for `T`. A stored row, if any, is returned with its **first stored** values and `conflicted: true`. |
+| 2 | `present` | A stored row for `T`. |
+| 3 | `not_yet_expected` | `T + rule.expected_after_ms > as_of_ms`: by the Collector's schedule `T` is not yet expected to be published. It does not say Binance has not published it; nobody looked. |
+| 4 | `no_longer_recoverable` | `T < as_of_ms - H` and no row: older than the retrieval horizon, so the Collector will never request it. It does not say the data existed, or that Binance would refuse it. |
+| 5 | `due` | No row, `T` is after the newest stored `time_ms` of the series, and `as_of_ms <= T + expected_after_ms + lag_threshold_ms`: expected, tolerated as lag. |
+| 6 | `stale` | No row, `T` is after the newest stored `time_ms`, and `as_of_ms > T + expected_after_ms + lag_threshold_ms`. |
+| 7 | `missing` | None of the above: no row, and `T` is before the newest stored `time_ms` (including slots before the oldest row that are still inside the horizon). The reason is unknown: Binance documents that periods without trades are omitted, and a row can also be late or lost; a response cannot tell these apart. |
+
+Hence `slots = present + conflicted + not_yet_expected + no_longer_recoverable + due + stale + missing`. A slot becomes `no_longer_recoverable` only by the passage of time and is never reported `present` by inference. A stored row is `present` whatever the clock says (stored facts win over the clock).
+
+Two consequences of the order, both different from candle coverage (section 6.1.2), where only slots after the newest stored candle are refined by the clock:
+
+- `due` and `stale` exist only after the **newest stored** `time_ms`: they describe a series that has stopped (or is late as a whole). A single absent row with newer rows stored is never `due` or `stale`: it is `not_yet_expected` while `T + expected_after_ms > as_of_ms`, then `missing` (or `no_longer_recoverable` after `H`).
+- A slot before the newest row and within `expected_after_ms` of `as_of_ms` is `not_yet_expected`, not `missing`: with `c > 1` rows reach the database in groups, so an older absent slot may still arrive with the symbol's next request.
+
+### 6.5.4 Response `200`
+
+```json
+{
+  "venue": "binance-usdm",
+  "symbol": "BTC/USDT:USDT",
+  "period": "5m",
+  "time_semantics": "period_end",
+  "start": 1792672500000,
+  "end": 1792674600000,
+  "as_of_ms": 1792674530000,
+  "rule": {
+    "cadence": 1,
+    "expected_after_ms": 500000,
+    "lag_threshold_ms": 60000,
+    "retrieval_horizon_ms": 2505600000
+  },
+  "series": {
+    "oldest_time_ms": 1792643700000,
+    "newest_time_ms": 1792673400000
+  },
+  "rows": [
+    { "time_ms": 1792672500000, "open_interest": "95677.779", "open_interest_value": "7446123150.675", "conflicted": false },
+    { "time_ms": 1792672800000, "open_interest": "95690.12", "open_interest_value": "7447031002.4", "conflicted": true },
+    { "time_ms": 1792673400000, "open_interest": "95702.5", "open_interest_value": "7447990111.25", "conflicted": false }
+  ],
+  "next": null,
+  "coverage": {
+    "span": { "start": 1792672500000, "end": 1792674600000 },
+    "slots": 7,
+    "present_slots": 2,
+    "conflicted_slots": 1,
+    "not_yet_expected_slots": 1,
+    "no_longer_recoverable_slots": 0,
+    "due_slots": 1,
+    "stale_slots": 1,
+    "missing_slots": 1,
+    "gap_free": false
+  }
+}
+```
+
+- The example is **illustrative and computed by hand**: seven slots `1792672500000` to `1792674300000`; rows stored for the 1st, 2nd (conflicted) and 4th slots; the newest stored `time_ms` is the 4th; `as_of_ms` is the 6th slot plus `expected_after_ms` plus 30 000 ms, so the 5th slot is `stale`, the 6th `due` and the 7th `not_yet_expected`; the 3rd slot has no row and lies before the newest, so it is `missing`. The values are not real.
+- `start` and `end` echo the effective window. `as_of_ms` is the server clock read once for this request. `series` is present on every `200`: the `time_ms` of the oldest and newest stored row of the series (a series that exists has at least one row, and rows are never deleted).
+- `rule` is what the states were computed with: `cadence` is `c` of ADR-0003 P-10 (each symbol is asked every `c` periods); `expected_after_ms = c x 300 000 + round_offset_ms`; `lag_threshold_ms` is `rule.lag_threshold_ms` of the configuration file (the value `/v1/coverage` uses, decision OA3); `retrieval_horizon_ms` is `H`, fixed at 29 days in v1.
+- `rows` are ascending, unique by `time_ms`, each with exactly the fields shown; `conflicted` is always present. `next` is always present and defined as in section 3.
+
+### 6.5.5 Errors and order of checks
+
+`400 invalid_parameter`, `404 open_interest_disabled`, `404 unknown_series`, `503 not_ready`, `500 internal_error`. Order: parameters (`400`) -> the configuration has an enabled `[open_interest]` table (`404 open_interest_disabled`, needs no database) -> the host clock (outside the valid range is `500`, as in section 6.1.5) -> the database (`503`) -> the series (`404 unknown_series` with the message "no open interest row of this series has been stored" and `details` `venue`, `symbol`, `period`, when no open interest row of the series has ever been stored: a typo, a symbol not yet collected, and a database where collection has not started look the same). An existing series with nothing in the window is a `200` with an empty `rows` list. A data-quality situation (gaps, conflicts, staleness) is never an error.
+
+### 6.5.6 The `coverage` block
+
+`coverage` speaks for **this page only**: the span `[span.start, span.end)`, where `span.start = start` and `span.end` is `next` when it is not `null`, else `end` (section 5.3). The counts are those of the states of section 6.5.3 at `as_of_ms`; `slots` and the seven `*_slots` (see the example) always satisfy `slots = present + conflicted + not_yet_expected + no_longer_recoverable + due + stale + missing`. `gap_free` is `true` only when every slot of the span is `present` (all other counts are `0`). It is the same condition as `fully_present` of `/v1/coverage` (section 6.1.3); the name `gap_free` is kept because the issue and ADR-0003 P-11 call it that and because this response is page-scoped like section 5.3. Unlike section 5.3 the other counts include the clock-dependent states, but see section 6.5.2: with a defaulted `end` the span never reaches them, and `gap_free` says nothing about the age of the data. Returned rows with `conflicted: true` are exactly the conflicted slots that have a stored row. The response lists no individual gaps; open interest has no separate coverage endpoint in v1.
+
+### 6.5.7 Where `rule` comes from, and what a consumer can rely on
+
+- The API reads the same configuration file as the Collector (section 6.1.5, S20). `cadence` is `open_interest_cadence(S, budget_per_5min)` with `S` the number of symbols of the configured venue and `budget_per_5min` from `[open_interest]`; `expected_after_ms = cadence x 300 000 + round_offset_ms`. The same pure function and the same file give the Collector and the API the same `c` (ADR-0003 P-10, P-15). If the two processes read different files the states shift; compare the `sha256` printed by both at start. A change of the file takes effect after a restart of each process.
+- The Collector judges the retrieval horizon and the expectation against the Binance **server lower bound** (ADR-0001 P-4); the API uses the **host clock**. The edges of `no_longer_recoverable` and `not_yet_expected` can differ from the Collector's by the clock skew between the two.
+- `due`, `stale` and `not_yet_expected` are judgments against the stated `rule` and the server clock, not facts about Binance or the market. Read `as_of_ms` and `rule` with the counts.
+- A row is never fabricated, interpolated or carried forward. The absence of a row is never evidence that open interest was zero or that nothing traded; Binance omits periods without trades (ADR-0003 E-1).
+- With `c > 1` (more symbols than the budget allows asking every period) a row can legitimately reach the database up to `c x 5 min + round_offset_ms` after its period end; this is the reason for `expected_after_ms`, and the latency is not guaranteed (ADR-0003 P-10).
+- A `conflicted: true` row is **untrusted**: the first stored value may be the wrong one (section 0, point 5). The rejected value is not exposed.
+- `present` means "we stored a value Binance reported for `T`", not "it will never change".
+- `Cache-Control: no-store` applies.
+
+### 6.5.8 The `open_interest` object of `GET /health/ingest`
+
+```json
+"open_interest": {
+  "as_of_ms": 1792677000000,
+  "rule": { "cadence": 1, "expected_after_ms": 500000, "lag_threshold_ms": 60000 },
+  "scope": "stored_series",
+  "status": "degraded",
+  "series_count": 10, "current": 9, "due": 1, "stale": 0, "unjudged_series": 0,
+  "conflicted_series": 1,
+  "behind": [
+    { "venue": "binance-usdm", "symbol": "ETH/USDT:USDT", "period": "5m",
+      "newest_time_ms": 1792676700000, "lag_slots": 1, "state": "due", "configured": true }
+  ],
+  "truncated": false
+}
+```
+
+- **`null`** (the key is present) when the configuration has no enabled `[open_interest]` table. Otherwise an object, judged in the **same read transaction** and at the same `as_of_ms` (repeated inside the object) as the candle fields.
+- **A series** is a `(venue, symbol, period)` with at least one row in `open_interest`; `scope` is always `"stored_series"`, like the candle part: a configured symbol whose first row never arrived is invisible here, and `no_series` does not mean the open interest task is healthy, idle, broken or not started.
+- **A series that cannot be judged** (decision OA9): its `period` is not the configured open interest period, or its newest `time_ms` is not aligned to the period (the Collector cannot write either; a hand-edited row can). It is counted in `series_count` and in `unjudged_series`, in none of `current`, `due`, `stale`, and not listed in `behind`; the answer is never a `500`, so open interest cannot change the candle part of the answer. `series_count = current + due + stale + unjudged_series`.
+- **Per series** (the rule of section 6.2.3 with the open interest expectation): `N` is the newest stored `time_ms`; the newest expected slot is `T_e = floor((as_of_ms - expected_after_ms) / period) x period`. `current` when `N >= T_e`; otherwise `x = N + period + expected_after_ms`, `due` when `as_of_ms <= x + lag_threshold_ms`, `stale` after; `lag_slots = (T_e - N) / period` (>= 1 when not current).
+- **`status`** (closed list), the first that matches: `no_series` when `series_count` is `0`; `degraded` when `conflicted_series > 0` or `unjudged_series > 0`; `behind` when `stale > 0`; `catching_up` when `due > 0`; `current`. `degraded` takes precedence over `behind` and `catching_up` (ADR-0003 P-8): a consumer that needs freshness reads the counts, which are always complete.
+- **`conflicted_series`:** the number of series with at least one `open_interest_conflicts` record whose slot satisfies `as_of_ms - 86 400 000 < time_ms`. A conflict recorded now for an older slot does not count here; it stays visible per slot in `GET /v1/open-interest`. It makes open interest health stricter than candle health on purpose, which does not count conflicts (ADR-0003 O-4).
+- **`behind`:** the non-current series, `stale` before `due`, then `lag_slots` descending, then `(venue, symbol, period)`; at most 50 (the same constant as the candle `behind`); `truncated` is `true` when more exist (the counts are complete). `configured` is whether `(venue, symbol)` is in the configuration file with the configured open interest period. A retired series stays stored, keeps going `stale` and keeps `status` at `behind`.
+- **What it cannot tell.** Only the newest stored row per series is read for freshness: a series with holes behind its newest row is `current` (`GET /v1/open-interest` shows the states). A stopped open interest task (it stops alone on a fatal error, ADR-0003 P-9), a `418`, a `429` pause and a Collector that is down all show as `due`, then `stale`; the endpoint does not know the cause. Candle health and open interest health are independent: a stale open interest never changes a candle field or any HTTP status.
+
 ## 7. Out of scope for v1
 
 Authentication, rate limiting, CORS, write endpoints, streaming, candle revision history, exposing rejected conflict values, a configurable page limit, timeframes other than `5m`, venues other than `binance-usdm`, and any trading functionality.
@@ -527,6 +675,8 @@ Authentication, rate limiting, CORS, write endpoints, streaming, candle revision
 | `/v1/indicators`: per-point values or reasons, segments that never cross a non-present slot, `warmup_slots`, `latest` is the window's last point, float64 values reproducible only for the same build | S18 design (`docs/superpowers/specs/2026-10-28-s18-indicators-design.md`), decisions I1–I6 |
 | S19 indicators: `ema`, `macd`, `atr`, `adx`, `bbands`, the `macd` parameter constraint, high/low inputs, the `2016 + 1500` read bound | S19 design (`docs/superpowers/specs/2026-10-28-s19-indicators-design.md`), decisions J1–J7 |
 | `/v1/instruments`: the configured universe from the versioned file, ordered by triple, `newest_open_time_ms` or `null`, configured instruments only | S20 design (`docs/superpowers/specs/2026-10-28-s20-universe-config-design.md`), decisions U4, U6, INV-066, INV-067 |
+| `/v1/open-interest`: `time_ms` is the period end, seven slot states with the first match winning, `not_yet_expected` after `c x 5 min + round_offset`, `no_longer_recoverable` after 29 days, `due`/`stale` at the newest edge, `conflicted` rows returned with their first stored values | ADR-0003 P-3, P-5, P-7, P-8, P-10, P-11; decisions OA1 to OA11 |
+| `/health/ingest` `open_interest` object: additive, `null` when not enabled, per-series freshness with the open interest expectation, `conflicted_series` makes the status `degraded` | ADR-0003 P-8, P-11, O-4; decisions OA5, OA6 |
 | `/health/ingest` `universe` block and `configured` on `behind` entries; the S17 fields keep their meaning; the two equalities | S20 design, decisions U5, U6, INV-066, INV-067 |
 
 ## 9. Decisions (answered by the user on 2026-10-23: all as recommended)
@@ -612,3 +762,19 @@ S20 decisions (PROPOSED, awaiting the user's approval at HARD STOP 1; design `do
 | U7 | Which values does version 1 accept? | Exactly one venue, `binance-usdm`, and `timeframes == ["5m"]`; anything else is refused at start as not supported yet (S22), so the file shape does not change when a venue is added. | Accept any venue or timeframe now: untested combinations. |
 
 The file format, the audit of the runtime settings (design 5.7: which values are in the file and which stay in code) and the removal of the switches (`--symbol`, `--limit`, `--publication-delay-ms`, `--max-concurrency`, `--min-request-interval-ms`, `--backfill-days`, `--no-backfill`, `--db` for the Collector; `--publication-delay-ms`, `--lag-threshold-ms`, `--host`, `--port`, `--db` for the API; `fetch-once` keeps its switches) are operational, and are part of the same approval so that nothing is decided twice.
+
+OI-5 decisions (APPROVED by the user on 2026-11-03, all as proposed; section 6.5):
+
+| # | Question | Proposal | Alternative that is not proposed, and its cost |
+|---|---|---|---|
+| OA1 | What does `GET /v1/open-interest` answer when the configuration has no enabled `[open_interest]` table? | `404` with the new closed-list code `open_interest_disabled`, checked after the parameters and before the database. The API cannot judge slots without `cadence` and `round_offset_ms`, so it refuses instead of guessing. | Serve stored rows with a guessed rule: could label slots `stale` that the Collector never intended to collect. The plain `not_found`: indistinguishable from an older API build that lacks the endpoint. **Cost of the proposal:** with `enabled = false` (for example, pausing collection) the already stored history is unreadable through this endpoint and health shows `null`, although the rows are in the database; the candle endpoints are unaffected. |
+| OA2 | Which key selects rows, and what do `start`/`end` mean? | The slot is `time_ms`, the period **end**; `start <= time_ms < end`, aligned to 5 minutes, window and paging as for candles (10 000 slots, `limit` 1000, `next`). The candle for open time `O` joins at `time_ms = O + 5m`; the contract says so in three places. | Select by the period start `time_ms - 5m`: matches candle windows, but invents a second timestamp that disagrees with the stored column and with Binance's field (ADR-0003 P-3). |
+| OA3 | Which lag threshold splits `due` from `stale` for open interest? | The existing `rule.lag_threshold_ms` of the file (60 000 by default), echoed in `rule`. No new configuration key. With a large universe (`c > 1`) it is the operator's job to set it above the spread of a round, as for candles. | A new key `open_interest.lag_threshold_ms`: more precise, but changes the approved `[open_interest]` table (ADR-0003 P-13, every key required) and needs its own approval. |
+| OA4 | What is in `rule`, and is the 29-day horizon exposed? | `cadence`, `expected_after_ms`, `lag_threshold_ms`, `retrieval_horizon_ms`: everything the states were computed with, so a consumer can recompute them. | Only `expected_after_ms`: shorter, but `no_longer_recoverable` would depend on a constant the response does not state. |
+| OA5 | `/health/ingest` when open interest is not enabled | `"open_interest": null`, key always present. | Omit the key: the shape depends on configuration. An object with `status: "disabled"` and zero counts: zeros would read as "nothing is behind". |
+| OA6 | Status precedence and scope in `/health/ingest` | `no_series`, `degraded` (any `conflicted_series`), `behind`, `catching_up`, `current`, following ADR-0003 P-8 literally (O-4 was approved as proposed); stored series only, retired ones flagged `configured: false`, as for candles. | `behind` before `degraded`: freshness would never be hidden by an old conflict, but it departs from the approved ADR wording. Judging configured series only: hides a retired series, which S20 (U6) deliberately did not do. |
+| OA7 | Does the response list individual gaps or expose `ingested_at_ms` or units? | No: counts only (as in the candle response), no `ingested_at_ms` (Q5), units documented as inferred, not a field. A per-run gap listing for open interest is a later, separate section if wanted. | A runs list or an `/v1/open-interest/coverage` endpoint: useful, but the issue scope is one endpoint plus the health object, and it would double the contract surface. |
+| OA8 | Is the health `conflicted_series` window about the slot or about when the conflict was recorded? | The slot (`as_of_ms - 24 h < time_ms`), as ADR-0003 P-8 words it. | `first_seen_at_ms`: also catches a late conflict in an old slot, but the ADR says slot and the index serves `time_ms`. |
+| OA9 | What does `/health/ingest` do with an open interest series it cannot judge (a `period` other than the configured one, an unaligned newest `time_ms`)? | It is counted in `series_count` and in a new field `unjudged_series`, judged as neither current, due nor stale, and makes the status `degraded`; the answer stays `200`. Open interest must not change the candle part (ADR-0003 P-8). | A `500` for the whole answer, as for an unjudgeable candle series (section 6.2.3): consistent with that rule, but a hand-edited open interest row would then take down the candle health too. |
+| OA10 | What is the defaulted `end` of `GET /v1/open-interest`? | As for candles (section 5.1): `newest + period`, so a defaulted window never shows `due`, `stale` or `not_yet_expected` at the newest edge; the contract says so (6.5.2) and sends the consumer to `/health/ingest` or to an explicit `end`. | As `/v1/indicators` (section 6.3.5): the end of the newest *expected* slot, so a stopped series answers `stale` by default; it is the better default for freshness, but it differs from the endpoint this one mirrors and from the issue text ("mirror `GET /v1/candles`"). |
+| OA11 | Is the `unknown_series` body of this endpoint different from the candle one? | Yes: message "no open interest row of this series has been stored", `details` `venue`, `symbol`, `period` (no `timeframe`), as section 2 now states. | Reuse the candle message and `timeframe`: wrong text and a field the request never had. |

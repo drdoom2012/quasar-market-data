@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (approved by the user on 2026-11-02: revision 4 as written, including the proposals for the
   open decisions O-1 to O-5). Revisions 2 to 4 answer the user's reviews (listed at the end). The API response
-  schema (P-11) still needs its own contract section approval before OI-5. Amendment A-1 (2026-11-02, approved by
+  schema (P-11) is contract section 6.5 of `docs/contracts/api-v1.md`, approved by the user on 2026-11-03. Amendment A-1 (2026-11-02, approved by
   the user): the 100-row transaction criterion of P-9 is checked from production measurements after OI-4, not by
   a benchmark in OI-2 (see the revision history).
 - **Date:** 2026-11-02
