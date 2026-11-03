@@ -345,3 +345,68 @@ def test_candles_and_open_interest_share_a_database_without_interfering(tmp_path
 
     assert client_for(path).get(f"/v1/open-interest?{Q}").status_code == 200
     assert client_for(path).get(f"/v1/candles?{cq}").status_code == 200
+
+
+def test_a_defaulted_start_after_the_newest_row_is_one_slot_judged_by_the_clock(tmp_path: Path) -> None:
+    """With ``start > newest`` the single defaulted slot IS after the newest row: it takes every clock state."""
+    path = make_database(tmp_path / "m.db", open_interest=[slot(0), slot(2)])
+    query = f"/v1/open-interest?venue=binance-usdm&symbol=BTC/USDT:USDT&period=5m&start={slot(5)}"
+
+    def states(now: int) -> dict[str, int]:
+        coverage = client_for(path, now).get(query).json()["coverage"]
+        assert coverage["slots"] == 1 and coverage["gap_free"] is False
+        return {
+            name: value for name, value in coverage.items() if name.endswith("_slots") and value and name != "slots"
+        }
+
+    assert states(slot(5) + E - 1) == {"not_yet_expected_slots": 1}
+    assert states(slot(5) + E) == {"due_slots": 1}
+    assert states(slot(5) + E + L + 1) == {"stale_slots": 1}
+    assert states(slot(5) + 30 * 86_400_000) == {"no_longer_recoverable_slots": 1}
+
+
+def test_a_defaulted_window_can_hold_a_not_yet_expected_slot_before_the_newest_row(tmp_path: Path) -> None:
+    """An absent slot before the newest row and within ``expected_after_ms`` of ``as_of`` is ``not_yet_expected``."""
+    path = make_database(tmp_path / "m.db", open_interest=[slot(0), slot(2)])
+
+    early = client_for(path, slot(1) + E - 1).get(f"/v1/open-interest?{Q}").json()["coverage"]
+    late = client_for(path, slot(1) + E).get(f"/v1/open-interest?{Q}").json()["coverage"]
+
+    assert (early["not_yet_expected_slots"], early["missing_slots"], early["gap_free"]) == (1, 0, False)
+    assert (late["not_yet_expected_slots"], late["missing_slots"], late["gap_free"]) == (0, 1, False)
+
+
+def test_a_cadence_of_five_moves_the_boundaries_of_a_stopped_series(tmp_path: Path) -> None:
+    rule = OpenInterestRule(5, 1_700_000, L, P5)
+    path = make_database(tmp_path / "m.db", open_interest=[slot(0)])
+    window = f"/v1/open-interest?{Q}&end={slot(2)}"
+    t = slot(1)
+
+    def counts(now: int) -> dict[str, int]:
+        coverage = client_for(path, now, open_interest=rule).get(window).json()["coverage"]
+        return {k: v for k, v in coverage.items() if k.endswith("_slots") and v and k not in ("slots", "present_slots")}
+
+    assert counts(t + 1_700_000 - 1) == {"not_yet_expected_slots": 1}
+    assert counts(t + 1_700_000) == {"due_slots": 1}
+    assert counts(t + 1_700_000 + L + 1) == {"stale_slots": 1}
+
+
+@pytest.mark.parametrize("explicit_end", [False, True])
+def test_an_unaligned_stored_time_is_a_500_never_a_wrong_count(tmp_path: Path, explicit_end: bool) -> None:
+    """Contract 6.5.5: a row this software cannot judge fails closed (the Collector cannot write one)."""
+    path = make_database(tmp_path / "m.db", open_interest=[slot(0), slot(1) + 7])
+    suffix = f"&end={slot(3)}" if explicit_end else ""
+
+    response = client_for(path).get(f"/v1/open-interest?{Q}{suffix}")
+
+    error = assert_error(response, 500, "internal_error")
+    assert error["details"] == {} and "7" not in error["message"]
+
+
+def test_an_unaligned_conflict_inside_the_span_is_a_500(tmp_path: Path) -> None:
+    path = make_database(tmp_path / "m.db", open_interest=[slot(0), slot(1)])
+    conn = open_writer(path)
+    insert_open_interest_conflict(conn, slot(1) + 7, 1)
+    conn.close()
+
+    assert_error(client_for(path).get(f"/v1/open-interest?{Q}&end={slot(3)}"), 500, "internal_error")

@@ -97,7 +97,6 @@ def main() -> int:
                 db, rule=SAMPLE_RULE, universe=(), open_interest=RULE, now_ms=lambda: BASE_MS + (ROWS + 2) * TF_MS
             )
         ).get("/health/ingest")
-        statements = sqlite3.sqlite_version
         result = {
             "candle_series": SERIES,
             "open_interest_series": SERIES,
@@ -108,7 +107,7 @@ def main() -> int:
             "open_interest_status": body.json()["open_interest"]["status"],
             "conflicted_series": body.json()["open_interest"]["conflicted_series"],
             "python": platform.python_version(),
-            "sqlite": statements,
+            "sqlite": sqlite3.sqlite_version,
             "note": f"Page cache not dropped; {ROWS} rows per series, not the 60-million-row candle target database.",
         }
         print(json.dumps(result, indent=2))

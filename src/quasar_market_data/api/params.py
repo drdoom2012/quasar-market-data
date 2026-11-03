@@ -87,7 +87,7 @@ def parse_candles_request(raw_query: bytes) -> CandlesRequest:
 def parse_open_interest_request(raw_query: bytes) -> OpenInterestRequest:
     values = _parse(raw_query, _OPEN_INTEREST_NAMES, _OPEN_INTEREST_REQUIRED)
     venue, symbol, start = _series_and_start(values, "period")
-    end = _end(values)
+    end = _end(values, "period")
     limit = _limit(values["limit"]) if "limit" in values else DEFAULT_LIMIT
     if end is not None:
         _check_window(start, end)
@@ -190,11 +190,11 @@ def _series_and_start(values: dict[str, str], label_name: str = "timeframe") -> 
             f"{label_name} must be {SERVED_TIMEFRAME.label}", parameter=label_name, received=values[label_name]
         )
 
-    return venue, symbol, _timestamp("start", values["start"])
+    return venue, symbol, _timestamp("start", values["start"], unit=label_name)
 
 
-def _end(values: dict[str, str]) -> int | None:
-    return _end_timestamp(values["end"]) if "end" in values else None
+def _end(values: dict[str, str], unit: str = "timeframe") -> int | None:
+    return _end_timestamp(values["end"], unit) if "end" in values else None
 
 
 def _check_window(start: int, end: int, maximum: int = MAX_WINDOW_SLOTS) -> None:
@@ -253,17 +253,17 @@ def _integer(name: str, text: str) -> int:
     return int(text)
 
 
-def _end_timestamp(text: str) -> int:
+def _end_timestamp(text: str, unit: str = "timeframe") -> int:
     """``end`` is exclusive, so it may be one timeframe past the last valid open time (the slot at the maximum)."""
-    return _timestamp("end", text, maximum=MAX_TIMESTAMP_MS + SERVED_TIMEFRAME.milliseconds)
+    return _timestamp("end", text, maximum=MAX_TIMESTAMP_MS + SERVED_TIMEFRAME.milliseconds, unit=unit)
 
 
-def _timestamp(name: str, text: str, *, maximum: int = MAX_TIMESTAMP_MS) -> int:
+def _timestamp(name: str, text: str, *, maximum: int = MAX_TIMESTAMP_MS, unit: str = "timeframe") -> int:
     value = _integer(name, text)
     if not MIN_TIMESTAMP_MS <= value <= maximum:
         raise invalid_parameter(f"{name} must be within [{MIN_TIMESTAMP_MS}, {maximum}]", parameter=name, received=text)
     if value % SERVED_TIMEFRAME.milliseconds != 0:
-        raise invalid_parameter(f"{name} must be aligned to the timeframe", parameter=name, received=text)
+        raise invalid_parameter(f"{name} must be aligned to the {unit}", parameter=name, received=text)
     return value
 
 

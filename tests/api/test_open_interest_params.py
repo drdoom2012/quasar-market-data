@@ -89,8 +89,10 @@ def test_invalid_requests_are_400_with_details(
     assert ("received" in error.details) == (received is not None)
 
 
-def test_the_message_for_a_wrong_period_names_the_period() -> None:
+def test_the_messages_name_the_period_and_not_the_timeframe() -> None:
     assert error_of(replace(period="1h")).message == "period must be 5m"
+    assert error_of(replace(start=str(START + 1))).message == "start must be aligned to the period"
+    assert error_of(f"{BASE}&end={START + TF + 1}").message == "end must be aligned to the period"
 
 
 def test_an_undecodable_query_is_400_without_parameter() -> None:

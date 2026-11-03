@@ -3,12 +3,11 @@
 import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from starlette.testclient import TestClient
 
-from quasar_market_data.api import database
 from quasar_market_data.api.app import HEALTH_BEHIND_MAX, create_app
 from quasar_market_data.api.health_reader import (
     _CONFLICT_PROBE,
@@ -23,6 +22,7 @@ from quasar_market_data.domain.open_interest_coverage import OpenInterestRule
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
+from tests.api.probe import InterleavingConnection
 from tests.api.seed import (
     SAMPLE_RULE,
     VENUE,
@@ -415,29 +415,71 @@ def test_statement_plans_search_by_index_and_never_scan(tmp_path: Path) -> None:
         assert "SCAN" not in plan, plan
 
 
-def test_a_commit_after_the_read_finished_is_not_in_the_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_commits_between_the_statements_of_the_answer_are_not_in_it(tmp_path: Path) -> None:
+    """One snapshot for the candle walk, the open interest walk and the conflict probes (contract 6.5.8)."""
     path = seed(tmp_path / "m.db", {(sym(0), "5m"): AS_OF})
-    reference = ingest(path, (inst(sym(0)),))
-    real = read_ingest_snapshot
-    committed: list[bool] = []
+    conn = open_writer(path)
+    insert_candle(conn, slot(1), symbol=sym(0))
+    conn.close()
+    cutoff = AS_OF - DAY
+    reference_conn = open_reader(path)
+    try:
+        reference = read_ingest_snapshot(reference_conn, cutoff)
+    finally:
+        reference_conn.close()
+    writer = open_writer(path, busy_timeout_ms=1000)
+    injected: list[str] = []
 
-    def read_then_commit(conn: sqlite3.Connection, conflicts_after_ms: int) -> Any:
-        result = real(conn, conflicts_after_ms)
-        writer = open_writer(path, busy_timeout_ms=1000)
-        insert_open_interest(writer, AS_OF, symbol=sym(1))
-        insert_open_interest_conflict(writer, AS_OF - TF, 1, symbol=sym(0))
+    def hook(n: int, sql: str) -> None:
+        if n < 2:
+            return
+        insert_open_interest(writer, AS_OF, symbol=sym(10 + n))  # a new series sorting after the cursor
+        insert_open_interest_conflict(
+            writer, AS_OF - TF, n, symbol=sym(0)
+        )  # a recent conflict in a series already read
+        injected.append(sql)
+
+    reader = open_reader(path)
+    probe = InterleavingConnection(reader, hook)
+    try:
+        found = read_ingest_snapshot(cast(sqlite3.Connection, probe), cutoff)
+
+        assert found == reference
+        assert len(injected) >= 5
+        assert any("FROM candles" in sql for sql in injected) and any(
+            "FROM open_interest_conflicts" in sql for sql in injected
+        )
+        assert reader.in_transaction is False
+        later = read_ingest_snapshot(reader, cutoff)
+        assert later != reference  # the commits happened and a new snapshot sees them
+        assert len(later[1].series) > len(reference[1].series) and later[1].conflicted == {(VENUE, sym(0), "5m")}
+    finally:
+        reader.close()
         writer.close()
-        committed.append(True)
-        return result
 
-    monkeypatch.setattr(database, "read_ingest_snapshot", read_then_commit)
 
-    body = ingest(path, (inst(sym(0)),))
+def test_behind_orders_stale_before_due_then_lag_then_venue_symbol(tmp_path: Path) -> None:
+    """With a threshold of two periods a series is ``due`` up to lag 2 and ``stale`` from lag 3 (stale lag >= due lag)."""
+    rule = OpenInterestRule(1, E, 2 * TF + 10_000, P5)
+    t_e = (AS_OF - E) // TF * TF
+    path = make_database(tmp_path / "m.db")
+    conn = open_writer(path)
+    for k, symbol in ((1, "A-due1"), (2, "B-due2"), (3, "C-stale3"), (4, "D-stale4"), (4, "A-stale4")):
+        insert_open_interest(conn, t_e - k * TF, symbol=symbol)
+    # same lag, a venue that sorts first but a symbol that sorts last: the venue decides
+    insert_open_interest(conn, t_e - 4 * TF, symbol="Z-stale4", venue="a-venue")
+    conn.close()
 
-    assert committed == [True]  # the commit really happened between the read and the answer
-    assert body == reference
-    monkeypatch.undo()
-    assert ingest(path, (inst(sym(0)),))["open_interest"]["series_count"] == 2
+    found = oi_object(path, (), open_interest=rule)
+
+    assert [(e["venue"], e["symbol"], e["state"], e["lag_slots"]) for e in found["behind"]] == [
+        ("a-venue", "Z-stale4", "stale", 4),
+        (VENUE, "A-stale4", "stale", 4),
+        (VENUE, "D-stale4", "stale", 4),
+        (VENUE, "C-stale3", "stale", 3),
+        (VENUE, "B-due2", "due", 2),
+        (VENUE, "A-due1", "due", 1),
+    ]
 
 
 # --- unreadable databases ------------------------------------------------------------------------------------

@@ -363,3 +363,62 @@ def test_freshness_refuses_an_unaligned_or_mistyped_input() -> None:
         fresh(float(T0), AS_OF)  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         fresh(T0, 0)
+
+
+def naive_state(
+    t: int, stored: set[int], conflicts: set[int], newest: int, as_of: int, rule: OpenInterestRule
+) -> OpenInterestSlotState:
+    """A literal transcription of the seven-row table of contract 6.5.3, independent of the implementation's shape."""
+    if t in conflicts:
+        return S.CONFLICTED
+    if t in stored:
+        return S.PRESENT
+    if t + rule.expected_after_ms > as_of:
+        return S.NOT_YET_EXPECTED
+    if t < as_of - rule.retrieval_horizon_ms:
+        return S.NO_LONGER_RECOVERABLE
+    if t > newest:
+        return S.DUE if as_of <= t + rule.expected_after_ms + rule.lag_threshold_ms else S.STALE
+    return S.MISSING
+
+
+def test_every_slot_state_equals_the_naive_table_and_only_stored_unconflicted_slots_are_present() -> None:
+    rng = random.Random(1103)
+    for _ in range(300):
+        rule = OpenInterestRule(
+            rng.randrange(1, 13), rng.randrange(0, 4_000_000), rng.randrange(0, 700_000), P5, rng.choice((0, 5 * P, H))
+        )
+        start = T0 + rng.randrange(0, 20) * P
+        slots = rng.randrange(1, 40)
+        grid = [start + k * P for k in range(slots)]
+        stored = {t for t in grid if rng.random() < 0.5}
+        conflicts = {t for t in grid if rng.random() < 0.15}
+        newest = max(stored) if stored else start - P
+        as_of = start + rng.randrange(-5, 3 * slots + 20) * P + rng.choice((0, 1, 59_999, 299_999))
+
+        states = open_interest_slot_states(
+            start=start,
+            end=start + slots * P,
+            stored=stored,
+            conflicts=conflicts,
+            newest_time_ms=newest,
+            as_of_ms=as_of,
+            rule=rule,
+        )
+
+        assert dict(states) == {t: naive_state(t, stored, conflicts, newest, as_of, rule) for t in grid}
+        assert {t for t, state in states if state is S.PRESENT} == stored - conflicts
+
+
+def test_an_end_beyond_the_last_valid_slot_is_refused() -> None:
+    last = 4_102_444_800_000 // P * P
+    with pytest.raises(ValueError, match="end must be at most"):
+        open_interest_slot_states(
+            start=last,
+            end=last + 3 * P,
+            stored=set(),
+            conflicts=set(),
+            newest_time_ms=last - P,
+            as_of_ms=AS_OF,
+            rule=RULE,
+        )
