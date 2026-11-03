@@ -212,8 +212,11 @@ def evaluate(results: Sequence[RefreshResult], *, series: int, l_tunnel_ms: floa
     }
 
 
-def evaluate_sustained(probe_ms: Sequence[float], http_503: int, server_peak_rss_bytes: int) -> dict[str, Any]:
-    """AC4 (the ``/health/ready`` probe during the sustained run) and AC5 (the server's peak resident set)."""
+def evaluate_sustained(
+    probe_ms: Sequence[float], http_503: int, server_peak_rss_bytes: int, problems: int = 0
+) -> dict[str, Any]:
+    """AC4 (the ``/health/ready`` probe during the sustained run), AC5 (the server's peak resident set) and AC2 over
+    the sustained refreshes (``problems``: failed calls plus calls not asked)."""
     p99_ms: float | None = None
     passed: bool | None = False if http_503 else None
     if probe_ms:
@@ -222,6 +225,7 @@ def evaluate_sustained(probe_ms: Sequence[float], http_503: int, server_peak_rss
     return {
         "AC4": {"value": {"p99_ms": p99_ms, "http_503": http_503}, "pass": passed},
         "AC5": {"value": server_peak_rss_bytes, "pass": server_peak_rss_bytes <= AC5_LIMIT_BYTES},
+        "AC2_sustained": {"value": problems, "pass": problems == 0},
     }
 
 
@@ -457,7 +461,10 @@ def environment(series: int) -> dict[str, Any]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.refreshes < 1:
+        parser.error("--refreshes must be at least 1")
     candle_rows = PROFILES[args.profile]
     tmp = Path(tempfile.mkdtemp(prefix="quasar-overview-bench-"))
     try:
@@ -512,7 +519,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if sustained is not None:
             output["sustained"] = {
                 **sustained,
-                **evaluate_sustained(sustained["probe_ms"], sustained["http_503"], peak),
+                **evaluate_sustained(sustained["probe_ms"], sustained["http_503"], peak, sustained["problems"]),
             }
         print(json.dumps(output, ensure_ascii=False))
         return 0

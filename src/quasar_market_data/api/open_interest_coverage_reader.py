@@ -57,6 +57,9 @@ def _read(
     ).fetchone()
     if oldest is None:
         raise UnknownSeries  # a series with only conflict records is unknown (contract 6.6.5)
+    if oldest % request.period.milliseconds:
+        # The domain refuses an unaligned newest; the oldest is echoed in the body, so it is checked here: fail closed.
+        raise ValueError("the oldest stored time of the series is not aligned to the period")
 
     window = (*series, request.start, request.end)
     stored = {

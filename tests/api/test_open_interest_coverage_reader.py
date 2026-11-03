@@ -20,6 +20,7 @@ from quasar_market_data.domain.open_interest_coverage import (
 )
 from quasar_market_data.domain.open_interest_request import RETRIEVAL_HORIZON_MS
 from quasar_market_data.domain.timeframe import Timeframe
+from quasar_market_data.domain.timestamps import MAX_TIMESTAMP_MS
 from quasar_market_data.storage.connection import open_reader, open_writer
 from tests.api.probe import InterleavingConnection
 from tests.api.seed import (
@@ -192,3 +193,35 @@ def test_the_report_carries_the_request_and_the_runs(tmp_path: Path) -> None:
         OpenInterestRun(ST.STALE, slot(4), slot(5)),  # NOW is far past the slot and the lag tolerance
     )
     assert report.runs.coverage.present == 2
+
+
+def test_an_unaligned_series_bound_is_refused_whatever_the_window(tmp_path: Path) -> None:
+    """A hand-edited row that is the series minimum or maximum cannot be judged: fail closed, never echo it."""
+    oldest = make_database(tmp_path / "o.db", open_interest=[slot(0) - 7, slot(2)])
+    newest = make_database(tmp_path / "n.db", open_interest=[slot(0), slot(9) + 7])
+
+    with pytest.raises(ValueError):
+        read(oldest, request(slot(1), slot(4)))  # the minimum lies outside the window
+    with pytest.raises(ValueError):
+        read(newest, request(slot(0), slot(5)))  # the maximum lies outside the window
+
+
+def test_an_unaligned_conflict_inside_the_window_is_refused(tmp_path: Path) -> None:
+    path = make_database(tmp_path / "m.db", open_interest=[slot(0), slot(3)])
+    writer = open_writer(path)
+    insert_open_interest_conflict(writer, slot(1) + 7, 1)
+    writer.close()
+
+    with pytest.raises(ValueError):
+        read(path, request(slot(0), slot(4)))
+
+
+def test_a_window_may_end_one_period_after_the_last_valid_time(tmp_path: Path) -> None:
+    last = MAX_TIMESTAMP_MS  # the last valid time_ms; the exclusive end is one period later
+    path = make_database(tmp_path / "m.db", open_interest=[last])
+
+    report = read(path, request(last - TF, last + TF))
+
+    assert report.runs.coverage.slots == 2 and report.runs.coverage.present == 1
+    assert report.runs.runs == (OpenInterestRun(ST.NOT_YET_EXPECTED, last - TF, last),)
+    assert (report.oldest_time_ms, report.newest_time_ms) == (last, last)

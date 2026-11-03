@@ -193,3 +193,29 @@ def test_a_conflict_record_written_later_shows_in_the_next_request(tmp_path: Pat
 
     assert first["coverage"]["conflicted_slots"] == 0 and first["coverage"]["missing_slots"] == 1
     assert second["coverage"]["conflicted_slots"] == 1 and second["coverage"]["missing_slots"] == 0
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        pytest.param([slot(0) - 7, slot(2)], id="unaligned oldest, outside the window"),
+        pytest.param([slot(0), slot(9) + 7], id="unaligned newest, outside the window"),
+    ],
+)
+def test_an_unaligned_series_bound_is_a_500_for_every_window(tmp_path: Path, rows: list[int]) -> None:
+    path = make_database(tmp_path / "m.db", open_interest=rows)
+
+    error = assert_error(client_for(path).get(f"{PATH}?{BASE}&start={slot(1)}&end={slot(5)}"), 500, "internal_error")
+
+    assert error["details"] == {} and "7" not in error["message"]
+
+
+def test_a_window_ending_one_period_after_the_last_valid_time_is_answered(tmp_path: Path) -> None:
+    last = 4102444800000  # the maximum valid time_ms
+    path = make_database(tmp_path / "m.db", open_interest=[last])
+
+    response = client_for(path).get(f"{PATH}?{BASE}&start={last - TF}&end={last + TF}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["end"] == last + TF and body["coverage"]["slots"] == 2 and body["coverage"]["present_slots"] == 1

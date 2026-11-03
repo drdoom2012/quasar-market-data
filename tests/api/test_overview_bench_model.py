@@ -14,6 +14,7 @@ from tests.api.bench_overview_refresh import (
     RefreshResult,
     evaluate,
     evaluate_sustained,
+    main,
     run_refresh,
     summarize,
     writer_tick,
@@ -277,3 +278,19 @@ def test_evaluate_sustained_thresholds() -> None:
     assert evaluate_sustained([1.0] * 100, 1, 432 * MIB)["AC4"]["pass"] is False
     assert evaluate_sustained([1.0] * 100, 0, 432 * MIB + 1)["AC5"]["pass"] is False
     assert evaluate_sustained([], 0, MIB)["AC4"]["pass"] is None  # nothing was probed: unknown, not passed
+
+
+def test_the_sustained_problems_are_an_ac2_check() -> None:
+    clean = evaluate_sustained([1.0] * 100, 0, MIB, problems=0)
+    broken = evaluate_sustained([1.0] * 100, 0, MIB, problems=3)
+
+    assert clean["AC2_sustained"] == {"value": 0, "pass": True}
+    assert broken["AC2_sustained"] == {"value": 3, "pass": False}
+
+
+def test_a_refresh_count_below_one_is_a_usage_error(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as caught:
+        main(["--refreshes", "0"])
+
+    assert caught.value.code == 2
+    assert "--refreshes" in capsys.readouterr().err
