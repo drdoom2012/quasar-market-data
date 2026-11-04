@@ -329,7 +329,7 @@ The rule comes from the `[rule]` table of the configuration file (`config/quasar
 
 ### 6.2.2 `GET /health/ready` (readiness)
 
-`200 {"status":"ready","schema_version":<schema version of this build>}` (2 since OI-2, ADR-0003 P-6) when the database opens read-only and its schema is the one this API was built for, checked inside one read transaction on every call. Otherwise `503 not_ready` with the reason and headers of section 2 (`database_missing`, `schema_mismatch`, `database_unreadable`). Readiness says nothing about freshness: an idle Collector does not make the API unready.
+`200 {"status":"ready","schema_version":<schema version of this build>}` (3 since FR-2, ADR-0004 P-6) when the database opens read-only and its schema is the one this API was built for, checked inside one read transaction on every call. Otherwise `503 not_ready` with the reason and headers of section 2 (`database_missing`, `schema_mismatch`, `database_unreadable`). Readiness says nothing about freshness: an idle Collector does not make the API unready.
 
 ### 6.2.3 `GET /health/ingest` (ingestion freshness)
 
