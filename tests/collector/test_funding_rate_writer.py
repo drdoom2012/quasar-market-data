@@ -270,6 +270,13 @@ def test_constructor_refuses_v2_database_and_bad_connections(tmp_path: Path) -> 
         FundingRateWriter(implicit)
     implicit.close()
 
+    not_wal = sqlite3.connect(tmp_path / "rollback_journal.db", isolation_level=None)
+    not_wal.execute("PRAGMA recursive_triggers=ON")
+    migrate(not_wal, applied_at_ms=AT)
+    with pytest.raises(FundingRateWriteError, match="WAL"):
+        FundingRateWriter(not_wal)
+    not_wal.close()
+
 
 def test_durations_are_measured(db: Path) -> None:
     conn = open_writer(db)

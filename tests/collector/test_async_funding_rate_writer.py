@@ -262,7 +262,8 @@ def test_cancel_between_transactions(db: Path) -> None:
         writer = await AsyncFundingRateWriter.open(db, activity=activity, connect=factory(made, AfterFirstCommit))
         conn = made[0]
         assert isinstance(conn, GatedConnection)
-        task = asyncio.ensure_future(writer.write(page(300), ingested_at_ms=AT))
+        rows = page(300)
+        task = asyncio.ensure_future(writer.write(rows, ingested_at_ms=AT, merge=merge_for(rows)))
         assert await asyncio.to_thread(conn.reached.wait, 10)
         with activity.writing():
             conn.release.set()
@@ -279,6 +280,7 @@ def test_cancel_between_transactions(db: Path) -> None:
 
     asyncio.run(scenario())
     assert stored_count(db) == 101
+    assert span_rows(db) == []  # the merge belongs to the cancelled final transaction, which never began
 
 
 def test_write_after_cancel_waits_for_the_running_transaction(db: Path) -> None:
@@ -471,7 +473,7 @@ def test_merge_is_in_the_last_transaction_only(db: Path) -> None:
         begins_at = [i for i, sql in enumerate(statements) if sql == BEGIN]
         commits_at = [i for i, sql in enumerate(statements) if sql == "COMMIT"]
         assert len(begins_at) == len(commits_at) == 3
-        assert all(begins_at[2] < i < commits_at[2] for i in span_statements)
+        assert span_statements and all(begins_at[2] < i < commits_at[2] for i in span_statements)
         assert len(report.inserted_keys) == 250
 
     asyncio.run(scenario())
@@ -591,5 +593,57 @@ def test_arguments_are_validated_before_any_transaction(db: Path) -> None:
             await writer.write(page(1), ingested_at_ms=AT, merge=Interval(T, T + 1))  # type: ignore[arg-type]
         assert begins(made[0]) == 0
         await writer.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_stored_value_the_value_object_refuses_fails_the_page_with_its_committed_part(db: Path) -> None:
+    open_faulty_writer(db, AT).close()
+    raw = open_writer(db)
+    row = page(150)[120]
+    raw.execute(
+        "INSERT INTO funding_rates VALUES (?, ?, ?, 'Regular', ?, NULL, ?)",
+        (*SERIES, row.key.funding_time_ms, "1" * 97, AT),  # accepted by the SQL check, refused by canonical_decimal
+    )
+    raw.close()
+
+    async def scenario() -> None:
+        writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity())
+        with pytest.raises(FundingRatePageError) as error:
+            await writer.write(page(150), ingested_at_ms=AT)
+        assert type(error.value.cause) is FundingRateWriteError
+        assert error.value.committed_transactions == 1 and error.value.partial.inserted == 100
+        assert not writer.unusable
+        await writer.close()
+
+    asyncio.run(scenario())
+    assert stored_count(db) == 101 and conflict_count(db) == 0
+
+
+def test_open_cancelled_while_connecting_closes_the_connection(db: Path) -> None:
+    release = threading.Event()
+    made: list[FaultyConnection] = []
+
+    def connect(path: Path, busy_timeout_ms: int) -> sqlite3.Connection:
+        assert release.wait(10)
+        conn = open_faulty_writer(path, AT)
+        made.append(conn)
+        return conn
+
+    async def scenario() -> None:
+        task = asyncio.ensure_future(AsyncFundingRateWriter.open(db, activity=CandleWriteActivity(), connect=connect))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        release.set()
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            if made:
+                try:
+                    made[0].execute("SELECT 1")
+                except sqlite3.ProgrammingError:
+                    return  # closed by the discard callback
+        raise AssertionError("the connection opened for a cancelled open() was never closed")
 
     asyncio.run(scenario())

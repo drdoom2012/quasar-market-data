@@ -116,9 +116,14 @@ class FundingRateBatchReport:
     conflicts: tuple[FundingRateConflict, ...]
     lock_wait_ns: int  # from the start of BEGIN IMMEDIATE until the write lock was held
     duration_ns: int  # from holding the lock until the end of COMMIT: what a candle write can wait for
-    inserted_keys: tuple[FundingRateKey, ...] = ()  # the rows this call inserted (late events, P-8)
-    span_before: Interval | None = None  # the verified span inside the transaction before the merge
-    span_after: Interval | None = None  # and after it; both None without a merge
+    # The rows this call inserted, and the span read inside the transaction around the merge (both spans are None
+    # in a transaction without a merge). A **late event** (P-8) is a new row of a round (recheck) page with
+    # ``span_before.from_ms <= funding_time_ms <= span_before.through_ms``; a row below ``from_ms`` of a history
+    # chunk is not late. Only the transaction that carries the merge knows the span, so after a failed page the
+    # caller classifies ``partial.inserted_keys`` against the span it planned with.
+    inserted_keys: tuple[FundingRateKey, ...] = ()
+    span_before: Interval | None = None
+    span_after: Interval | None = None
 
 
 def _require_writer_connection(conn: sqlite3.Connection) -> None:
@@ -286,10 +291,16 @@ class FundingRateWriter:
         except FundingSpanNotAdjacentError as refused:
             self._roll_back()
             if self._unusable:
-                raise FundingSpanNotAdjacentError(
+                # A different failure from "re-plan": the writer is dead and must be reopened.
+                raise FundingRateWriteError(
                     f"{refused}; the rollback could not be confirmed: the connection was closed and the writer is unusable"
                 ) from refused
             raise
+        except Exception as error:
+            # e.g. a stored value the SQL check accepts but ``FundingRate`` refuses (the 97-digit boundary, INV-103)
+            self._roll_back()
+            suffix = "; the writer is now unusable" if self._unusable else ""
+            raise FundingRateWriteError(f"transaction rolled back; nothing was written: {error!r}{suffix}") from error
         except BaseException:
             self._roll_back()
             raise

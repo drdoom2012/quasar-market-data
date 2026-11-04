@@ -206,9 +206,17 @@ def test_a_refused_merge_whose_rollback_fails_makes_the_writer_unusable(db: Path
     conn, w = faulty(db)
     w.write_transaction([], ingested_at_ms=AT, merge=merge_of(X, X + 10))
     conn.faults.append(Fault("ROLLBACK", sqlite3.OperationalError("rollback failed")))
-    with pytest.raises(FundingSpanNotAdjacentError, match="unusable"):
+    with pytest.raises(FundingRateWriteError, match="unusable") as error:
         w.write_transaction([fr(X + 99)], ingested_at_ms=AT, merge=merge_of(X + 99, X + 100))
+    assert not isinstance(error.value, FundingSpanNotAdjacentError)  # not "re-plan": the writer is dead
+    assert isinstance(error.value.__cause__, FundingSpanNotAdjacentError)
     assert w.unusable
+    other = open_writer(db, busy_timeout_ms=0)
+    try:
+        other.execute("BEGIN IMMEDIATE")  # the write lock was released by closing the connection
+        other.execute("ROLLBACK")
+    finally:
+        other.close()
     with pytest.raises(FundingRateWriteError, match="unusable"):
         w.write_transaction([], ingested_at_ms=AT)
 
@@ -315,14 +323,25 @@ def test_the_span_is_written_by_one_function_only() -> None:
         if isinstance(target, ast.Name)
     }
     assert constants == {"_MERGE_INSERT", "_MERGE_UPDATE"}
-    users = {
-        f"{owner.name}"
-        for owner in ast.walk(tree)
-        if isinstance(owner, ast.FunctionDef)
-        for node in ast.walk(owner)
-        if isinstance(node, ast.Name) and node.id in constants
-    }
-    assert users == {"_merge_span_statements"}
+    functions = [
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda)
+    ]
+    merge_function = next(
+        node for node in functions if isinstance(node, ast.FunctionDef) and node.name == "_merge_span_statements"
+    )
+    in_module = [
+        n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in constants and isinstance(n.ctx, ast.Load)
+    ]
+    in_function = [n for n in ast.walk(merge_function) if isinstance(n, ast.Name) and n.id in constants]
+    assert in_module and len(in_module) == len(in_function), "a span statement is used outside the merge function"
+    aliases = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        and node.value is not None
+        and any(isinstance(n, ast.Name) and n.id in constants for n in ast.walk(node.value))
+    ]
+    assert aliases == [], "an alias of a span statement constant would hide a second writer"
 
 
 # --- crash table (ADR-0004 P-7) -----------------------------------------------------------------------------
@@ -518,3 +537,35 @@ def test_killed_process_inside_the_final_transaction_leaves_neither_rows_nor_spa
     )
     restarted.close()
     assert len(times_of(db)) == 5 and span_of(db) is not None
+
+
+def test_a_non_sqlite_exception_inside_the_transaction_rolls_back_and_releases_the_lock(db: Path) -> None:
+    conn, w = faulty(db)
+    conn.faults.append(Fault("SELECT from_ms", KeyboardInterrupt(), nth=1))
+    with pytest.raises(KeyboardInterrupt):
+        w.write_transaction([fr(X)], ingested_at_ms=AT, merge=merge_of(X, X + 10))
+    assert not conn.in_transaction
+    other = open_writer(db, busy_timeout_ms=0)
+    try:
+        other.execute("BEGIN IMMEDIATE")  # the write lock is free
+        other.execute("ROLLBACK")
+    finally:
+        other.close()
+    assert times_of(db) == [] and span_of(db) is None
+    assert w.write_transaction([fr(X)], ingested_at_ms=AT, merge=merge_of(X, X + 10)).inserted == 1
+
+
+def test_a_stored_value_the_value_object_refuses_is_a_write_error_not_a_bare_value_error(db: Path) -> None:
+    # The SQL check accepts a 97-digit integer that canonical_decimal refuses (INV-103); a differing re-delivery of
+    # such a row cannot rebuild the stored FundingRate. The caller must still get a FundingRateWriteError.
+    w = FundingRateWriter(open_writer(db))
+    long_rate = "1" * 97
+    raw = open_writer(db)
+    raw.execute("INSERT INTO funding_rates VALUES (?, ?, ?, 'Regular', ?, NULL, ?)", (VENUE, SYMBOL, X, long_rate, AT))
+    raw.close()
+    with pytest.raises(FundingRateWriteError, match="nothing was written"):
+        w.write_transaction([fr(X)], ingested_at_ms=AT)
+    assert dump(db)["conflicts"] == []
+    assert not w.unusable
+    assert w.write_transaction([fr(X + 1)], ingested_at_ms=AT).inserted == 1
+    w.close()

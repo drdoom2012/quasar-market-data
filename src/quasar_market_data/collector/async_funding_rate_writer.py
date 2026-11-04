@@ -2,7 +2,7 @@
 
 Resource isolation: one single-thread executor and one writer connection of its own, separate from
 ``AsyncCandleWriter``; ``busy_timeout`` is 1 000 ms (the candle connection keeps 5 000 ms), so a locked database
-fails an funding rate transaction quickly instead of holding it.
+fails a funding rate transaction quickly instead of holding it.
 
 Contention rules (P-9): ``write`` splits a page into transactions of at most
 ``MAX_ROWS_PER_TRANSACTION`` rows, in input order. A ``SpanMerge`` is attached to the **last** transaction of the
@@ -20,7 +20,7 @@ carries their count and report, and re-sending the page is idempotent. A ``merge
 the last transaction (``cause`` is ``FundingSpanNotAdjacentError``; nothing of that transaction is kept). Cancellation
 between transactions starts no further one. Cancelling a ``write`` whose final transaction already runs on the worker
 thread does not stop it: rows and span may still commit, and the caller (FR-4) must treat that page as outcome
-unknown, as it does for an ``COMMIT`` error (P-7).
+unknown, as it does for a ``COMMIT`` error (P-7).
 
 Lifecycle (``OPEN -> CLOSING -> CLOSED``), cancellation of ``open`` and ``close`` are copied from
 ``collector/async_open_interest_writer.py`` (keep the two in step).
@@ -189,6 +189,11 @@ class AsyncFundingRateWriter:
     @property
     def state(self) -> WriterState:
         return self._state
+
+    @property
+    def unusable(self) -> bool:
+        """``True`` after a rollback that could not be confirmed closed the connection: reopen the writer."""
+        return self._writer.unusable
 
     async def _wait_for_previous(self) -> None:
         job = self._last_job
