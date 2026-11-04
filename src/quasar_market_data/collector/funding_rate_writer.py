@@ -25,6 +25,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Final
 
+from quasar_market_data.domain.candle import ensure_symbol, ensure_venue
 from quasar_market_data.domain.funding_rate import FundingRate, FundingRateKey
 from quasar_market_data.domain.funding_rate_span import Interval
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
@@ -47,6 +48,20 @@ _SELECT_STORED: Final = (
 )
 
 
+# The only statements that write the verified span (ADR-0004 P-7 ``merge``). ``test_the_span_is_written_by_one_function_only``
+# pins that nothing else in ``src`` does, and ``_merge_span_statements`` is their only user.
+_MERGE_INSERT: Final = (
+    "INSERT INTO funding_rate_verified (venue, symbol, from_ms, through_ms, verified_at_ms)"
+    " VALUES (?, ?, ?, ?, ?) ON CONFLICT (venue, symbol) DO NOTHING"
+)
+_MERGE_UPDATE: Final = (
+    "UPDATE funding_rate_verified"
+    " SET from_ms = min(from_ms, ?), through_ms = max(through_ms, ?), verified_at_ms = max(verified_at_ms, ?)"
+    " WHERE venue = ? AND symbol = ? AND ? <= through_ms + 1 AND ? >= from_ms - 1"
+)
+_SELECT_SPAN: Final = "SELECT from_ms, through_ms FROM funding_rate_verified WHERE venue = ? AND symbol = ?"
+
+
 class FundingRateWriteError(StorageError):
     """A transaction could not be written, or the writer cannot be used."""
 
@@ -64,6 +79,27 @@ class FundingRateWriteBusy(FundingRateWriteError):
 
 class FundingSpanNotAdjacentError(FundingRateWriteError):
     """The ``merge`` interval does not touch the verified span; the transaction was rolled back."""
+
+
+@dataclass(frozen=True)
+class SpanMerge:
+    """Claim the closed interval ``interval`` of ``(venue, symbol)`` as verified, as of ``verified_at_ms``.
+
+    It is applied in the same transaction as the page's last chunk of rows (P-7). The rows of that chunk are not
+    required to lie inside ``interval``: a full page covers ``[a, last - 1]`` and its last row is at ``last``.
+    """
+
+    venue: str
+    symbol: str
+    interval: Interval
+    verified_at_ms: int
+
+    def __post_init__(self) -> None:
+        ensure_venue(self.venue)
+        ensure_symbol(self.symbol)
+        if type(self.interval) is not Interval:
+            raise TypeError(f"interval must be an Interval, got {type(self.interval).__name__}")
+        ensure_timestamp_ms(self.verified_at_ms, "verified_at_ms")
 
 
 @dataclass(frozen=True)
@@ -166,7 +202,30 @@ class FundingRateWriter:
             f"re-sending the same rows is safe{suffix}"
         )
 
-    def write_transaction(self, rows: Sequence[FundingRate], *, ingested_at_ms: int) -> FundingRateBatchReport:
+    def _merge_span_statements(self, merge: SpanMerge) -> tuple[Interval | None, Interval]:
+        """P-7 ``merge`` inside the open transaction: returns the span before and after.
+
+        Raises ``FundingSpanNotAdjacentError`` (the caller rolls the whole transaction back) when the interval
+        does not touch the span: the guarded ``UPDATE`` then changes nothing and the span does not contain it.
+        """
+        series = (merge.venue, merge.symbol)
+        before_row = self._conn.execute(_SELECT_SPAN, series).fetchone()
+        before = None if before_row is None else Interval(before_row[0], before_row[1])
+        a, e = merge.interval.from_ms, merge.interval.through_ms
+        self._conn.execute(_MERGE_INSERT, (*series, a, e, merge.verified_at_ms))
+        self._conn.execute(_MERGE_UPDATE, (a, e, merge.verified_at_ms, *series, a, e))
+        after_row = self._conn.execute(_SELECT_SPAN, series).fetchone()
+        if after_row is None or after_row[0] > a or after_row[1] < e:
+            raise FundingSpanNotAdjacentError(
+                f"interval [{a}, {e}] does not touch the verified span of {merge.venue} {merge.symbol}"
+                f" ({'none' if before is None else f'[{before.from_ms}, {before.through_ms}]'}); the transaction was"
+                " rolled back and nothing of it was kept"
+            )
+        return before, Interval(after_row[0], after_row[1])
+
+    def write_transaction(
+        self, rows: Sequence[FundingRate], *, ingested_at_ms: int, merge: SpanMerge | None = None
+    ) -> FundingRateBatchReport:
         if self._closed:
             raise FundingRateWriteError("writer is closed")
         if self._unusable:
@@ -177,12 +236,20 @@ class FundingRateWriter:
                 raise TypeError(f"rows[{index}] must be a FundingRate, got {type(row).__name__}")
         if len(rows) > MAX_ROWS_PER_TRANSACTION:
             raise ValueError(f"at most {MAX_ROWS_PER_TRANSACTION} rows per transaction, got {len(rows)}")
-        if not rows:
+        if merge is not None:
+            if type(merge) is not SpanMerge:
+                raise TypeError(f"merge must be a SpanMerge, got {type(merge).__name__}")
+            for index, row in enumerate(rows):
+                if (row.key.venue, row.key.symbol) != (merge.venue, merge.symbol):
+                    raise ValueError(f"rows[{index}] is not of the merge series {merge.venue} {merge.symbol}")
+        if not rows and merge is None:
             return FundingRateBatchReport(0, 0, (), 0, 0)
 
         inserted = duplicates = 0
         inserted_keys: list[FundingRateKey] = []
         conflicts: list[FundingRateConflict] = []
+        span_before: Interval | None = None
+        span_after: Interval | None = None
         commit_issued = False
         started = self._monotonic_ns()
         try:
@@ -209,14 +276,30 @@ class FundingRateWriter:
                         newly_recorded=recorded,
                     )
                 )
+            if merge is not None:
+                span_before, span_after = self._merge_span_statements(merge)
             commit_issued = True
             self._conn.execute("COMMIT")
             finished = self._monotonic_ns()
         except sqlite3.Error as error:
             raise self._failure(error, commit_issued) from error
+        except FundingSpanNotAdjacentError as refused:
+            self._roll_back()
+            if self._unusable:
+                raise FundingSpanNotAdjacentError(
+                    f"{refused}; the rollback could not be confirmed: the connection was closed and the writer is unusable"
+                ) from refused
+            raise
         except BaseException:
             self._roll_back()
             raise
         return FundingRateBatchReport(
-            inserted, duplicates, tuple(conflicts), locked - started, finished - locked, tuple(inserted_keys)
+            inserted,
+            duplicates,
+            tuple(conflicts),
+            locked - started,
+            finished - locked,
+            tuple(inserted_keys),
+            span_before,
+            span_after,
         )
