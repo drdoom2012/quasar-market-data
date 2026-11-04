@@ -176,7 +176,7 @@ def insert_funding_conflict(
     conn.execute(
         "INSERT INTO funding_rate_conflicts (venue, symbol, funding_time_ms, rate_type, funding_rate, mark_price,"
         " first_seen_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (venue, symbol, funding_time_ms, rate_type, f"0.00{variant + 1}", f"81000.{variant + 1}", AT),
+        (venue, symbol, funding_time_ms, rate_type, f"0.{variant + 1:03d}1", f"81000.{variant + 1}1", AT),
     )
 
 

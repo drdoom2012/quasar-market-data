@@ -24,9 +24,11 @@ from quasar_market_data.api.errors import (
 )
 from quasar_market_data.api.funding_rate_page import FundingRatePage, read_funding_rate_page
 from quasar_market_data.api.health_reader import (
+    IngestSnapshot,
     OpenInterestFacts,
     StoredSeries,
     check_ready,
+    read_ingest_extensions,
     read_ingest_snapshot,
     read_stored_series,
 )
@@ -164,6 +166,22 @@ def read_ingest_open_interest(
 ) -> tuple[tuple[StoredSeries, ...], OpenInterestFacts]:
     """The candle series and the open interest facts of ``/health/ingest`` in one read transaction."""
     return _with_reader(db_path, open_connection, lambda conn: read_ingest_snapshot(conn, conflicts_after_ms), None)
+
+
+def read_ingest_with_funding(
+    db_path: Path,
+    *,
+    oi_conflicts_after_ms: int | None,
+    funding_conflicts_after_ms: int,
+    open_connection: ConnectionFactory = open_reader,
+) -> IngestSnapshot:
+    """Candle, open interest (when asked) and funding facts of ``/health/ingest`` in one read transaction."""
+    return _with_reader(
+        db_path,
+        open_connection,
+        lambda conn: read_ingest_extensions(conn, oi_conflicts_after_ms, funding_conflicts_after_ms),
+        None,
+    )
 
 
 def read_instruments(
