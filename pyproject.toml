@@ -119,6 +119,7 @@ forbidden_modules = ["ccxt"]
 ignore_imports = [
     "quasar_market_data.collector.binance_usdm -> ccxt",
     "quasar_market_data.collector.binance_usdm_open_interest -> ccxt",
+    "quasar_market_data.collector.binance_usdm_funding_rate -> ccxt",
 ]
 
 [[tool.importlinter.contracts]]
