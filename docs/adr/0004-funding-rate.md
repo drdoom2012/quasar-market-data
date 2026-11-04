@@ -4,7 +4,7 @@
   decisions O-1 to O-6). Revisions 2 to 4 answer the user's reviews (listed at the end). FR-1 to FR-5 are implemented. The API response
   schema is contract section 6.7 of `docs/contracts/api-v1.md`, approved by the user on 2026-11-04 (decisions FA1 to FA10) and
   implemented by FR-5; where it differs from P-13 and P-15 it supersedes them: `behind` is inclusive at
-  `publication_delay_ms + 2 h`, a defaulted `end` is `max(as_of, start)` capped at 3 650 days, `limit` is 2 to 1000, the cursor is
+  `publication_delay_ms + 2 h`, a defaulted `end` is `max(as_of, start)` capped at 365 days (like an explicit window longer than that, which is a `400`), `limit` is 2 to 1000, the cursor is
   an integer (`next` is passed as `start`, and a page never splits the rows of one millisecond), `series.*` are rows only, and the
   coverage of a continuation page describes `[next, end]` (the P-15 row "identical across the three pages" holds for page 1
   and for a changed `limit`). Amendment A-3 to ADR-0003 (O-6) is applied (2026-11-04, issue #21). The user asked for the spec on 2026-11-03 and

@@ -90,9 +90,9 @@ def stub_task(
 def oi_opener(
     rec: Recorder, clock: FakeClock, error: BaseException | None = None
 ) -> Callable[..., Awaitable[OpenInterestOnceSource]]:
-    async def open_oi(budget: OpenInterestBudget, gate: ExtensionPause, received: Clock) -> OpenInterestOnceSource:
+    async def open_oi(budget: OpenInterestBudget, pause: ExtensionPause, received: Clock) -> OpenInterestOnceSource:
         rec.events.append("open")
-        assert isinstance(budget, OpenInterestBudget) and isinstance(gate, ExtensionPause) and received is clock
+        assert isinstance(budget, OpenInterestBudget) and isinstance(pause, ExtensionPause) and received is clock
         if error is not None:
             raise error
         source = FakeOiSource(clock)

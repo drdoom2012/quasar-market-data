@@ -257,6 +257,18 @@ def test_a_candle_or_open_interest_conflict_never_counts(tmp_path: Path) -> None
     assert funding(path)["conflicted_series"] == 0
 
 
+def test_a_conflict_of_a_series_with_rows_but_no_span_is_not_counted(tmp_path: Path) -> None:
+    path = seed(tmp_path / "m.db", current_series(0))  # sym(0) has a span; sym(1) below has rows and a conflict only
+    conn = open_writer(path)
+    insert_funding_rate(conn, AS_OF - H, symbol=sym(1))
+    insert_funding_conflict(conn, AS_OF - H, 1, symbol=sym(1))
+    conn.close()
+
+    found = funding(path)
+
+    assert (found["series_count"], found["conflicted_series"], found["status"]) == (1, 0, "current")
+
+
 # --- shape ------------------------------------------------------------------------------------------------------------
 
 

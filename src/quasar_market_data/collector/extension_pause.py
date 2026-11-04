@@ -34,7 +34,7 @@ class ExtensionPaused(SourceError):
 
     def __init__(self, remaining_ms: int, until_monotonic_ns: int) -> None:
         self.remaining_ms = remaining_ms
-        self.until_monotonic_ns = until_monotonic_ns  # the end of the pause on the gate's monotonic clock
+        self.until_monotonic_ns = until_monotonic_ns  # the end of the pause on the pause's monotonic clock
         super().__init__(f"extension dataset requests are paused after a 429 for another {remaining_ms} ms")
 
 

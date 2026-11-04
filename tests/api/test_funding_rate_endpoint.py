@@ -182,9 +182,9 @@ def test_a_start_after_now_is_a_one_millisecond_unverified_window(tmp_path: Path
     assert (body["coverage"]["window_state"], body["coverage"]["events_in_window"]) == ("unverified", 0)
 
 
-def test_a_defaulted_window_longer_than_3650_days_is_capped_and_echoed_never_a_400(tmp_path: Path) -> None:
+def test_a_defaulted_window_longer_than_365_days_is_capped_and_echoed_never_a_400(tmp_path: Path) -> None:
     path = make_database(tmp_path / "m.db", funding=[ev(0)], funding_span=(ev(0), ev(5)))
-    start = ev(0) - 4000 * 86_400_000
+    start = ev(0) - 500 * 86_400_000
 
     response = client_for(path, ev(8)).get(f"/v1/funding-rates?{BASE}&start={start}")
 
@@ -194,7 +194,18 @@ def test_a_defaulted_window_longer_than_3650_days_is_capped_and_echoed_never_a_4
     assert body["coverage"]["window_state"] == "unverified"  # the capped window ends before the span
 
 
-def test_an_explicit_window_longer_than_3650_days_is_a_400_with_the_maximum_in_ms(tmp_path: Path) -> None:
+def test_a_capped_defaulted_window_inside_the_span_is_judged_like_an_explicit_one(tmp_path: Path) -> None:
+    start = ev(0) - 500 * 86_400_000
+    path = make_database(tmp_path / "m.db", funding=[start + 5, ev(0)], funding_span=(start - 1, ev(8)))
+
+    body = client_for(path, ev(8)).get(f"/v1/funding-rates?{BASE}&start={start}").json()
+
+    assert body["end"] == start + MAX_FUNDING_WINDOW_MS < body["coverage"]["as_of_ms"]  # capped: before now
+    assert (body["coverage"]["window_state"], body["coverage"]["complete"]) == ("verified", True)
+    assert body["coverage"]["events_in_window"] == 1  # only the row inside the capped window
+
+
+def test_an_explicit_window_longer_than_365_days_is_a_400_with_the_maximum_in_ms(tmp_path: Path) -> None:
     client = client_for(seeded(tmp_path))
     end = ev(0) + MAX_FUNDING_WINDOW_MS + 1
 
@@ -309,14 +320,17 @@ def test_a_conflicted_event_is_flagged_in_its_row_counted_and_makes_the_window_i
 def test_a_window_of_2500_events_page_one_describes_the_window_and_the_later_pages_the_remainder(
     tmp_path: Path,
 ) -> None:
+    def hourly(i: int) -> int:
+        return T0 + i * H  # a 1 h symbol: 2 500 settlements are about 104 days, inside the 365-day maximum
+
     path = make_database(
         tmp_path / "m.db",
-        funding=[ev(i) for i in range(2500)],
-        funding_span=(ev(0), ev(2600)),
-        funding_conflicts=[ev(7)],
+        funding=[hourly(i) for i in range(2500)],
+        funding_span=(hourly(0), hourly(2600)),
+        funding_conflicts=[hourly(7)],
     )
-    client = client_for(path, ev(3000))
-    coverages, url = [], f"/v1/funding-rates?{BASE}&start={ev(0)}&end={ev(2499)}"
+    client = client_for(path, hourly(3000))
+    coverages, url = [], f"/v1/funding-rates?{BASE}&start={hourly(0)}&end={hourly(2499)}"
     while True:
         body = client.get(url).json()
         coverages.append(body["coverage"])

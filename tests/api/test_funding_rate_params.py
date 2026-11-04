@@ -47,11 +47,11 @@ def test_unaligned_instants_and_the_boundaries_are_accepted() -> None:
     assert parse(f"{BASE}&limit=1000").limit == 1000
 
 
-def test_the_window_maximum_is_3650_days_inclusive_and_one_ms_more_is_refused() -> None:
+def test_the_window_maximum_is_365_days_inclusive_and_one_ms_more_is_refused() -> None:
     assert parse(f"{BASE}&end={START + MAX_FUNDING_WINDOW_MS}").end == START + MAX_FUNDING_WINDOW_MS
     error = error_of(f"{BASE}&end={START + MAX_FUNDING_WINDOW_MS + 1}")
     assert (error.details["parameter"], error.details["maximum"]) == ("end", MAX_FUNDING_WINDOW_MS)
-    assert "3650 days" in error.message
+    assert "365 days" in error.message
 
 
 @pytest.mark.parametrize(

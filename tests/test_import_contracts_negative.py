@@ -25,6 +25,7 @@ ENGINE_ONLY_CONTRACT = "talib and numpy are imported only by the indicator engin
 CONFIG_CONTRACT = "config depends only on domain and the standard library"
 OI_INDEPENDENCE_CONTRACT = "open interest is independent of candle limiter and time"
 OI_NO_FUNDING_CONTRACT = "open interest does not use funding rate modules"
+PAUSE_LEAF_CONTRACT = "extension pause does not use funding rate modules"
 FUNDING_INDEPENDENCE_CONTRACT = "funding rate is independent of candle limiter, time and open interest"
 CANDLE_ISOLATION_CONTRACT = "candle collection does not use extension datasets"
 CONTRACT_NAMES = (
@@ -38,6 +39,7 @@ CONTRACT_NAMES = (
     CONFIG_CONTRACT,
     OI_INDEPENDENCE_CONTRACT,
     OI_NO_FUNDING_CONTRACT,
+    PAUSE_LEAF_CONTRACT,
     FUNDING_INDEPENDENCE_CONTRACT,
     CANDLE_ISOLATION_CONTRACT,
 )
@@ -125,6 +127,15 @@ CASES = {
         "collector/binance_usdm_open_interest.py",
         f"import ccxt\nimport {PACKAGE}.collector.binance_usdm_funding_rate\n",  # keeps the ignored ccxt import matched
         OI_NO_FUNDING_CONTRACT,
+    ),
+    "open_interest_task_importing_the_funding_writer_fails_oi_no_funding": Case(
+        "collector/open_interest_task.py", f"import {PACKAGE}.collector.funding_rate_writer\n", OI_NO_FUNDING_CONTRACT
+    ),
+    "open_interest_writer_importing_the_funding_reader_fails_oi_no_funding": Case(
+        "collector/open_interest_writer.py", f"import {PACKAGE}.collector.funding_rate_reader\n", OI_NO_FUNDING_CONTRACT
+    ),
+    "extension_pause_importing_the_funding_task_fails_pause_leaf": Case(
+        "collector/extension_pause.py", f"import {PACKAGE}.collector.funding_rate_task\n", PAUSE_LEAF_CONTRACT
     ),
     "open_interest_source_importing_extension_pause_is_allowed": Case(
         "collector/binance_usdm_open_interest.py",

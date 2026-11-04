@@ -90,7 +90,7 @@ def test_a_defaulted_end_is_now_or_the_start_capped_at_the_maximum_window() -> N
     assert defaulted_window_end(F + DAY_MS, F) == F + DAY_MS  # start after now: a one-millisecond window
     assert defaulted_window_end(F, F + MAX_FUNDING_WINDOW_MS) == F + MAX_FUNDING_WINDOW_MS
     assert defaulted_window_end(F, F + MAX_FUNDING_WINDOW_MS + 1) == F + MAX_FUNDING_WINDOW_MS  # capped, echoed
-    assert MAX_FUNDING_WINDOW_MS == 3650 * DAY_MS == 315_360_000_000
+    assert MAX_FUNDING_WINDOW_MS == 365 * DAY_MS == 31_536_000_000
 
 
 def test_a_cap_beyond_the_valid_time_range_is_clamped_to_it() -> None:

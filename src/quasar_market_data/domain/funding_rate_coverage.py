@@ -27,7 +27,8 @@ from quasar_market_data.domain.funding_rate_span import (
 )
 from quasar_market_data.domain.timestamps import MAX_TIMESTAMP_MS, ensure_timestamp_ms
 
-MAX_FUNDING_WINDOW_MS: Final = MAX_BACKFILL_DAYS * DAY_MS  # contract 6.7.2 (decision FA2): 3 650 days
+MAX_FUNDING_WINDOW_DAYS: Final = 365  # contract 6.7.2 (decision FA2, set to 365 days by the user on 2026-11-04)
+MAX_FUNDING_WINDOW_MS: Final = MAX_FUNDING_WINDOW_DAYS * DAY_MS
 QUIET_AFTER_MS: Final = 2 * DAY_MS  # contract 6.7.8: a series with no event for more than 48 h is quiet
 
 
@@ -87,7 +88,7 @@ def is_complete(state: WindowState, conflicted_events: int) -> bool:
 
 
 def defaulted_window_end(start: int, as_of_ms: int) -> int:
-    """The ``end`` of a request without one: ``max(as_of, start)``, capped at ``start + 3 650 days`` (contract 6.7.2).
+    """The ``end`` of a request without one: ``max(as_of, start)``, capped at ``start + 365 days`` (contract 6.7.2).
 
     The cap is clamped to the last valid time, so the result is always a valid ``end``.
     """
