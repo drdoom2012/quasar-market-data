@@ -14,6 +14,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from quasar_market_data.domain.funding_rate import MAX_FUNDING_RATE_PUBLICATION_DELAY_MS
+from quasar_market_data.domain.funding_rate_capacity import MAX_BUDGET_PER_5MIN as MAX_FUNDING_BUDGET_PER_5MIN
+from quasar_market_data.domain.funding_rate_capacity import MAX_ROUND_OFFSET_MS as MAX_FUNDING_ROUND_OFFSET_MS
+from quasar_market_data.domain.funding_rate_capacity import MIN_BUDGET_PER_5MIN as MIN_FUNDING_BUDGET_PER_5MIN
+from quasar_market_data.domain.funding_rate_capacity import MIN_ROUND_OFFSET_MS as MIN_FUNDING_ROUND_OFFSET_MS
+from quasar_market_data.domain.funding_rate_capacity import (
+    CapacityError,
+    assess_capacity,
+)
+from quasar_market_data.domain.funding_rate_span import MAX_BACKFILL_DAYS as MAX_FUNDING_BACKFILL_DAYS
+from quasar_market_data.domain.funding_rate_span import MIN_BACKFILL_DAYS as MIN_FUNDING_BACKFILL_DAYS
 from quasar_market_data.domain.open_interest_cadence import (
     MAX_BUDGET_PER_5MIN,
     MIN_BUDGET_PER_5MIN,
@@ -30,6 +41,9 @@ MAX_BACKFILL_DAYS: Final = 365
 MAX_PUBLICATION_DELAY_MS: Final = 300_000
 MAX_LAG_THRESHOLD_MS: Final = 900_000
 SUPPORTED_OPEN_INTEREST_PERIOD: Final = "5m"
+MIN_FUNDING_RECHECK_MS: Final = 3_600_000
+MAX_FUNDING_RECHECK_MS: Final = 604_800_000
+MIN_OFFSET_MARGIN_MS: Final = 5_000  # round_offset_ms >= publication_delay_ms + this (ADR-0004 P-12)
 MIN_ROUND_OFFSET_MS: Final = 60_000
 MAX_ROUND_OFFSET_MS: Final = 280_000
 MAX_SYMBOL_CHARS: Final = 64
@@ -89,6 +103,16 @@ class OpenInterestSettings:
 
 
 @dataclass(frozen=True)
+class FundingRateSettings:
+    enabled: bool
+    publication_delay_ms: int
+    round_offset_ms: int
+    budget_per_5min: int
+    backfill_days: int
+    recheck_ms: int
+
+
+@dataclass(frozen=True)
 class ApiSettings:
     host: str
     port: int
@@ -102,6 +126,22 @@ class Settings:
     collector: CollectorSettings
     api: ApiSettings
     open_interest: OpenInterestSettings | None = None  # absent table: open interest is off (ADR-0003 P-13)
+    funding_rate: FundingRateSettings | None = None  # absent table: funding is off (ADR-0004 P-12)
+
+    def funding_rate_capacity_warning(self) -> str | None:
+        """The text for ``run`` to print when an enabled funding table is above 90 % of ``S_sustained`` (P-10)."""
+        table = self.funding_rate
+        if table is None or not table.enabled:
+            return None
+        count = len(self.venues[0].symbols)
+        assessment = assess_capacity(count, table.budget_per_5min, table.round_offset_ms)
+        if not assessment.warn:
+            return None
+        return (
+            f"warning: funding_rate: {count} symbols is above {assessment.warn_above} (90 % of the sustainable"
+            f" {assessment.sustained} at budget_per_5min {table.budget_per_5min} and round_offset_ms"
+            f" {table.round_offset_ms}); less than 10 % of the capacity is left for retries and slow requests"
+        )
 
     def instruments(self) -> tuple[Instrument, ...]:
         return tuple(
@@ -277,6 +317,35 @@ def _open_interest(root: dict[str, Any], symbol_count: int) -> OpenInterestSetti
     return OpenInterestSettings(enabled, period, delay, offset, budget)
 
 
+def _funding_rate(root: dict[str, Any], symbol_count: int) -> FundingRateSettings | None:
+    if "funding_rate" not in root:
+        return None
+    path = "funding_rate"
+    table = _table(root, "", path)
+    _check_keys(
+        table,
+        path,
+        {"enabled", "publication_delay_ms", "round_offset_ms", "budget_per_5min", "backfill_days", "recheck_ms"},
+    )
+    enabled = _bool(table, path, "enabled")
+    delay = _int(table, path, "publication_delay_ms", 0, MAX_FUNDING_RATE_PUBLICATION_DELAY_MS)
+    offset = _int(table, path, "round_offset_ms", MIN_FUNDING_ROUND_OFFSET_MS, MAX_FUNDING_ROUND_OFFSET_MS)
+    budget = _int(table, path, "budget_per_5min", MIN_FUNDING_BUDGET_PER_5MIN, MAX_FUNDING_BUDGET_PER_5MIN)
+    days = _int(table, path, "backfill_days", MIN_FUNDING_BACKFILL_DAYS, MAX_FUNDING_BACKFILL_DAYS)
+    recheck = _int(table, path, "recheck_ms", MIN_FUNDING_RECHECK_MS, MAX_FUNDING_RECHECK_MS)
+    if offset < delay + MIN_OFFSET_MARGIN_MS:
+        raise ConfigError(
+            f"{path}.round_offset_ms",
+            f"must be at least publication_delay_ms + {MIN_OFFSET_MARGIN_MS} = {delay + MIN_OFFSET_MARGIN_MS}, got {offset}",
+        )
+    if enabled:  # a disabled feature never refuses the start of the Collector (approved 2026-11-05)
+        try:
+            assess_capacity(symbol_count, budget, offset)
+        except CapacityError as exc:
+            raise ConfigError(f"{path}.budget_per_5min", str(exc)) from exc
+    return FundingRateSettings(enabled, delay, offset, budget, days, recheck)
+
+
 def parse_settings(text: str, *, base_dir: Path) -> Settings:
     if not base_dir.is_absolute():
         raise ValueError(f"base_dir must be absolute, got {base_dir}")
@@ -284,19 +353,20 @@ def parse_settings(text: str, *, base_dir: Path) -> Settings:
         root = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError("file", f"not valid TOML: {exc}") from exc
-    _check_keys(root, "", {"database", "rule", "venues", "collector", "api", "open_interest"})
+    _check_keys(root, "", {"database", "rule", "venues", "collector", "api", "open_interest", "funding_rate"})
     database_path = _database_path(root, base_dir)
     rule = _rule(root)
     venues = _venues(root)
     collector = _collector(root)
     api = _api(root)
     open_interest = _open_interest(root, len(venues[0].symbols))
+    funding_rate = _funding_rate(root, len(venues[0].symbols))
     needed = steady_state_limit_needed(rule.publication_delay_ms, Timeframe(SUPPORTED_TIMEFRAMES[0]).milliseconds)
     if collector.limit < needed:
         raise ConfigError(
             "collector.limit", f"publication_delay_ms {rule.publication_delay_ms} needs limit >= {needed}"
         )
-    return Settings(database_path, rule, venues, collector, api, open_interest)
+    return Settings(database_path, rule, venues, collector, api, open_interest, funding_rate)
 
 
 @dataclass(frozen=True)
