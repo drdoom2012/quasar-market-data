@@ -6,62 +6,158 @@
 <title>Symbol overview</title>
 <style>
   :root {
-    --bg: #fafafa; --fg: #1d1d1f; --muted: #6b6b70; --line: #d8d8dc; --card: #ffffff;
-    --ok: #2e7d4f; --warn: #b26a00; --bad: #b3261e; --none: #6b6b70;
+    --bg: #f4f5f8; --fg: #1b1d24; --muted: #6a6f7c; --line: #e2e4ea; --card: #ffffff; --hover: #f0f2f7;
+    --ok: #1f8a54; --warn: #b26a00; --bad: #c4301f; --none: #6a6f7c; --accent: #3b5bdb;
+    --shadow: 0 1px 2px rgba(20, 24, 40, .06), 0 4px 14px rgba(20, 24, 40, .04);
+    --lab: 96px; --chip: 112px; --gap: 10px;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #151517; --fg: #ececf0; --muted: #9a9aa2; --line: #36363b; --card: #1f1f22;
-            --ok: #5cc98a; --warn: #e0a040; --bad: #ff7b72; --none: #9a9aa2; }
+    :root { --bg: #101116; --fg: #e8e9ef; --muted: #8e93a1; --line: #2a2c36; --card: #181a21; --hover: #20232c;
+            --ok: #4cc58a; --warn: #e5a53d; --bad: #ff7a6b; --none: #8e93a1; --accent: #8ba2ff;
+            --shadow: 0 1px 2px rgba(0, 0, 0, .4); }
   }
-  body { font: 14px/1.4 -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 16px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  h2 { font-size: 14px; margin: 20px 0 6px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
-  #status-line { color: var(--muted); }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px 20px 48px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+  h2 { font-size: 12px; margin: 28px 0 8px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); display: flex; align-items: baseline; gap: 8px; }
+  h2 .count { font-weight: 500; letter-spacing: 0; text-transform: none; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 16px; }
+  header .spacer { flex: 1; }
+  #status-line { color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+  #status-line:not(:empty)::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 var(--ok); animation: pulse 2.4s ease-out infinite; }
   #status-line.old { color: var(--warn); font-weight: 600; }
-  button { font: inherit; padding: 4px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); cursor: pointer; }
-  button:disabled { opacity: .5; cursor: default; }
-  #api-error { display: none; border: 1px solid var(--bad); color: var(--bad); border-radius: 8px; padding: 10px 12px; margin: 8px 0; font-weight: 600; }
-  #summary { display: flex; flex-wrap: wrap; gap: 8px; }
-  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 14px; min-width: 90px; }
-  .tile b { display: block; font-size: 22px; }
-  table { border-collapse: collapse; width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
-  th, td { text-align: left; padding: 5px 10px; border-top: 1px solid var(--line); vertical-align: middle; }
-  th { color: var(--muted); font-size: 12px; text-transform: uppercase; border-top: 0; }
-  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; border: 1px solid currentColor; }
-  .s-ok { color: var(--ok); } .s-behind, .s-holes, .s-unverified, .s-partly_verified { color: var(--warn); } .s-stale, .s-conflict, .s-unknown, .s-quiet { color: var(--bad); } .s-no_data { color: var(--none); }
-  canvas { width: 100%; min-width: 360px; height: 14px; display: block; border-radius: 2px; }
-  details { margin-top: 8px; } summary { cursor: pointer; color: var(--muted); }
-  #legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; font-size: 12px; color: var(--muted); }
-  #legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 4px; vertical-align: -2px; }
-  .muted { color: var(--muted); }
-  .tilerow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; margin-bottom: 8px; }
-  .tilerow-label { align-self: center; min-width: 110px; font-weight: 600; color: var(--muted); }
-  .notice { color: var(--warn); font-weight: 600; margin: 4px 0; }
-  .strip-label { font-size: 11px; color: var(--muted); margin: 2px 0 1px; }
+  #status-line.old::before { background: var(--warn); animation: none; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 7px transparent; } }
+  @media (prefers-reduced-motion: reduce) { #status-line::before { animation: none !important; } }
+  button { font: inherit; }
+  #refresh { padding: 6px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); cursor: pointer; box-shadow: var(--shadow); }
+  #refresh:hover:not(:disabled) { border-color: var(--accent); }
+  #refresh:disabled { opacity: .5; cursor: default; }
+  button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #api-error { display: none; border: 1px solid var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--card)); color: var(--bad); border-radius: 10px; padding: 12px 14px; margin: 8px 0; font-weight: 600; }
+
+  #banner:not(:empty) { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-radius: 12px; border: 1px solid; margin-bottom: 14px; font-size: 16px; font-weight: 650; }
+  #banner .dot { width: 12px; height: 12px; border-radius: 50%; background: currentColor; flex: none; }
+  #banner .sub { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: auto; text-align: right; }
+  #banner.lvl-ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 9%, var(--card)); border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
+  #banner.lvl-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--card)); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+  #banner.lvl-bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--card)); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+  #banner.lvl-none { color: var(--muted); background: var(--card); border-color: var(--line); }
+
+  #parts { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 16px; box-shadow: var(--shadow); }
+  #parts > div:empty { display: none; }
+  .tilerow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 0; }
+  .tilerow + .tilerow, #parts > div + div > .tilerow { border-top: 1px solid var(--line); }
+  .tilerow-label { min-width: 120px; font-weight: 650; }
+  .tile { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--fg); font-size: 13px; }
+  button.tile { cursor: pointer; }
+  button.tile:hover:not(:disabled) { background: var(--hover); border-color: var(--accent); }
+  button.tile.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); box-shadow: 0 0 0 1px var(--accent); }
+  button.tile:disabled { cursor: default; }
+  .tile.zero { opacity: .5; }
+  .tile.total { background: transparent; border-style: dashed; }
+  .tile .n { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .tile.zero .n { color: var(--muted); }
   .note { color: var(--muted); font-size: 12px; }
+  #funding-health:not(:empty) { padding: 0 0 8px; }
+  .notice { color: var(--warn); font-weight: 600; margin: 4px 0; }
+  .notice:empty { display: none; }
+  #refresh-notice p { margin: 4px 0; }
+
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 22px; }
+  #search { flex: 1 1 240px; max-width: 420px; font: inherit; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); }
+  #search::placeholder { color: var(--muted); }
+  #filter-chip button { padding: 4px 10px; border: 1px solid var(--accent); border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, var(--card)); color: var(--fg); cursor: pointer; }
+  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--muted); }
+
+  table { border-collapse: separate; border-spacing: 0; width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: clip; box-shadow: var(--shadow); }
+  th, td { text-align: left; padding: 9px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+  tr:first-child > th, tr:first-child > td { border-top: 0; }
+  th { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; background: var(--card); position: sticky; top: 0; z-index: 1; }
+  tbody tr:hover > td, tr:hover > td { background: var(--hover); }
+  td.sym { font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+  tr.lvl-bad > td:first-child { box-shadow: inset 3px 0 var(--bad); }
+  tr.lvl-warn > td:first-child { box-shadow: inset 3px 0 var(--warn); }
+  td.empty { color: var(--muted); padding: 22px; text-align: center; }
+  ul.why { margin: 0; padding: 0; list-style: none; }
+  ul.why li { display: grid; grid-template-columns: 104px 1fr; gap: 8px; align-items: baseline; }
+  ul.why li + li { margin-top: 4px; }
+  .rp { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+
+  .tag { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 650; white-space: nowrap;
+         background: color-mix(in srgb, currentColor 12%, transparent); }
+  .s-ok { color: var(--ok); } .s-behind, .s-holes, .s-unverified, .s-partly_verified { color: var(--warn); } .s-stale, .s-conflict, .s-unknown, .s-quiet { color: var(--bad); } .s-no_data { color: var(--none); }
+  .dash { color: var(--muted); }
+
+  .line { display: grid; grid-template-columns: var(--lab) var(--chip) 1fr; gap: var(--gap); align-items: center; min-height: 22px; }
+  .line + .line { margin-top: 4px; }
+  .line .lab { color: var(--muted); font-size: 12px; }
+  .line .chip { display: flex; }
+  .line .fline { font-size: 12px; color: var(--muted); }
+  canvas { width: 100%; min-width: 200px; height: 16px; display: block; border-radius: 4px; cursor: crosshair; }
+  .axis { display: flex; justify-content: space-between; margin-left: calc(var(--lab) + var(--chip) + 2 * var(--gap)); font-weight: 500; text-transform: none; letter-spacing: 0; }
+  th:first-child, td.sym { width: 200px; }
+  .since { margin-top: 2px; white-space: nowrap; font: 11px/1.3 -apple-system, system-ui, sans-serif; color: var(--muted); font-weight: 400; white-space: normal; }
+  details { margin-top: 10px; } summary { cursor: pointer; color: var(--muted); }
+  #ok-group > div { margin-top: 6px; line-height: 1.7; }
+  #legend { margin: 0 0 10px; font-size: 12px; color: var(--muted); }
+  #legend > div { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  #legend > div + div { margin-top: 4px; }
+  #legend b { color: var(--fg); }
+  #legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; }
+  .muted { color: var(--muted); }
+  @media (max-width: 760px) {
+    main { padding: 12px 12px 40px; }
+    :root { --lab: 0px; --chip: 104px; --gap: 8px; }
+    .line .lab { display: none; }
+    .axis { margin-left: calc(var(--chip) + var(--gap)); }
+    #banner .sub { display: none; }
+    .tilerow-label { min-width: 100%; }
+    #problems th, #heatmap th { display: none; }
+    #problems tr, #heatmap tr { display: block; padding: 8px 12px; border-top: 1px solid var(--line); }
+    #problems tr:first-child, #heatmap tr:first-child { border-top: 0; }
+    #problems td, #heatmap td { display: block; border: 0; padding: 2px 0; width: auto; overflow-wrap: anywhere; }
+    #problems td:nth-child(n+2):nth-child(-n+4) { display: inline-block; margin-right: 6px; }
+    tr.lvl-bad, tr.lvl-warn { box-shadow: inset 3px 0 var(--bad); }
+    tr.lvl-warn { box-shadow: inset 3px 0 var(--warn); }
+    tr.lvl-bad > td:first-child, tr.lvl-warn > td:first-child { box-shadow: none; }
+    canvas { min-width: 0; }
+    ul.why li { grid-template-columns: 1fr; gap: 0; }
+  }
 </style>
 </head>
 <body>
+<main>
 <header>
   <h1>Symbol overview</h1>
-  <button id="refresh" type="button">Refresh</button>
   <span id="status-line" role="status"></span>
+  <span class="spacer"></span>
+  <button id="refresh" type="button">Refresh</button>
 </header>
 <div id="api-error" role="alert"></div>
-<div id="summary"></div>
-<div id="oi-summary"></div>
-<div id="oi-notice" class="notice" role="status"></div>
-<div id="funding-summary"></div>
-<div id="funding-health" class="note"></div>
-<div id="funding-notice" class="notice" role="status"></div>
-<div id="refresh-notice" class="notice" role="status"></div>
-<h2 id="problems-title">What is wrong</h2>
+<div id="banner" role="status"></div>
+<div id="parts">
+  <div id="summary"></div>
+  <div id="oi-summary"></div>
+  <div id="oi-notice" class="notice" role="status"></div>
+  <div id="funding-summary"></div>
+  <div id="funding-health" class="note"></div>
+  <div id="funding-notice" class="notice" role="status"></div>
+  <div id="refresh-notice" class="notice" role="status"></div>
+</div>
+<div class="toolbar">
+  <input id="search" type="search" placeholder="Filter symbols, e.g. BTC or ETH SOL" aria-label="Filter symbols" autocomplete="off" spellcheck="false">
+  <span id="filter-chip"></span>
+  <span class="note"><kbd>/</kbd> to search, <kbd>Esc</kbd> to clear</span>
+</div>
+<h2 id="problems-title">What is wrong <span id="problems-count" class="count"></span></h2>
 <table id="problems"></table>
 <details id="ok-group"></details>
 <h2>Last 30 days</h2>
 <div id="legend"></div>
 <table id="heatmap"></table>
+</main>
 
 <script>
 "use strict";
@@ -138,6 +234,16 @@ const TEXT = {
   oiStrip: { "_": "before the first stored row", ".": "ok", r: "no longer recoverable", n: "not expected yet", d: "behind", m: "hole", c: "conflict", s: "stale" },
   stripNone: "cannot judge",
   since: { candles: "candles", openInterest: "first stored row" },
+  banner: {
+    empty: "The API reports no symbols",
+    ok: (n) => `All ${n} ${plural(n, "symbol is", "symbols are")} ok`,
+    problems: (k, n) => `${k} of ${n} ${plural(n, "symbol needs", "symbols need")} attention`,
+    notices: "The refresh did not finish: nothing is shown as ok until it does",
+    worst: (state) => `worst: ${TEXT.states[state]}`,
+  },
+  search: { none: "No symbol matches the filter.", count: (shown, all) => `${shown} of ${all}`, clear: "clear filter" },
+  filterHint: "Show only these symbols",
+  axis: { start: (ms) => day(ms), middle: "30 days", end: "now" },
 };
 // English plural: 1 -> one, otherwise many.
 const plural = (n, one, many) => (n === 1 ? one : many);
@@ -182,6 +288,36 @@ function isProblem(s, status, fstatus = "absent") {
 function problemSymbols(symbols, status, fstatus = "absent") {
   return symbols.filter((s) => isProblem(s, status, fstatus))
     .sort((a, b) => worstRank(a, status, fstatus) - worstRank(b, status, fstatus) || rank(a.state) - rank(b.state) || a.symbol.localeCompare(b.symbol));
+}
+// The state of one part of a symbol ("candles", "openInterest", "funding"), or null when the part does not apply.
+function partState(s, part, status, fstatus = "absent") {
+  if (part === "candles") return s.state;
+  if (part === "openInterest") return oiStateOf(s, status);
+  if (part === "funding") return fundingStateOf(s, fstatus);
+  return null;
+}
+// The worst state of a symbol over all parts that apply.
+function worstState(s, status, fstatus = "absent") {
+  return RANK_ORDER[worstRank(s, status, fstatus)];
+}
+// How loud a state is: "ok", "warn", "bad". `no_data` is "bad" here: a symbol with nothing downloaded is not a quiet one.
+const LEVELS = { ok: "ok", behind: "warn", holes: "warn", unverified: "warn", partly_verified: "warn" };
+function levelOf(state) { return LEVELS[state] || "bad"; }
+// The headline over the whole page. Green only when there are symbols, none is a problem and the refresh finished;
+// anything else is never green (nothing says it is fine).
+function headline(total, problems, worst, notices) {
+  if (total === 0) return { level: "none", text: TEXT.banner.empty };
+  if (problems > 0) return { level: levelOf(worst), text: TEXT.banner.problems(problems, total), sub: TEXT.banner.worst(worst) };
+  if (notices > 0) return { level: "warn", text: TEXT.banner.notices };
+  return { level: "ok", text: TEXT.banner.ok(total) };
+}
+// The user's filter: `query` (symbol names separated by spaces or commas, any may match, case ignored) and an optional
+// `part` + `state` (a clicked tile). Pure display filter: it decides no state.
+function matchesFilter(s, f, status, fstatus = "absent") {
+  const terms = (f.query || "").toLowerCase().split(/[\s,]+/).filter(Boolean);
+  if (terms.length && !terms.some((t) => s.symbol.toLowerCase().includes(t))) return false;
+  if (f.part && partState(s, f.part, status, fstatus) !== f.state) return false;
+  return true;
 }
 function reasonText(r, s) { return (TEXT.reasons[r.code] || (() => r.code))(r, s); }
 function oiReasonText(r, block) { return (TEXT.oiReasons[r.code] || (() => r.code))(r, block); }
@@ -258,29 +394,30 @@ function legend() {
   const box = $("legend");
   box.replaceChildren();
   for (const [title, texts] of [[TEXT.legend.candles, TEXT.strip], [TEXT.legend.openInterest, TEXT.oiStrip]]) {
-    box.append(el("b", {}, title + ":"));
+    const row = el("div", {}, el("b", {}, title + ":"));
     for (const [ch, text] of Object.entries(texts)) {
       const swatch = el("i"); swatch.style.background = COLORS[ch];
-      box.append(el("span", {}, swatch, text));
+      row.append(el("span", {}, swatch, text));
     }
+    box.append(row);
   }
 }
 
 function tag(state) { return el("span", { class: `tag s-${state}` }, TEXT.states[state]); }
 
 function drawStrip(canvas, strip, window_, texts) {
-  canvas.width = 720; canvas.height = 14;
+  canvas.width = 720; canvas.height = 16;
   const ctx = canvas.getContext("2d");
   if (strip == null) {  // cannot be judged: hatched, never a color that means fine
-    ctx.fillStyle = "#8884"; ctx.fillRect(0, 0, 720, 14);
+    ctx.fillStyle = "#8884"; ctx.fillRect(0, 0, 720, 16);
     ctx.strokeStyle = "#888"; ctx.lineWidth = 1;
-    for (let x = -14; x < 720; x += 6) { ctx.beginPath(); ctx.moveTo(x, 14); ctx.lineTo(x + 14, 0); ctx.stroke(); }
+    for (let x = -16; x < 720; x += 6) { ctx.beginPath(); ctx.moveTo(x, 16); ctx.lineTo(x + 16, 0); ctx.stroke(); }
     canvas.title = TEXT.stripNone;
     return;
   }
   for (let i = 0; i < strip.length;) {
     let j = i; while (j < strip.length && strip[j] === strip[i]) j++;
-    ctx.fillStyle = COLORS[strip[i]] || "#000"; ctx.fillRect(i, 0, j - i, 14);
+    ctx.fillStyle = COLORS[strip[i]] || "#000"; ctx.fillRect(i, 0, j - i, 16);
     i = j;
   }
   // Bucket k is the same hour in both strips (an open interest slot is the END of its period).
@@ -293,56 +430,108 @@ function drawStrip(canvas, strip, window_, texts) {
 }
 
 function clearStates() {
-  for (const id of ["summary", "oi-summary", "oi-notice", "funding-summary", "funding-health", "funding-notice", "refresh-notice", "problems", "heatmap"]) $(id).replaceChildren();
+  for (const id of ["banner", "summary", "oi-summary", "oi-notice", "funding-summary", "funding-health", "funding-notice", "refresh-notice", "problems", "problems-count", "filter-chip", "heatmap"]) $(id).replaceChildren();
+  $("banner").className = "";
   $("ok-group").replaceChildren(); $("ok-group").style.display = "none";
 }
 
 function showError(text) { const box = $("api-error"); box.textContent = text; box.style.display = "block"; clearStates(); }
 
-function tiles(box, label, summary, order = ORDER) {
+// What the user filtered by (display only; the states are the tool's). Kept across refreshes.
+const filter = { query: "", part: null, state: null };
+let lastData = null;
+
+function toggleFilter(part, state) {
+  const same = filter.part === part && filter.state === state;
+  filter.part = same ? null : part; filter.state = same ? null : state;
+  if (lastData) render(lastData);
+}
+
+function tiles(box, label, summary, order, part) {
   box.replaceChildren();
   const row = el("div", { class: "tilerow" }, el("span", { class: "tilerow-label" }, label));
-  for (const key of ["total", ...order]) {
-    row.append(el("div", { class: "tile" }, el("b", {}, String(summary[key])), key === "total" ? TEXT.tiles.total : TEXT.states[key]));
+  row.append(el("div", { class: "tile total" }, el("b", { class: "n" }, String(summary.total)), TEXT.tiles.total));
+  for (const key of order) {
+    const count = summary[key];
+    const active = filter.part === part && filter.state === key;
+    const tile = el("button", { type: "button", class: `tile${count === 0 ? " zero" : ""}${active ? " active" : ""}`, "aria-pressed": String(active), title: TEXT.filterHint },
+      el("b", { class: `n s-${key}` }, String(count)), TEXT.states[key]);
+    tile.disabled = count === 0;
+    tile.addEventListener("click", () => toggleFilter(part, key));
+    row.append(tile);
   }
   box.append(row);
 }
 
+// "candles: 5 slots missing" -> <li><span>candles</span>5 slots missing</li>
+function reasonItem(line) {
+  for (const prefix of Object.values(TEXT.prefix)) {
+    if (line.startsWith(prefix)) return el("li", {}, el("span", { class: "rp" }, prefix.slice(0, -2)), line.slice(prefix.length));
+  }
+  return el("li", {}, line);
+}
+
+function stateCell(state) { return el("td", {}, state === null ? el("span", { class: "dash" }, TEXT.notApplicable) : tag(state)); }
+
+// One line of a heatmap row: the part, its state, and its strip (or the funding sentence).
+function stripLine(label, state, content) {
+  return el("div", { class: "line" }, el("span", { class: "lab" }, label), el("span", { class: "chip" }, tag(state)), content);
+}
+
 function render(data, httpStatus) {
   if (data.api_error) { showError(TEXT.apiNotReady + data.api_error.code + (data.api_error.detail ? ": " + data.api_error.detail : "")); return; }
+  lastData = data;
   $("api-error").style.display = "none";
   const status = oiStatus(data);
 
-  tiles($("summary"), TEXT.rows.candles, data.summary);
+  tiles($("summary"), TEXT.rows.candles, data.summary, ORDER, "candles");
   const interest = data.open_interest;
-  if (interest && interest.summary) tiles($("oi-summary"), TEXT.rows.openInterest, interest.summary); else $("oi-summary").replaceChildren();
+  if (interest && interest.summary) tiles($("oi-summary"), TEXT.rows.openInterest, interest.summary, ORDER, "openInterest"); else $("oi-summary").replaceChildren();
   $("oi-notice").textContent = oiNotice(status, interest ? interest.detail : "") || "";
   const fstatus = fundingStatus(data);
   const funding = data.funding_rate;
-  if (funding && funding.summary) tiles($("funding-summary"), TEXT.rows.funding, funding.summary, FUNDING_ORDER); else $("funding-summary").replaceChildren();
+  if (funding && funding.summary) tiles($("funding-summary"), TEXT.rows.funding, funding.summary, FUNDING_ORDER, "funding"); else $("funding-summary").replaceChildren();
   $("funding-health").textContent = funding && funding.health ? TEXT.fundingHealth(funding.health) : "";
   $("funding-notice").textContent = fundingNotice(fstatus, funding ? funding.detail : "", funding) || "";
   const notices = $("refresh-notice"); notices.replaceChildren();
-  for (const line of refreshNotices(data.refresh || {})) notices.append(el("p", { class: "notice" }, line));
+  const noticeLines = refreshNotices(data.refresh || {});
+  for (const line of noticeLines) notices.append(el("p", { class: "notice" }, line));
 
   const symbols = data.symbols;
-  const problems = problemSymbols(symbols, status, fstatus);
+  const allProblems = problemSymbols(symbols, status, fstatus);
+  const head = headline(symbols.length, allProblems.length, allProblems.length ? worstState(allProblems[0], status, fstatus) : "ok", noticeLines.length);
+  const banner = $("banner");
+  banner.className = `lvl-${head.level}`;
+  banner.replaceChildren(el("span", { class: "dot" }), el("span", {}, head.text));
+  if (head.sub) banner.append(el("span", { class: "sub" }, head.sub));
+
+  const shown = (s) => matchesFilter(s, filter, status, fstatus);
+  const filtered = filter.query.trim() !== "" || filter.part !== null;
+  const chip = $("filter-chip"); chip.replaceChildren();
+  if (filter.part) {
+    const clear = el("button", { type: "button" }, `${TEXT.rows[filter.part]}: ${TEXT.states[filter.state]}  ✕`);
+    clear.title = TEXT.search.clear;
+    clear.addEventListener("click", () => toggleFilter(filter.part, filter.state));
+    chip.append(clear);
+  }
+
+  const problems = allProblems.filter(shown);
+  $("problems-count").textContent = filtered ? TEXT.search.count(problems.length, allProblems.length) : String(allProblems.length);
   const table = $("problems"); table.replaceChildren();
   if (problems.length === 0) {
-    table.append(el("tr", {}, el("td", { class: "muted" }, TEXT.noProblems)));
+    table.append(el("tr", {}, el("td", { class: "empty" }, filtered && allProblems.length ? TEXT.search.none : TEXT.noProblems)));
   } else {
-    table.append(el("tr", {}, el("th", {}, TEXT.columns.candles), el("th", {}, TEXT.columns.openInterest), el("th", {}, TEXT.columns.funding),
-      el("th", {}, TEXT.columns.symbol), el("th", {}, TEXT.columns.why)));
+    table.append(el("tr", {}, el("th", {}, TEXT.columns.symbol), el("th", {}, TEXT.columns.candles), el("th", {}, TEXT.columns.openInterest),
+      el("th", {}, TEXT.columns.funding), el("th", {}, TEXT.columns.why)));
     for (const s of problems) {
-      const state = oiStateOf(s, status);
-      const fund = fundingStateOf(s, fstatus);
-      table.append(el("tr", {}, el("td", {}, tag(s.state)), el("td", {}, state === null ? TEXT.notApplicable : tag(state)),
-        el("td", {}, fund === null ? TEXT.notApplicable : tag(fund)),
-        el("td", {}, s.symbol), el("td", {}, reasonLines(s, status, fstatus, funding).join("; "))));
+      const why = el("ul", { class: "why" });
+      for (const line of reasonLines(s, status, fstatus, funding)) why.append(reasonItem(line));
+      table.append(el("tr", { class: `lvl-${levelOf(worstState(s, status, fstatus))}` }, el("td", { class: "sym" }, s.symbol),
+        stateCell(s.state), stateCell(oiStateOf(s, status)), stateCell(fundingStateOf(s, fstatus)), el("td", {}, why)));
     }
   }
 
-  const ok = okEntries(symbols, status, fstatus);
+  const ok = okEntries(symbols.filter(shown), status, fstatus);
   const group = $("ok-group"); group.replaceChildren();
   group.style.display = ok.length ? "block" : "none";
   if (ok.length) {
@@ -355,27 +544,47 @@ function render(data, httpStatus) {
   }
 
   const heat = $("heatmap"); heat.replaceChildren();
-  heat.append(el("tr", {}, el("th", {}, TEXT.columns.candles), el("th", {}, TEXT.columns.openInterest), el("th", {}, TEXT.columns.funding), el("th", {}, TEXT.columns.symbol),
-    el("th", {}, TEXT.columns.since), el("th", {}, TEXT.columns.strips)));
-  for (const s of symbols) {
+  const visible = symbols.filter(shown);
+  if (visible.length === 0) {
+    heat.append(el("tr", {}, el("td", { class: "empty" }, TEXT.search.none)));
+    return;
+  }
+  const axis = el("div", { class: "axis" }, el("span", {}, TEXT.axis.start(data.window.start)), el("span", {}, TEXT.axis.middle), el("span", {}, TEXT.axis.end));
+  heat.append(el("tr", {}, el("th", {}, TEXT.columns.symbol), el("th", {}, axis)));
+  for (const s of visible) {
     const state = oiStateOf(s, status);
     const block = s.open_interest;
+    const lines = el("td", {});
     const candleCanvas = el("canvas");
     drawStrip(candleCanvas, s.strip, data.window, TEXT.strip);
-    const cell = el("td", { style: "width:60%" }, el("div", { class: "strip-label" }, TEXT.rows.candles), candleCanvas);
-    const since = el("td", {}, el("div", {}, `${TEXT.since.candles}: ${day(s.oldest_open_time_ms)}`));
+    lines.append(stripLine(TEXT.rows.candles, s.state, candleCanvas));
+    const since = el("div", { class: "since" }, `${TEXT.since.candles}: ${day(s.oldest_open_time_ms)}`);
     if (state !== null) {
       const interestCanvas = el("canvas");
       drawStrip(interestCanvas, block ? block.strip : null, data.window, TEXT.oiStrip);
-      cell.append(el("div", { class: "strip-label" }, TEXT.rows.openInterest), interestCanvas);
-      since.append(el("div", {}, `${TEXT.since.openInterest}: ${day(block ? block.oldest_time_ms : null)}`));
+      lines.append(stripLine(TEXT.rows.openInterest, state, interestCanvas));
+      since.append(el("br"), `${TEXT.since.openInterest}: ${day(block ? block.oldest_time_ms : null)}`);
     }
     const fund = fundingStateOf(s, fstatus);
-    if (fund !== null) cell.append(el("div", { class: "strip-label", title: TEXT.noStripFunding }, fundingLine(s.funding_rate, funding)));
-    heat.append(el("tr", {}, el("td", {}, tag(s.state)), el("td", {}, state === null ? TEXT.notApplicable : tag(state)),
-      el("td", {}, fund === null ? TEXT.notApplicable : tag(fund)), el("td", {}, s.symbol), since, cell));
+    if (fund !== null) lines.append(stripLine(TEXT.rows.funding, fund, el("span", { class: "fline", title: TEXT.noStripFunding }, fundingLine(s.funding_rate, funding))));
+    heat.append(el("tr", {}, el("td", { class: "sym" }, s.symbol, since), lines));
   }
 }
+
+// The filter box: typing filters at once (debounced), "/" jumps to it, Escape clears it.
+let typing = null;
+$("search").addEventListener("input", (event) => {
+  clearTimeout(typing);
+  typing = setTimeout(() => { filter.query = event.target.value; if (lastData) render(lastData); }, 150);
+});
+document.addEventListener("keydown", (event) => {
+  const box = $("search");
+  if (event.key === "/" && document.activeElement !== box && !event.metaKey && !event.ctrlKey) { event.preventDefault(); box.focus(); box.select(); }
+  else if (event.key === "Escape" && (filter.query || filter.part)) {
+    box.value = ""; filter.query = ""; filter.part = null; filter.state = null;
+    if (lastData) render(lastData);
+  }
+});
 
 let inFlight = false, timer = null, lastFetchedAt = null, lastApiClock = null;
 
