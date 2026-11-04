@@ -70,11 +70,21 @@ class OpenInterestRule:
 
 
 def open_interest_rule(
-    symbol_count: int, budget_per_5min: int, round_offset_ms: int, lag_threshold_ms: int, period: Timeframe
+    symbol_count: int,
+    budget_per_5min: int,
+    round_offset_ms: int,
+    lag_threshold_ms: int,
+    period: Timeframe,
+    retrieval_horizon_ms: int = RETRIEVAL_HORIZON_MS,
 ) -> OpenInterestRule:
-    """The rule for a configuration; ``CadenceError`` when the symbol count needs a cadence above 12."""
+    """The rule for a configuration; ``CadenceError`` when the symbol count needs a cadence above 12.
+
+    ``retrieval_horizon_ms`` is the configured ``backfill_days`` in milliseconds (ADR-0003 A-4).
+    """
     cadence = open_interest_cadence(symbol_count, budget_per_5min)
-    return OpenInterestRule(cadence, expected_after_ms(cadence, round_offset_ms, period), lag_threshold_ms, period)
+    return OpenInterestRule(
+        cadence, expected_after_ms(cadence, round_offset_ms, period), lag_threshold_ms, period, retrieval_horizon_ms
+    )
 
 
 @dataclass(frozen=True)

@@ -26,6 +26,7 @@ OPEN_INTEREST_TABLE = (
     "publication_delay_ms = 15000\n"
     "round_offset_ms = 200000\n"
     "budget_per_5min = 400\n"
+    "backfill_days = 29\n"
 )
 FUNDING_RATE_TABLE = (
     "\n[funding_rate]\n"

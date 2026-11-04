@@ -18,7 +18,7 @@ from quasar_market_data.collector.binance_usdm_open_interest import (
 from quasar_market_data.collector.extension_pause import ExtensionPause, ExtensionPaused, ExtensionStopped
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.collector.open_interest_budget import WINDOW_MS, OpenInterestBudget
-from quasar_market_data.domain.open_interest_request import RETRIEVAL_HORIZON_MS
+from quasar_market_data.domain.open_interest_request import MAX_RETRIEVAL_HORIZON_MS
 from quasar_market_data.domain.timeframe import Timeframe
 from tests.collector.manual_time import NS_PER_MS, ManualTime, assert_no_leftover_tasks
 from tests.collector.test_binance_usdm import FakeExchange as FakeCandleExchange
@@ -233,11 +233,11 @@ def test_a_start_older_than_the_horizon_is_never_sent_and_one_at_the_horizon_is(
     async def scenario() -> None:
         rig = Rig()
         source = await rig.open()
-        too_old = AS_OF - RETRIEVAL_HORIZON_MS - STEP
+        too_old = AS_OF - MAX_RETRIEVAL_HORIZON_MS - STEP
         with pytest.raises(OpenInterestRequestRefused, match="horizon"):
             await hist(source, too_old, too_old + STEP)
         assert rig.exchange.called("hist") == 0
-        at_horizon = AS_OF - RETRIEVAL_HORIZON_MS
+        at_horizon = AS_OF - MAX_RETRIEVAL_HORIZON_MS
         await hist(source, at_horizon, at_horizon + STEP)
         assert rig.exchange.called("hist") == 1
 

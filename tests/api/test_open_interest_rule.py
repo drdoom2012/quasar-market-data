@@ -40,6 +40,7 @@ def settings_for(
     offset: int = 200_000,
     lag: int = 60_000,
     table: bool = True,
+    backfill_days: int = 29,
 ) -> Settings:
     text = config_text(symbols=symbols(count), lag_threshold_ms=lag)
     if table:
@@ -50,6 +51,7 @@ def settings_for(
             "publication_delay_ms = 15000\n"
             f"round_offset_ms = {offset}\n"
             f"budget_per_5min = {budget}\n"
+            f"backfill_days = {backfill_days}\n"
         )
     return parse_settings(text, base_dir=BASE)
 
@@ -139,3 +141,24 @@ def test_the_slots_the_api_expects_are_the_window_the_collector_requests(count: 
     ]
 
     assert requestable == list(range(oldest, newest + P, P))
+
+
+@pytest.mark.parametrize("days", [1, 29, 30])
+def test_the_rule_carries_the_configured_depth_as_the_retrieval_horizon_and_the_collector_agrees(days: int) -> None:
+    settings = settings_for(10, 400, backfill_days=days)
+
+    rule = rule_from_settings(settings)
+
+    assert rule is not None and rule.retrieval_horizon_ms == days * 86_400_000
+    run = _open_interest_run(settings, fake_open_source)
+    assert run is not None and run.config.retrieval_horizon_ms == rule.retrieval_horizon_ms  # one file, one depth
+    # a slot older than the depth can no longer be requested: the Collector's oldest allowed slot is the rule's edge
+    assert (
+        oldest_allowed_ms(AS_OF, P5, run.config.retrieval_horizon_ms)
+        == -(-(AS_OF - rule.retrieval_horizon_ms) // P) * P
+    )
+
+
+def test_a_depth_above_30_days_never_reaches_a_rule() -> None:
+    with pytest.raises(ConfigError, match="backfill_days"):
+        settings_for(10, 400, backfill_days=31)

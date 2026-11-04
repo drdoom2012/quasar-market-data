@@ -74,7 +74,12 @@ from quasar_market_data.domain.open_interest_holes import (
     plan_pages,
     slots_at_risk,
 )
-from quasar_market_data.domain.open_interest_request import MAX_PERIOD_ENDS, RETRIEVAL_HORIZON_MS
+from quasar_market_data.domain.open_interest_request import (
+    DEFAULT_BACKFILL_DAYS,
+    MAX_BACKFILL_DAYS,
+    MAX_PERIOD_ENDS,
+    MIN_BACKFILL_DAYS,
+)
 from quasar_market_data.domain.open_interest_schedule import (
     ROUND_DEADLINE_RESERVE_MS,
     backfill_may_start,
@@ -129,6 +134,7 @@ class OpenInterestTaskConfig:
     round_offset_ms: int
     budget_per_5min: int
     time_trust: TimeTrustConfig = DEFAULT_TIME_TRUST
+    backfill_days: int = DEFAULT_BACKFILL_DAYS  # the retrieval horizon H: how far back a hole is still requested (A-4)
 
     def __post_init__(self) -> None:
         if type(self.symbols) is not tuple:
@@ -140,7 +146,15 @@ class OpenInterestTaskConfig:
         object.__setattr__(self, "symbols", tuple(sorted(self.symbols)))
         if type(self.publication_delay_ms) is not int or self.publication_delay_ms < 0:
             raise ValueError(f"publication_delay_ms must be an int >= 0, got {self.publication_delay_ms!r}")
+        if type(self.backfill_days) is not int or not MIN_BACKFILL_DAYS <= self.backfill_days <= MAX_BACKFILL_DAYS:
+            raise ValueError(
+                f"backfill_days must be an int within [{MIN_BACKFILL_DAYS}, {MAX_BACKFILL_DAYS}], got {self.backfill_days!r}"
+            )
         open_interest_cadence(len(self.symbols), self.budget_per_5min)  # CadenceError / ValueError: fail at once
+
+    @property
+    def retrieval_horizon_ms(self) -> int:
+        return self.backfill_days * DAY_MS
 
     @property
     def cadence(self) -> int:
@@ -439,7 +453,7 @@ class _OpenInterestTask:
         config = self.config
         period = config.period
         step = period.milliseconds
-        oldest = oldest_allowed_ms(as_of, period)
+        oldest = oldest_allowed_ms(as_of, period, config.retrieval_horizon_ms)
         newest = newest_expected_ms(as_of, config.cadence, config.round_offset_ms, period)
         first_scan = symbol not in self.holes
         known = self.holes.get(symbol)
@@ -485,7 +499,7 @@ class _OpenInterestTask:
         lost = 0
         if first_stored is not None and first_stored < oldest:
             lost = max(0, (oldest - first_stored) // step - (stored_older or 0))
-        leaves = f"{holes[0] + RETRIEVAL_HORIZON_MS - as_of}" if holes else "na"
+        leaves = f"{holes[0] + self.config.retrieval_horizon_ms - as_of}" if holes else "na"
         self.emit(
             f"oi-reconcile symbol={symbol} stored={len(stored)} holes={len(holes)}"
             f" no_longer_recoverable={lost} oldest_hole_leaves_in_ms={leaves}"
@@ -529,7 +543,7 @@ class _OpenInterestTask:
     async def _warn_slots_at_risk(self, as_of: int) -> None:
         config = self.config
         step = config.period.milliseconds
-        threshold = as_of - RETRIEVAL_HORIZON_MS + DAY_MS  # only slots that leave within a day are judged
+        threshold = as_of - config.retrieval_horizon_ms + DAY_MS  # only slots that leave within a day are judged
         reachable: dict[str, tuple[int, ...]] = {}
         for index, symbol in enumerate(config.symbols):
             if index % YIELD_EVERY_SYMBOLS == 0:
@@ -543,7 +557,13 @@ class _OpenInterestTask:
             if slots := self.tries.available(symbol, near, _FAR_FUTURE_MS):
                 reachable[symbol] = slots
         share = backfill_share(len(config.symbols), config.budget_per_5min)
-        lost = slots_at_risk(plan_pages(reachable, config.period), as_of, share, config.period)
+        lost = slots_at_risk(
+            plan_pages(reachable, config.period),
+            as_of,
+            share,
+            config.period,
+            retrieval_horizon_ms=config.retrieval_horizon_ms,
+        )
         for symbol, slots in lost.items():
             first = ",".join(str(slot) for slot in slots[:URGENT_SLOTS_LOGGED])
             self.emit(f"oi-warning holes-will-leave-the-horizon symbol={symbol} slots={len(slots)} first={first}")

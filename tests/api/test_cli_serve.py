@@ -160,6 +160,28 @@ def test_a_funding_backfill_depth_above_30_days_exits_2_and_never_binds(
     assert "funding_rate.backfill_days" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("enabled", ["true", "false"])
+def test_an_open_interest_backfill_depth_above_30_days_exits_2_and_never_binds(
+    tmp_path: Path,
+    run_calls: RunCalls,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    enabled: str,
+) -> None:
+    created: list[Any] = []
+    monkeypatch.setattr(cli, "create_app", lambda *args, **kwargs: created.append(kwargs))
+    cfg = write_config(tmp_path, database_path="m.db")
+    table = OPEN_INTEREST_TABLE.format(enabled=enabled).replace("backfill_days = 29", "backfill_days = 31")
+    cfg.write_text(cfg.read_text(encoding="utf-8") + table, encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["serve", str(cfg)])
+
+    assert exc.value.code == 2  # ADR-0003 A-4
+    assert created == [] and run_calls == []
+    assert "open_interest.backfill_days" in capsys.readouterr().err
+
+
 def test_a_missing_file_exits_2_and_never_binds(tmp_path: Path, run_calls: RunCalls) -> None:
     with pytest.raises(SystemExit) as exc:
         cli.main(["serve", str(tmp_path / "absent.toml")])
@@ -197,7 +219,7 @@ def test_the_database_path_does_not_depend_on_the_working_directory(
 
 OPEN_INTEREST_TABLE = (
     '\n[open_interest]\nenabled = {enabled}\nperiod = "5m"\npublication_delay_ms = 15000\n'
-    "round_offset_ms = 250000\nbudget_per_5min = 400\n"
+    "round_offset_ms = 250000\nbudget_per_5min = 400\nbackfill_days = 29\n"
 )
 
 

@@ -541,7 +541,7 @@ GET /v1/open-interest?venue=binance-usdm&symbol=BTC/USDT:USDT&period=5m&start=17
 
 ### 6.5.3 Slot states
 
-For a slot `T` at `as_of_ms`, the **first** matching state wins (ADR-0003 P-7). `rule` is the one stated in the response (section 6.5.4); `H` is `rule.retrieval_horizon_ms`, 29 days.
+For a slot `T` at `as_of_ms`, the **first** matching state wins (ADR-0003 P-7). `rule` is the one stated in the response (section 6.5.4); `H` is `rule.retrieval_horizon_ms`, the `backfill_days` of the `[open_interest]` table of the configuration file (1 to 30 days, 29 in the shipped files; ADR-0003 amendment A-4).
 
 | Order | State | Condition |
 |---|---|---|
@@ -604,7 +604,7 @@ Two consequences of the order, both different from candle coverage (section 6.1.
 
 - The example is **illustrative and computed by hand**: seven slots `1792672500000` to `1792674300000`; rows stored for the 1st, 2nd (conflicted) and 4th slots; the newest stored `time_ms` is the 4th; `as_of_ms` is the 6th slot plus `expected_after_ms` plus 30 000 ms, so the 5th slot is `stale`, the 6th `due` and the 7th `not_yet_expected`; the 3rd slot has no row and lies before the newest, so it is `missing`. The values are not real.
 - `start` and `end` echo the effective window. `as_of_ms` is the server clock read once for this request. `series` is present on every `200`: the `time_ms` of the oldest and newest stored row of the series (a series that exists has at least one row, and rows are never deleted).
-- `rule` is what the states were computed with: `cadence` is `c` of ADR-0003 P-10 (each symbol is asked every `c` periods); `expected_after_ms = c x 300 000 + round_offset_ms`; `lag_threshold_ms` is `rule.lag_threshold_ms` of the configuration file (the value `/v1/coverage` uses, decision OA3); `retrieval_horizon_ms` is `H`, fixed at 29 days in v1.
+- `rule` is what the states were computed with: `cadence` is `c` of ADR-0003 P-10 (each symbol is asked every `c` periods); `expected_after_ms = c x 300 000 + round_offset_ms`; `lag_threshold_ms` is `rule.lag_threshold_ms` of the configuration file (the value `/v1/coverage` uses, decision OA3); `retrieval_horizon_ms` is `H`, the `backfill_days` of the `[open_interest]` table in milliseconds (1 to 30 days; 29 in the shipped files; the Collector and the API read the same key, ADR-0003 amendment A-4).
 - `rows` are ascending, unique by `time_ms`, each with exactly the fields shown; `conflicted` is always present. `next` is always present and defined as in section 3.
 
 ### 6.5.5 Errors and order of checks
@@ -910,7 +910,7 @@ Authentication, rate limiting, CORS, write endpoints, streaming, candle revision
 | `/v1/indicators`: per-point values or reasons, segments that never cross a non-present slot, `warmup_slots`, `latest` is the window's last point, float64 values reproducible only for the same build | S18 design (`docs/superpowers/specs/2026-10-28-s18-indicators-design.md`), decisions I1–I6 |
 | S19 indicators: `ema`, `macd`, `atr`, `adx`, `bbands`, the `macd` parameter constraint, high/low inputs, the `2016 + 1500` read bound | S19 design (`docs/superpowers/specs/2026-10-28-s19-indicators-design.md`), decisions J1–J7 |
 | `/v1/instruments`: the configured universe from the versioned file, ordered by triple, `newest_open_time_ms` or `null`, configured instruments only | S20 design (`docs/superpowers/specs/2026-10-28-s20-universe-config-design.md`), decisions U4, U6, INV-066, INV-067 |
-| `/v1/open-interest`: `time_ms` is the period end, seven slot states with the first match winning, `not_yet_expected` after `c x 5 min + round_offset`, `no_longer_recoverable` after 29 days, `due`/`stale` at the newest edge, `conflicted` rows returned with their first stored values | ADR-0003 P-3, P-5, P-7, P-8, P-10, P-11; decisions OA1 to OA11 |
+| `/v1/open-interest`: `time_ms` is the period end, seven slot states with the first match winning, `not_yet_expected` after `c x 5 min + round_offset`, `no_longer_recoverable` after `backfill_days` (29 days in the shipped files), `due`/`stale` at the newest edge, `conflicted` rows returned with their first stored values | ADR-0003 P-3, P-5, P-7, P-8, P-10, P-11; decisions OA1 to OA11 |
 | `/health/ingest` `open_interest` object: additive, `null` when not enabled, per-series freshness with the open interest expectation, `conflicted_series` makes the status `degraded` | ADR-0003 P-8, P-11, O-4; decisions OA5, OA6 |
 | `/v1/open-interest/coverage`: counts and runs of the section 6.5.3 states for at most 10 000 slots from one slot sequence, the slot-model properties of 6.6.4, only times read, a conflict without a row accepted | ADR-0003 P-7, amendment A-2; OI-6 design sections 5 and 6; decisions OB1 to OB6 |
 | `/v1/funding-rates`: rows at `funding_time_ms` (an instant, per settlement, no interval), signed `funding_rate`, nullable `mark_price`, `rate_type` in the key, first stored values for a conflicted row | ADR-0004 P-2, P-3, P-6; decisions FA1 to FA4 |

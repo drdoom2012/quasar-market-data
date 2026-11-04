@@ -31,6 +31,8 @@ from quasar_market_data.domain.open_interest_cadence import (
     CadenceError,
     open_interest_cadence,
 )
+from quasar_market_data.domain.open_interest_request import MAX_BACKFILL_DAYS as MAX_OI_BACKFILL_DAYS
+from quasar_market_data.domain.open_interest_request import MIN_BACKFILL_DAYS as MIN_OI_BACKFILL_DAYS
 from quasar_market_data.domain.reconcile import steady_state_limit_needed
 from quasar_market_data.domain.timeframe import Timeframe
 
@@ -100,6 +102,7 @@ class OpenInterestSettings:
     publication_delay_ms: int
     round_offset_ms: int
     budget_per_5min: int
+    backfill_days: int
 
 
 @dataclass(frozen=True)
@@ -302,7 +305,11 @@ def _open_interest(root: dict[str, Any], symbol_count: int) -> OpenInterestSetti
         return None
     table = _table(root, "", "open_interest")
     path = "open_interest"
-    _check_keys(table, path, {"enabled", "period", "publication_delay_ms", "round_offset_ms", "budget_per_5min"})
+    _check_keys(
+        table,
+        path,
+        {"enabled", "period", "publication_delay_ms", "round_offset_ms", "budget_per_5min", "backfill_days"},
+    )
     enabled = _bool(table, path, "enabled")
     period = _str(table, path, "period")
     if period != SUPPORTED_OPEN_INTEREST_PERIOD:
@@ -310,11 +317,12 @@ def _open_interest(root: dict[str, Any], symbol_count: int) -> OpenInterestSetti
     delay = _int(table, path, "publication_delay_ms", 0, MAX_PUBLICATION_DELAY_MS)
     offset = _int(table, path, "round_offset_ms", MIN_ROUND_OFFSET_MS, MAX_ROUND_OFFSET_MS)
     budget = _int(table, path, "budget_per_5min", MIN_BUDGET_PER_5MIN, MAX_BUDGET_PER_5MIN)
+    backfill_days = _int(table, path, "backfill_days", MIN_OI_BACKFILL_DAYS, MAX_OI_BACKFILL_DAYS)  # ADR-0003 A-4
     try:
         open_interest_cadence(symbol_count, budget)
     except CadenceError as exc:
         raise ConfigError(f"{path}.budget_per_5min", str(exc)) from exc
-    return OpenInterestSettings(enabled, period, delay, offset, budget)
+    return OpenInterestSettings(enabled, period, delay, offset, budget, backfill_days)
 
 
 def _funding_rate(root: dict[str, Any], symbol_count: int) -> FundingRateSettings | None:

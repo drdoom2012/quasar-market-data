@@ -932,6 +932,7 @@ def _open_interest_run(settings: Settings, open_oi_source: OpenInterestOpenSourc
         publication_delay_ms=table.publication_delay_ms,
         round_offset_ms=table.round_offset_ms,
         budget_per_5min=table.budget_per_5min,
+        backfill_days=table.backfill_days,
     )
     return OpenInterestRun(config, open_oi_source, OPEN_INTEREST_STOP_GRACE_MS)
 

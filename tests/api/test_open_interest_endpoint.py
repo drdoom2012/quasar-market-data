@@ -130,7 +130,7 @@ def test_the_rule_in_the_body_is_the_one_derived_from_the_file(
     """P-15: the API and the Collector derive the same ``c`` from the same file (b = 100, 200, 400)."""
     text = config_text(symbols=tuple(f"C{i:04d}/USDT:USDT" for i in range(symbols))) + (
         '\n[open_interest]\nenabled = true\nperiod = "5m"\npublication_delay_ms = 15000\n'
-        f"round_offset_ms = 200000\nbudget_per_5min = {budget}\n"
+        f"round_offset_ms = 200000\nbudget_per_5min = {budget}\nbackfill_days = 29\n"
     )
     rule = rule_from_settings(parse_settings(text, base_dir=tmp_path))
     path = make_database(tmp_path / "m.db", open_interest=[slot(0)])

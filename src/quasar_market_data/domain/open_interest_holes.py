@@ -30,11 +30,12 @@ def _int(value: int, name: str) -> int:
     return value
 
 
-def oldest_allowed_ms(as_of_ms: int, period: Timeframe) -> int:
-    """The oldest slot that may be requested at ``as_of_ms``: ``as_of - H`` rounded up to the period."""
+def oldest_allowed_ms(as_of_ms: int, period: Timeframe, retrieval_horizon_ms: int = RETRIEVAL_HORIZON_MS) -> int:
+    """The oldest slot that may be requested at ``as_of_ms``: ``as_of - H`` rounded up to the period (``H`` is the
+    configured depth, ``backfill_days``)."""
     as_of = ensure_timestamp_ms(as_of_ms, "as_of_ms")
     step = period.milliseconds
-    return -(-(as_of - RETRIEVAL_HORIZON_MS) // step) * step
+    return -(-(as_of - retrieval_horizon_ms) // step) * step
 
 
 def newest_expected_ms(as_of_ms: int, cadence: int, offset_ms: int, period: Timeframe) -> int:
@@ -107,6 +108,7 @@ def slots_at_risk(
     share_per_cycle: int,
     period: Timeframe,
     margin_ms: int = DAY_MS,
+    retrieval_horizon_ms: int = RETRIEVAL_HORIZON_MS,
 ) -> Mapping[str, tuple[int, ...]]:
     """Holes that will leave the horizon before the plan can reach them within the backfill share.
 
@@ -120,7 +122,7 @@ def slots_at_risk(
     if share < 1:
         raise ValueError(f"share_per_cycle must be >= 1, got {share}")
     margin = _int(margin_ms, "margin_ms")
-    horizon_start = as_of - RETRIEVAL_HORIZON_MS
+    horizon_start = as_of - retrieval_horizon_ms
     lost: dict[str, list[int]] = {}
     for position, page in enumerate(pages, start=1):
         for slot in page.slots:

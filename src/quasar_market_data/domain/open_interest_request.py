@@ -16,7 +16,11 @@ from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
 
 MAX_PERIOD_ENDS: Final = 500
-RETRIEVAL_HORIZON_MS: Final = 29 * 86_400_000  # ADR-0003 P-5 H: one day under the observed 30/31-day edge
+MIN_BACKFILL_DAYS: Final = 1
+MAX_BACKFILL_DAYS: Final = 30  # ADR-0003 A-4: the configured depth is at most 30 days, a larger value stops the process
+DEFAULT_BACKFILL_DAYS: Final = 29  # ADR-0003 P-5 H: one day under the observed 30/31-day edge of Binance
+RETRIEVAL_HORIZON_MS: Final = DEFAULT_BACKFILL_DAYS * 86_400_000  # the depth of the shipped file; a default argument
+MAX_RETRIEVAL_HORIZON_MS: Final = MAX_BACKFILL_DAYS * 86_400_000  # no request is ever older than this
 
 
 class OpenInterestRequestError(ValueError):
@@ -49,8 +53,8 @@ def validate_open_interest_request(start_ms: int, end_ms: int, period: Timeframe
     count = period_end_count(start, end, period)
     if count > MAX_PERIOD_ENDS:
         raise OpenInterestRequestError(f"{count} period ends exceed the maximum of {MAX_PERIOD_ENDS}")
-    if start < as_of - RETRIEVAL_HORIZON_MS:
+    if start < as_of - MAX_RETRIEVAL_HORIZON_MS:
         raise OpenInterestRequestError(
-            f"start_ms {start} is older than the retrieval horizon of {RETRIEVAL_HORIZON_MS} ms before {as_of}"
+            f"start_ms {start} is older than the retrieval horizon of {MAX_RETRIEVAL_HORIZON_MS} ms before {as_of}"
         )
     return count

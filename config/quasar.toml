@@ -34,6 +34,24 @@ min_request_interval_ms = 100
 enabled = true
 days = 30
 
+# Open interest (ADR-0003). The history depth is not configurable: it is the 29 days Binance serves.
+[open_interest]
+enabled = true
+period = "5m"
+publication_delay_ms = 15000   # a row is stored only when its period end + this is behind the server-time lower bound
+round_offset_ms = 200000       # 60000..280000: the round for boundary B wakes at B + this
+budget_per_5min = 400          # 100..400 request starts per 300 s (history and server time together)
+backfill_days = 29             # 1..30: how far back a hole is still requested; more than 30 stops the process at start
+
+# Funding rate (ADR-0004), judged together with open interest: they share one rate-limit pause.
+[funding_rate]
+enabled = true
+publication_delay_ms = 30000
+round_offset_ms = 60000        # 60000..600000 and at least publication_delay_ms + 5000
+budget_per_5min = 150          # 50..250 request starts per 305 s window (history and server time together)
+backfill_days = 30             # 1..30: how far back the verified span grows; more than 30 stops the process at start
+recheck_ms = 86400000          # 3600000..604800000
+
 [api]
 host = "127.0.0.1"
 port = 8000
