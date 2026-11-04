@@ -18,8 +18,9 @@ is entered right before the CCXT call and left after it:
 A group that waits for room therefore never holds a slot against the other group, and a start is recorded only
 when a slot is held, so the sends of a group stay at least 305 s apart in the sense of the rule above. A waiter
 that is cancelled (for example by the caller's deadline) before step 4 consumes nothing and holds neither lock nor
-slot. CCXT's own throttle may still delay the network send after the grant; that only spaces requests further
-apart. The limiter says nothing about other processes on the same IP (README).
+slot. A send may lag its recorded start by CCXT's own throttle (a request costs 1 and ``rateLimit`` is 50 ms for
+``fundingRate``, so tens of milliseconds); such a lag can narrow the gap to a later request, and the 5 s guard of
+the window covers it. The limiter says nothing about other processes on the same IP (README).
 
 Memory of starts is pruned on the next grant, so ``starts_in_window`` is exact for instants not earlier than the
 previous grant's clock reading.

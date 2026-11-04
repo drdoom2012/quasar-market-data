@@ -42,8 +42,10 @@ class FakeFundingSource:
         time_error: Exception | None = None,
         hist_error: BaseException | None = None,
         response: object | None = None,
+        market_error: Exception | None = None,
     ) -> None:
         self.clock = clock
+        self.market_error = market_error
         hour = clock.wall_ms() // HOUR * HOUR
         self.dataset = settlement_rows(hour - 1_000 * HOUR, hour + 10 * HOUR) if dataset is None else dataset
         self.rtt_ms = rtt_ms
@@ -55,6 +57,8 @@ class FakeFundingSource:
         self.closed = False
 
     def market_id(self, symbol: str) -> str:
+        if self.market_error is not None:
+            raise self.market_error
         return MARKET_ID
 
     async def fetch_server_time(self, request_class: RequestClass = RequestClass.R) -> ServerTimeObservation:

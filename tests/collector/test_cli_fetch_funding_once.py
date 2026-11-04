@@ -9,6 +9,7 @@ from quasar_market_data.collector.async_funding_rate_writer import (
     FundingRatePageError,
     FundingRateWriteReport,
 )
+from quasar_market_data.collector.binance_usdm_funding_rate import FundingRateRequestRefused
 from quasar_market_data.collector.cli import main
 from quasar_market_data.collector.clock import Clock
 from quasar_market_data.collector.extension_pause import ExtensionPause, ExtensionPaused, ExtensionStopped
@@ -269,6 +270,13 @@ def test_a_429_or_418_on_the_time_request_is_reported_as_such_not_as_untrusted_t
     err = capsys.readouterr().err
     assert err.startswith("error:") and "untrusted" not in err and str(error) in err
     assert source.hist_calls == [] and stored(db) == []
+
+
+def test_an_inactive_symbol_exits_one_before_any_request(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    clock = FakeClock()
+    source = FakeFundingSource(clock, market_error=FundingRateRequestRefused("the market is not active"))
+    assert run_cli(db, source, clock) == 1
+    assert capsys.readouterr().err.startswith("error:") and source.time_calls == [] and stored(db) == []
 
 
 def test_a_rejected_response_exits_one_with_nothing_written(db: Path, capsys: pytest.CaptureFixture[str]) -> None:

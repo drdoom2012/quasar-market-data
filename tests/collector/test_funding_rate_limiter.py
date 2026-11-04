@@ -18,8 +18,14 @@ WINDOW_NS = WINDOW_MS * NS_PER_MS
 Grants = list[tuple[RequestClass, int]]
 
 
+REAL_TIMEOUT_S = 30  # a regression in the boundary arithmetic spins the fake clock forever: fail instead of hanging
+
+
 def run(scenario: Callable[[], Coroutine[None, None, None]]) -> None:
-    asyncio.run(scenario())
+    async def guarded() -> None:
+        await asyncio.wait_for(scenario(), REAL_TIMEOUT_S)
+
+    asyncio.run(guarded())
 
 
 def shares(b: int) -> tuple[int, int]:
@@ -184,6 +190,9 @@ def test_a_start_is_recorded_only_when_a_slot_is_held() -> None:
         assert limiter.starts_in_window(t.monotonic_ns()) == 3
         assert grants[-1] == (C, t.monotonic_ns())  # recorded with the reading taken when the slot was held
         assert grants[-1][1] - grants[0][1] == 1_000 * NS_PER_MS
+        # the recorded start is the reading taken when the slot was held (1 s after the first), not before the wait
+        after_first_window = grants[0][1] + WINDOW_NS + 500 * NS_PER_MS
+        assert limiter.starts_in_window(after_first_window, C) == 1
         hold[1].set()
         await asyncio.gather(*busy)
 
@@ -407,3 +416,87 @@ def test_the_class_aliases_are_the_domain_enum() -> None:
     from quasar_market_data.domain.funding_rate_capacity import RequestClass as DomainRequestClass
 
     assert RequestClass is DomainRequestClass
+
+
+def test_the_group_lock_is_held_while_waiting_for_a_slot_so_the_room_cannot_shrink() -> None:
+    """Room is seen, then both slots are busy: a second waiter of the group must not see the same room."""
+
+    async def scenario() -> None:
+        t = ManualTime()
+        limiter = FundingRateLimiter(50, t, t.sleep)  # m = 25
+        grants: Grants = []
+        first = t.monotonic_ns()
+        for _ in range(24):
+            await use(limiter, t, R, grants)
+        holds = [asyncio.Event(), asyncio.Event()]
+        busy = [asyncio.create_task(use(limiter, t, C, grants, holds[i])) for i in range(2)]
+        await t.settle()
+        r1 = asyncio.create_task(use(limiter, t, R, grants))
+        r2 = asyncio.create_task(use(limiter, t, R, grants))
+        await t.settle()
+        assert limiter.starts_in_window(t.monotonic_ns(), R) == 24  # both wait for a slot, nothing recorded
+        holds[0].set()
+        await t.settle()
+        assert r1.done() and not r2.done()
+        assert limiter.starts_in_window(t.monotonic_ns(), R) == 25  # the cap, not 26
+        holds[1].set()
+        await t.settle()
+        assert not r2.done()  # the group is full until the first batch leaves the window
+        await t.advance(WINDOW_MS - 1)
+        assert not r2.done()
+        await t.advance(1)
+        await asyncio.gather(r1, r2, *busy)
+        assert grants[-1] == (R, first + WINDOW_NS)
+        assert max_in_any_window([instant for c, instant in grants if c is R]) <= 25
+
+    run(scenario)
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_property_with_slots_held_no_group_exceeds_its_cap(seed: int) -> None:
+    async def scenario() -> None:
+        rng = random.Random(seed)
+        t = ManualTime()
+        limiter = FundingRateLimiter(50, t, t.sleep)
+        starts: dict[RequestClass, list[int]] = {R: [], C: [], H: []}
+
+        async def one() -> None:
+            await t.sleep(rng.randint(0, 20_000))
+            request_class = rng.choice([R, R, C, H])
+            async with limiter.grant(request_class):
+                starts[request_class].append(t.monotonic_ns())
+                await t.sleep(rng.choice([0, 1, 500, 5_000, 60_000]))  # the call holds its slot
+
+        tasks = [asyncio.create_task(one()) for _ in range(120)]
+        await t.settle()
+        while not all(task.done() for task in tasks):
+            await t.advance(rng.randint(1, 20_000))
+        await asyncio.gather(*tasks)
+        assert max_in_any_window(starts[R]) <= 25
+        assert max_in_any_window(starts[C] + starts[H]) <= 25
+        assert max_in_any_window(starts[R] + starts[C] + starts[H]) <= 50
+
+    run(scenario)
+
+
+def test_the_wait_is_rounded_up_to_a_whole_millisecond() -> None:
+    async def scenario() -> None:
+        t = ManualTime()
+        asked: list[int] = []
+
+        async def sleep(ms: int) -> None:
+            asked.append(ms)
+            await t.sleep(ms)
+
+        limiter = FundingRateLimiter(50, t, sleep)
+        grants: Grants = []
+        for _ in range(25):
+            await use(limiter, t, R, grants)
+        await t.advance_ns(500_000)  # half a millisecond later
+        waiter = asyncio.create_task(use(limiter, t, R, grants))
+        await t.settle()
+        assert asked == [305_000]  # 304 999.5 ms remain: rounded up, never down
+        await t.advance(WINDOW_MS)
+        await waiter
+
+    run(scenario)

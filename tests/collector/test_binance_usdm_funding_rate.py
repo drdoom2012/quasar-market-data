@@ -19,6 +19,7 @@ from quasar_market_data.collector.binance_usdm_funding_rate import (
 from quasar_market_data.collector.extension_pause import ExtensionPause, ExtensionPaused, ExtensionStopped
 from quasar_market_data.collector.funding_rate_limiter import WINDOW_MS, FundingRateLimiter, RequestClass
 from quasar_market_data.collector.kline_source import SourceError
+from quasar_market_data.collector.rate_limiter import RateLimitedSource, RateLimiter
 from quasar_market_data.domain.funding_rate import FUNDING_RATE_PAGE_LIMIT
 from quasar_market_data.domain.funding_rate_span import Interval, merge_span, page_coverage
 from quasar_market_data.domain.timeframe import Timeframe
@@ -36,8 +37,14 @@ S = 1000
 R, C, H = RequestClass.R, RequestClass.C, RequestClass.H
 
 
+REAL_TIMEOUT_S = 30  # a regression that spins the fake clock must fail, not hang
+
+
 def run(scenario: Callable[[], Coroutine[None, None, None]]) -> None:
-    asyncio.run(scenario())
+    async def guarded() -> None:
+        await asyncio.wait_for(scenario(), REAL_TIMEOUT_S)
+
+    asyncio.run(guarded())
 
 
 def funding_rows(
@@ -560,12 +567,23 @@ def test_a_fresh_client_has_no_max_retries_on_failure_option_and_the_adapter_sen
     run(scenario)
 
 
-def test_candle_requests_continue_while_funding_is_paused_banned_raising_or_hanging() -> None:
+def test_candle_requests_continue_while_funding_is_paused_banned_raising_or_hanging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acquired: list[int] = []
+    original_acquire = RateLimiter.acquire
+
+    async def counting_acquire(self: RateLimiter) -> None:
+        acquired.append(1)
+        await original_acquire(self)
+
+    monkeypatch.setattr(RateLimiter, "acquire", counting_acquire)  # ANY candle RateLimiter instance is observed
+
     async def scenario() -> None:
         rig = Rig()
         source = await rig.open()
         candle_exchange = FakeCandleExchange()
-        candle = await BinanceUsdmSource.open(candle_exchange)
+        candle = RateLimitedSource(await BinanceUsdmSource.open(candle_exchange), RateLimiter(0, rig.t, rig.t.sleep))
         rig.exchange.errors = [ddos(429)]
         with pytest.raises(ExtensionPaused):
             await hist(source)
@@ -595,7 +613,11 @@ def test_candle_requests_continue_while_funding_is_paused_banned_raising_or_hang
         hanging.exchange.hold = False
         hanging.exchange.release.set()
         await asyncio.gather(*stuck)
+        # the 6 candle calls above went through the candle limiter; not one of the funding calls (paused, banned, raising,
+        # hanging, ordinary) acquired it
+        assert len(acquired) == candle_calls
 
+    candle_calls = 6
     run(scenario)
 
 
@@ -884,5 +906,49 @@ def test_close_closes_the_client() -> None:
         await source.close()
         assert rig.exchange.closed
         await assert_no_leftover_tasks()
+
+    run(scenario)
+
+
+def test_a_success_of_a_request_that_waited_in_the_limiter_resets_the_doubling() -> None:
+    """The generation is read inside the grant: a pause that begins and ends during the wait is not "earlier"."""
+
+    async def scenario() -> None:
+        rig = Rig(b=50)
+        source = await rig.open()
+        for _ in range(25):
+            await hist(source)  # the R group is full
+        waiter = asyncio.create_task(hist(source))
+        await rig.t.settle()
+        rig.exchange.errors = [ddos(429)]
+        with pytest.raises(ExtensionPaused) as first:
+            await hist(source, request_class=C)  # a 429 starts a 300 s pause while the R request waits
+        assert first.value.remaining_ms == 300 * S
+        await rig.t.advance(WINDOW_MS)  # the pause is over and the R group has room
+        await waiter  # it starts after the pause, so its success resets the doubling
+        rig.exchange.errors = [ddos(429)]
+        with pytest.raises(ExtensionPaused) as again:
+            await hist(source, request_class=C)
+        assert again.value.remaining_ms == 300 * S  # not 600 s
+
+    run(scenario)
+
+
+def test_open_creates_a_client_without_a_max_retries_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def load_markets(self: Any, reload: bool = False, params: Any = None) -> dict[str, Any]:
+        self.markets = usdm_markets()
+        return self.markets  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(ccxt.async_support.binanceusdm, "load_markets", load_markets)
+
+    async def scenario() -> None:
+        t = ManualTime()
+        source = await BinanceUsdmFundingRateSource.open(FundingRateLimiter(150, t, t.sleep), ExtensionPause(t), t)
+        try:
+            options = source._client.options
+            assert "maxRetriesOnFailure" not in options and "defaultMaxRetriesOnFailure" not in options
+            assert "maxRetriesOnFailure" not in (options.get("fundingRate") or {})
+        finally:
+            await source.close()
 
     run(scenario)

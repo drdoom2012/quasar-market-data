@@ -109,7 +109,7 @@ Every request obeys the P-5 rules (`startTime` always sent, `limit` 1000, `start
 |---|---|
 | `0` | every eligible row stored; nothing conflicting |
 | `3` | eligible rows stored, but a re-delivered row differed from the stored one (see the output) |
-| `1` | failed; nothing was written, with certainty (source error, malformed response, a 429 pause or 418 stop, untrusted server time, schema or directory problem) |
+| `1` | failed; nothing was written, with certainty (source error, malformed response, a 429 pause or 418 stop, a symbol that is unknown, inactive or not a USDT-M perpetual, untrusted server time, a pending row in the answer (defensive), schema or directory problem) |
 | `4` | the write's outcome is unknown, or a page failed after at least one transaction (of at most 100 rows) committed: those rows stay stored; re-run the same command to complete it |
 | `130` | interrupted; whether the last batch was stored is unknown; re-run to reconcile |
 | `2` | usage error |

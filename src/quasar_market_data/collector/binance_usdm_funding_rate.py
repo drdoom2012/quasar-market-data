@@ -13,8 +13,8 @@ observations (``fapiPublicGetTime`` through the same client) are class ``R`` req
 Every request, history or time, passes the same steps: ``pause.check()`` (a 429 pause or a 418 stop), the
 limiter's grant (room in the class's group, then one of at most ``MAX_IN_FLIGHT`` slots, then the start is
 recorded; waiting for room never holds a slot), ``pause.check()`` again (a call that waited while another got a
-429/418 sends nothing), the CCXT call. CCXT's own throttle (``enableRateLimit``) may still delay the network send
-after the grant; that only spaces requests further apart.
+429/418 sends nothing), the CCXT call. A send may lag its recorded start by CCXT's own throttle (``enableRateLimit``; tens of
+milliseconds for ``fundingRate``); the 5 s guard of the limiter's window covers it.
 
 Share one source (one limiter, one pause) between everything that asks for funding rates in a process.
 

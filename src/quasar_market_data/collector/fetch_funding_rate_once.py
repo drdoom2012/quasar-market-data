@@ -1,6 +1,7 @@
 """Fetch one page of funding rate history of one symbol once and store the eligible rows (ADR-0004 P-4, P-5, P-16 FR-3).
 
-Order of work: observe server time through the funding source (its own client, a class ``R`` request of its own
+Order of work: check the symbol (an unknown, inactive or non-perpetual market is refused before any request),
+observe server time through the funding source (its own client, a class ``R`` request of its own
 limiter), evaluate the conservative lower bound ``L`` before the history call (the source's waits can only make it
 older), take ``end = L - publication_delay`` (``forward_end_bound_ms``, FR-1: the latest settlement that is
 eligible, so no row of the answer can be pending) and ``start = end - hours * 1 h``, fetch **one** page of class
@@ -118,6 +119,7 @@ class FetchFundingRateOnceReport:
 async def fetch_funding_rate_once(
     source: FundingRateOnceSource, writer: FundingRateSink, config: FetchFundingRateOnceConfig, clock: Clock
 ) -> FetchFundingRateOnceReport:
+    market_id = source.market_id(config.symbol)  # an unusable symbol is refused before any request is spent
     try:
         observation = await source.fetch_server_time(request_class=RequestClass.R)
     except (ExtensionPaused, ExtensionStopped):
@@ -136,7 +138,7 @@ async def fetch_funding_rate_once(
     response = await source.fetch_funding_rate_history(config.symbol, start, end, request_class=RequestClass.R)
     rows = parse_funding_rate_history(
         response,
-        market_id=source.market_id(config.symbol),
+        market_id=market_id,
         symbol=config.symbol,
         start_time_ms=start,
         end_time_ms=end,

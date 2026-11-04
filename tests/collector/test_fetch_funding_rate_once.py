@@ -6,6 +6,7 @@ import pytest
 from quasar_market_data.collector import fetch_funding_rate_once as module
 from quasar_market_data.collector.async_funding_rate_writer import FundingRatePageError, FundingRateWriteReport
 from quasar_market_data.collector.binance_funding_rate import FundingRateParseError
+from quasar_market_data.collector.binance_usdm_funding_rate import FundingRateRequestRefused
 from quasar_market_data.collector.extension_pause import ExtensionPaused, ExtensionStopped
 from quasar_market_data.collector.fetch_funding_rate_once import (
     DEFAULT_HOURS,
@@ -103,6 +104,15 @@ def test_a_429_or_418_on_the_time_request_is_not_reported_as_untrusted_time(erro
     with pytest.raises(type(error)):
         go(source, sink, clock)
     assert source.hist_calls == [] and sink.writes == []
+
+
+def test_an_unusable_symbol_is_refused_before_any_request_including_the_time_request() -> None:
+    clock = FakeClock()
+    source = FakeFundingSource(clock, market_error=FundingRateRequestRefused("not active"))
+    sink = RecordingFundingSink()
+    with pytest.raises(FundingRateRequestRefused):
+        go(source, sink, clock)
+    assert source.time_calls == [] and source.hist_calls == [] and sink.writes == []
 
 
 def test_an_empty_answer_stores_nothing_and_is_not_an_error() -> None:
