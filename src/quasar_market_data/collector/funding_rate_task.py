@@ -34,7 +34,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final, Protocol
+from typing import Any, Final, Protocol
 
 from quasar_market_data.collector.binance_funding_rate import FundingRateParseError
 from quasar_market_data.collector.binance_usdm_funding_rate import FundingRateRequestRefused
@@ -51,6 +51,7 @@ from quasar_market_data.collector.funding_rate_limiter import MAX_IN_FLIGHT, Fun
 from quasar_market_data.collector.funding_rate_measurements import FundingRateMeasurements
 from quasar_market_data.collector.funding_rate_reader import read_series_facts, read_span
 from quasar_market_data.collector.funding_rate_writer import (
+    FundingRateConflict,
     FundingRateWriteBusy,
     FundingRateWriteError,
     FundingRateWriteOutcomeUnknown,
@@ -186,6 +187,17 @@ class _Round:
 
 
 @dataclass
+class _Opening:
+    """A round whose server-time observation is in flight: the dispatcher goes on with catch-up and history meanwhile."""
+
+    plan: RoundPlan
+    deadline_ns: int
+    started_ns: int
+    late_ms: int
+    task: "asyncio.Task[bool]"
+
+
+@dataclass
 class _Worker:
     plan: Plan
     series: _Series
@@ -253,6 +265,9 @@ class _FundingRateTask:
         self._behind_marked = False
         self._measure_started_ns = clock.monotonic_ns()
         self._next_plan: RoundPlan | None = None
+        self.opening: _Opening | None = None
+        self._pause_until_ns: int | None = None  # set by an observation that met a 429 pause
+        self._open_not_before_ns: int | None = None  # a round delayed by a pause that ends before its deadline
 
     # ---- lifecycle ------------------------------------------------------------------------------------------------
 
@@ -261,8 +276,14 @@ class _FundingRateTask:
             await self._start_up()
             await self._loop()
         finally:
-            await self._cancel_workers(list(self.workers))
-            self._emit_measurements(force=True)
+            try:
+                if self.opening is not None:
+                    self.opening.task.cancel()
+                    await asyncio.gather(self.opening.task, return_exceptions=True)
+                    self.opening = None
+                await self._cancel_workers(list(self.workers))
+            finally:
+                self._emit_measurements(force=True)
 
     def _now_ms(self) -> int:
         return self.clock.monotonic_ns() // _NS_PER_MS
@@ -339,11 +360,13 @@ class _FundingRateTask:
 
     async def _observe(self, deadline_ns: int) -> bool:
         """One class-R server-time observation; sets ``b_now`` and returns ``True`` when time is trusted."""
+        self._pause_until_ns = None
         try:
             status, observation = await self._run_until(self.source.fetch_server_time(RequestClass.R), deadline_ns)
         except ExtensionStopped:
             raise
-        except ExtensionPaused:
+        except ExtensionPaused as paused:
+            self._pause_until_ns = paused.until_monotonic_ns
             self.emit("funding-warning observation-paused the time request met a 429 pause; no bound taken")
             return False
         except SourceError as error:
@@ -383,15 +406,21 @@ class _FundingRateTask:
             self._apply(worker, task.result())  # a fatal condition raised inside a worker ends the task here
 
     async def _cancel_workers(self, tasks: list[asyncio.Task[PageResult | _Failed | _Paused]]) -> None:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        for task in tasks:
-            worker = self.workers.pop(task, None)
-            if worker is not None:
-                worker.series.busy = False
-                worker.series.needs_reread = True  # the page's outcome is unknown: read the span before planning again
-                worker.series.touch()
+        try:
+            self._drain()  # a page that has already ended is applied, not thrown away (a retry cannot report it again)
+        finally:
+            running = [t for t in tasks if t in self.workers and not t.done()]
+            for task in running:
+                task.cancel()
+            await asyncio.gather(*running, return_exceptions=True)
+            for task in running:
+                worker = self.workers.pop(task, None)
+                if worker is not None:
+                    worker.series.busy = False
+                    worker.series.needs_reread = (
+                        True  # the page's outcome is unknown: read the span before planning again
+                    )
+                    worker.series.touch()
 
     async def _reread_marked(self) -> None:
         for state in self.series.values():
@@ -418,6 +447,12 @@ class _FundingRateTask:
         )
 
     async def _rounds(self) -> None:
+        if self.opening is not None:
+            if not self.opening.task.done():
+                return
+            opening, self.opening = self.opening, None
+            self._finish_opening(opening, opening.task.result())
+            return
         round_ = self.round
         if round_ is not None:
             expired = self.clock.monotonic_ns() >= round_.deadline_ns
@@ -433,28 +468,41 @@ class _FundingRateTask:
         plan = self._next_plan = next_round(now, self.last_boundary_ms, self.config.round_offset_ms)
         if plan.wake_ms > now:
             return
-        await self._open_round(plan, now)
+        if self._open_not_before_ns is not None and self.clock.monotonic_ns() < self._open_not_before_ns:
+            return  # delayed by a 429 pause that ends before the round's deadline
+        self._open_round(plan, now)
 
-    async def _open_round(self, plan: RoundPlan, now_wall_ms: int) -> None:
+    def _open_round(self, plan: RoundPlan, now_wall_ms: int) -> None:
+        """Start the round's server-time observation as a job beside the workers (it may wait for room, or hang)."""
         started_ns = self.clock.monotonic_ns()
         deadline_ns = started_ns + _ns(round_deadline_ms(plan.boundary_ms) - now_wall_ms)
         late_ms = max(0, now_wall_ms - plan.wake_ms)
-        if plan.skipped:
+        if plan.skipped and self._open_not_before_ns is None:
             self.emit(
                 f"funding-warning rounds-skipped skipped={plan.skipped} before boundary={plan.boundary_ms}"
                 " past their deadline"
             )
-        trusted = await self._observe(deadline_ns)
+        self._open_not_before_ns = None
+        task = asyncio.ensure_future(self._observe(deadline_ns))
+        self.opening = _Opening(plan, deadline_ns, started_ns, late_ms, task)
+
+    def _finish_opening(self, opening: _Opening, trusted: bool) -> None:
+        plan = opening.plan
         if self.stop.is_set():
             return
         if not trusted:
+            until = self._pause_until_ns
+            if until is not None and until < opening.deadline_ns:  # a pause delays the round; it does not cancel it
+                self._open_not_before_ns = until
+                self.emit(f"funding-warning round-delayed boundary={plan.boundary_ms} until the 429 pause ends")
+                return
             self.last_boundary_ms = plan.boundary_ms
             self.emit(f"funding-warning round-skipped boundary={plan.boundary_ms} no trusted server time")
             return
         for state in self.series.values():
             state.asked_in_round = False
             state.touch()
-        self.round = _Round(plan.boundary_ms, deadline_ns, started_ns, plan.skipped, late_ms)
+        self.round = _Round(plan.boundary_ms, opening.deadline_ns, opening.started_ns, plan.skipped, opening.late_ms)
 
     def _close_round(self, round_: _Round, skipped: int) -> None:
         self.round = None
@@ -551,6 +599,8 @@ class _FundingRateTask:
     def _classify_write_failure(self, error: FundingRateExecutionError, state: _Series) -> _Failed:
         cause = error.cause.cause
         self.measurements.record_partial(error.cause.partial, error.rows, late_events=len(error.late_events))
+        for conflict in error.cause.partial.conflicts:  # recorded by the committed part; a retry reports them as old
+            self._emit_conflict(conflict)
         for key in error.late_events:
             self.emit(f"funding-warning late-event symbol={key.symbol} funding_time_ms={key.funding_time_ms}")
         if isinstance(cause, FundingRateWriteOutcomeUnknown):
@@ -615,18 +665,22 @@ class _FundingRateTask:
                 round_.asked += 1
         self.measurements.record_page(outcome)
         for conflict in outcome.conflicts:
-            if conflict.newly_recorded:
-                key = conflict.incoming.key
-                self.emit(
-                    f"funding-conflict symbol={key.symbol} funding_time_ms={key.funding_time_ms}"
-                    f" rate_type={key.rate_type.value} stored={conflict.stored.funding_rate}"
-                    f" incoming={conflict.incoming.funding_rate}"
-                )
+            self._emit_conflict(conflict)
         for key in outcome.late_events:
             self.emit(f"funding-warning late-event symbol={key.symbol} funding_time_ms={key.funding_time_ms}")
         if outcome.off_hour_rows:
             self.emit(f"funding-warning off-hour symbol={plan.symbol} rows={outcome.off_hour_rows}")
         state.touch()
+
+    def _emit_conflict(self, conflict: FundingRateConflict) -> None:
+        """One line per NEWLY recorded conflict (P-8); a re-delivered known conflict is not logged again."""
+        if conflict.newly_recorded:
+            key = conflict.incoming.key
+            self.emit(
+                f"funding-conflict symbol={key.symbol} funding_time_ms={key.funding_time_ms}"
+                f" rate_type={key.rate_type.value} stored={conflict.stored.funding_rate}"
+                f" incoming={conflict.incoming.funding_rate}"
+            )
 
     # ---- waiting ------------------------------------------------------------------------------------------------
 
@@ -636,6 +690,10 @@ class _FundingRateTask:
         round_ = self.round
         if round_ is not None:
             timers.append(round_.deadline_ns)
+        elif self.opening is not None:
+            pass  # the observation task wakes the loop when it ends (or at its own deadline)
+        elif self._open_not_before_ns is not None and self._open_not_before_ns > now_ns:
+            timers.append(self._open_not_before_ns)
         elif self._next_plan is not None:
             timers.append(now_ns + _ns(max(0, self._next_plan.wake_ms - self.clock.wall_ms())))
         for group in (RequestClass.R, RequestClass.C):
@@ -655,7 +713,10 @@ class _FundingRateTask:
         timer = asyncio.ensure_future(self.sleep(remaining_ms))
         stopper = asyncio.ensure_future(self.stop.wait())
         try:
-            await asyncio.wait({timer, stopper, *self.workers}, return_when=asyncio.FIRST_COMPLETED)
+            waiting: set[asyncio.Future[Any]] = {timer, stopper, *self.workers}
+            if self.opening is not None:
+                waiting.add(self.opening.task)
+            await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
         finally:
             for future in (timer, stopper):
                 future.cancel()

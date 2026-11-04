@@ -99,6 +99,7 @@ class FakeFundingExchange:
         self.time_error: BaseException | None = None
         self.hold: asyncio.Event | None = None  # when set, funding requests wait for it
         self.hang = False
+        self.hang_time = False  # when set, server-time requests never answer
         self.hang_symbols: set[str] = set()
         self.mutate: Callable[[list[dict[str, Any]]], object] | None = None
         self.served: list[Served] = []
@@ -179,6 +180,8 @@ class FakeFundingExchange:
         delay = self.request_ms if self.time_request_ms is None else self.time_request_ms
         if delay:
             await self.t.sleep(delay)
+        if self.hang_time:
+            await asyncio.Event().wait()
         if self.time_error is not None:
             raise self.time_error
         return {"serverTime": self.t.wall_ms()}

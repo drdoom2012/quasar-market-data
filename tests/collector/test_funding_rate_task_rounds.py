@@ -16,6 +16,7 @@ from tests.collector.funding_rate_task_fakes import (
     Harness,
     InMemorySink,
     make_rig,
+    seed_state,
     start_task,
     symbols_of,
 )
@@ -218,3 +219,44 @@ def test_with_history_saturating_the_share_every_r_request_keeps_its_planned_sta
         await h.finish()
 
     run(scenario, timeout=900)
+
+
+def test_a_429_pause_at_the_wake_delays_the_round_until_the_pause_ends_instead_of_skipping_it() -> None:
+    async def scenario(tmp_path: Path) -> None:
+        h = await start_task(tmp_path, t=t_at(B0 + 3_000), backfill_days=1)
+        h.rig.pause.record_rate_limited(0)  # a 429 shortly before the wake: paused for 300 s, the wake is at 60 s
+        await h.run_for(500 * S, step_ms=10 * S)
+        assert not h.lines_starting("funding-warning round-skipped")
+        (line,) = round_lines(h)
+        assert line["boundary"] == str(B0) and line["asked"] == "2"
+        await h.finish()
+
+    run(scenario)
+
+
+def test_a_pause_that_outlasts_the_deadline_skips_that_round_only() -> None:
+    async def scenario(tmp_path: Path) -> None:
+        h = await start_task(tmp_path, t=t_at(B0 + 3_000), backfill_days=1)
+        h.rig.pause.record_rate_limited(3_600_000)  # longer than the round
+        await h.run_for(200 * S, step_ms=10 * S)
+        assert h.lines_starting("funding-warning round-skipped") and not round_lines(h)
+        await h.finish()
+
+    run(scenario)
+
+
+def test_a_hanging_round_observation_does_not_stop_history_requests() -> None:
+    async def scenario(tmp_path: Path) -> None:
+        symbols = symbols_of(2)
+        rig = await make_rig(tmp_path, symbols=symbols, t=t_at(B0 + 3_000), sink=InMemorySink())
+        for symbol in symbols:
+            seed_state(rig, symbol, Interval(B0 - 400 * 86_400_000, B0 - HOUR))
+        rig.exchange.hang_time = True
+        h = await start_task(tmp_path, rig=rig, backfill_days=3650)
+        await h.run_for(60 * S, step_ms=5 * S)  # up to the wake: the observation now hangs
+        before = len(rig.exchange.served)
+        await h.run_for(700 * S, step_ms=10 * S)
+        assert len(rig.exchange.served) > before + 10  # history went on while the time request was pending
+        await h.finish()
+
+    run(scenario)

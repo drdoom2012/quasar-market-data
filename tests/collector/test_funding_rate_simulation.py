@@ -59,6 +59,7 @@ class Outcome:
     asked: list[int]
     failed: list[int]
     lines: list[str]
+    served: list[set[str]]  # per round: the series that got a request inside the round's window
 
 
 async def simulate(
@@ -78,11 +79,13 @@ async def simulate(
     sink = InMemorySink()
     rig = await make_rig(tmp_path, symbols=symbols, budget_per_5min=b, sink=sink, t=t, request_ms=request_ms)
     through = B0 - 3_600_000
+    rig.exchange.time_request_ms = min(request_ms, 400)  # the time-trust gate refuses a slow observation
     for symbol in symbols:  # every series already seeded and caught up: rounds only (and history if asked for)
         width = 3 * 3_600_000 if history else 2 * 86_400_000
         seed_state(rig, symbol, Interval(through - width, through))
     if failures is not None or slow is not None:
         counter = {"n": 0}
+        failed_once: set[object] = set()  # E-14: a chosen request fails once and its retry succeeds
         original = rig.exchange.fapiPublicGetFundingRate
 
         async def hooked(params: dict[str, object]) -> object:
@@ -92,7 +95,10 @@ async def simulate(
                 rig.exchange.request_ms = slow(n)
             else:
                 rig.exchange.request_ms = request_ms
-            if failures is not None and failures(n):
+            if params["symbol"] in failed_once:
+                failed_once.discard(params["symbol"])
+            elif failures is not None and failures(n):
+                failed_once.add(params["symbol"])
                 raise ccxt.NetworkError("injected")
             return await original(params)
 
@@ -118,13 +124,30 @@ def outcome_of(h: Harness, rounds: int) -> Outcome:
         offsets.append([(ns - wake) // NS_PER_MS for ns in r_grants if wake <= ns < end])
     lines = h.lines_starting("funding-round")
     fields = [dict(part.split("=", 1) for part in line.split()[1:]) for line in lines]
+    served: list[set[str]] = []
+    for index in range(rounds):
+        wake = wake_ns(index)
+        end = wake + (HOUR - DEADLINE_MARGIN - WAKE_OFFSET) * NS_PER_MS
+        served.append({r.symbol for r in h.rig.exchange.served if wake <= r.at_ns < end})
     return Outcome(
         offsets,
         [int(f["skipped"]) for f in fields],
         [int(f["asked"]) for f in fields],
         [int(f["failed"]) for f in fields],
         h.lines,
+        served,
     )
+
+
+def longest_skip_streak(served: list[set[str]], symbols: tuple[str, ...]) -> int:
+    """The most consecutive rounds in which one series got no request."""
+    longest = 0
+    for symbol in symbols:
+        current = 0
+        for round_served in served:
+            current = 0 if symbol in round_served else current + 1
+            longest = max(longest, current)
+    return longest
 
 
 @pytest.mark.parametrize("b", BUDGETS)
@@ -161,32 +184,39 @@ def test_the_isolated_round_capacity_is_not_sustainable(b: int) -> None:
 
 
 @pytest.mark.parametrize(
-    ("fraction", "expect_skips"),
-    [(1.0, False), (0.9, False)],
-    ids=["s_sustained_5_percent", "ninety_percent_10_percent"],
+    ("fraction", "every"), [(1.0, 20), (0.9, 10)], ids=["s_sustained_5_percent", "ninety_percent_10_percent"]
 )
-def test_a_failure_that_is_retried_once_costs_no_skip_inside_the_reserve(fraction: float, expect_skips: bool) -> None:
+def test_a_failure_that_is_retried_once_costs_no_skip_inside_the_reserve(fraction: float, every: int) -> None:
     async def scenario(tmp_path: Path) -> None:
         b = 50
         series = int(sustained_capacity(b, WAKE_OFFSET) * fraction)
-        every = 20 if fraction == 1.0 else 10  # 5 % at S_sustained, 10 % at 0.9 x S_sustained
         result = await simulate(tmp_path, series=series, b=b, rounds=6, failures=lambda n: n % every == 0)
-        assert (sum(result.skipped) > 0) is expect_skips and all(f >= 0 for f in result.failed)
+        assert sum(result.failed) > 0, "no failure was injected"
+        assert sum(result.skipped) == 0
         assert not [line for line in result.lines if line.startswith("funding-suspended")]
 
     run(scenario, timeout=3_000)
 
 
-def test_more_failures_than_the_reserve_cause_skips_but_no_series_is_skipped_for_ever() -> None:
+def test_at_90_percent_of_s_sustained_20_percent_failures_skip_a_series_in_at_most_two_rounds_in_a_row() -> None:
+    async def scenario(tmp_path: Path) -> None:
+        b = 50
+        series = int(sustained_capacity(b, WAKE_OFFSET) * 0.9)
+        result = await simulate(tmp_path, series=series, b=b, rounds=8, request_ms=400, failures=lambda n: n % 5 == 0)
+        assert sum(result.failed) > 0 and sum(result.skipped) > 0, "the case must really cost skips"
+        assert longest_skip_streak(result.served, symbols_of(series)) <= 2
+        assert not [line for line in result.lines if line.startswith("funding-suspended")]
+
+    run(scenario, timeout=3_000)
+
+
+def test_at_s_sustained_10_percent_failures_cost_skips_and_a_series_is_never_skipped_for_good() -> None:
     async def scenario(tmp_path: Path) -> None:
         b = 50
         series = sustained_capacity(b, WAKE_OFFSET)
-        result = await simulate(
-            tmp_path, series=series, b=b, rounds=12, failures=lambda n: n % 10 == 0
-        )  # 10 % at S_sustained
-        assert sum(result.skipped) > 0
-        asked = result.asked
-        assert min(asked) >= series - max(result.skipped)  # the skip is the safety valve, not a collapse
+        result = await simulate(tmp_path, series=series, b=b, rounds=6, request_ms=400, failures=lambda n: n % 10 == 0)
+        assert sum(1 for count in result.skipped if count) >= 3, "the reserve is exceeded: skips in several rounds"
+        assert longest_skip_streak(result.served, symbols_of(series)) <= 2
         assert not [line for line in result.lines if line.startswith("funding-suspended")]
 
     run(scenario, timeout=3_000)

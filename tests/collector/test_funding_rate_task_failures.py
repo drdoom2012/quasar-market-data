@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import itertools
 import tempfile
 from collections.abc import Callable, Coroutine
@@ -13,10 +14,14 @@ from quasar_market_data.collector.extension_pause import ExtensionStopped
 from quasar_market_data.collector.funding_rate_reader import FundingRateReadError, read_span
 from quasar_market_data.collector.funding_rate_task import REQUEST_TIMEOUT_MS, FundingRateWriterUnusable
 from quasar_market_data.collector.funding_rate_writer import (
+    FundingRateConflict,
+    FundingRateWriteBusy,
     FundingRateWriteError,
     FundingSpanNotAdjacentError,
 )
+from quasar_market_data.domain.funding_rate import FundingRate, FundingRateKey, RateType
 from quasar_market_data.domain.funding_rate_span import Interval
+from quasar_market_data.storage.connection import open_reader
 from tests.collector.funding_rate_task_fakes import (
     HOUR,
     VENUE,
@@ -45,6 +50,17 @@ def run(scenario: Callable[[Path], Coroutine[None, None, None]], timeout: float 
 
 def t0() -> ManualTime:
     return ManualTime(wall_start_ms=B0 + 3_000)
+
+
+def stored_funding_times(db: Path, symbol: str, from_ms: int, through_ms: int) -> list[int]:
+    conn = open_reader(db)
+    try:
+        query = (
+            "SELECT funding_time_ms FROM funding_rates WHERE symbol = ? AND funding_time_ms BETWEEN ? AND ? ORDER BY 1"
+        )
+        return [t for (t,) in conn.execute(query, (symbol, from_ms, through_ms))]
+    finally:
+        conn.close()
 
 
 def warnings(h: Harness, prefix: str) -> list[str]:
@@ -233,7 +249,9 @@ def test_stop_mid_round_cancels_the_workers_and_leaves_no_task_and_no_half_claim
         await assert_no_leftover_tasks()
         for symbol in (BTC, ETH):
             span, _ = await read_span(rig.db, VENUE, symbol)
-            assert span is None or isinstance(span, Interval)
+            if span is not None:  # every settlement inside a claimed span has its row (no half-claimed span)
+                expected = rig.exchange.settlements(symbol, span.from_ms, span.through_ms, 10**6)
+                assert stored_funding_times(rig.db, symbol, span.from_ms, span.through_ms) == expected
 
     run(scenario)
 
@@ -329,6 +347,69 @@ def test_a_success_between_failures_clears_the_count_so_four_failures_do_not_sus
         await h.run_for(200 * S, step_ms=S)
         assert len(rig.exchange.served) >= 6
         assert not h.lines_starting("funding-suspended")
+        await h.finish()
+
+    run(scenario)
+
+
+class ConflictThenBusy(InMemorySink):
+    """The first write fails in its SECOND transaction: the first one committed and recorded a new conflict."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed = False
+
+    async def write(self, rows: Any, *, ingested_at_ms: int, merge: Any = None) -> FundingRateWriteReport:
+        if self.failed:
+            return await super().write(rows, ingested_at_ms=ingested_at_ms, merge=merge)
+        self.failed = True
+        key = FundingRateKey(VENUE, BTC, B0 - HOUR + 3, RateType.REGULAR)
+        conflict = FundingRateConflict(FundingRate(key, "0.0002", None), FundingRate(key, "0.0001", None), True)
+        partial = FundingRateWriteReport(100, 0, (conflict,), (0,), (0,), 0, 0, (), None, None)
+        raise FundingRatePageError(FundingRateWriteBusy("database is locked"), 1, partial)
+
+
+def test_a_conflict_recorded_by_the_committed_part_of_a_failed_page_is_logged_once() -> None:
+    async def scenario(tmp_path: Path) -> None:
+        sink = ConflictThenBusy()
+        h = await start_task(tmp_path, symbols=(BTC,), backfill_days=1, sink=sink, t=t0())
+        await h.run_for(120 * S, step_ms=5 * S)
+        lines = h.lines_starting("funding-conflict")
+        assert len(lines) == 1 and f"symbol={BTC}" in lines[0] and "stored=0.0001 incoming=0.0002" in lines[0]
+        assert h.lines_starting("funding-warning request-failed")  # the page did fail and was retried
+        await h.finish()
+
+    run(scenario)
+
+
+class GatedSink(InMemorySink):
+    """Holds the first write until released, then reports a new conflict."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+        self.entered = asyncio.Event()
+
+    async def write(self, rows: Any, *, ingested_at_ms: int, merge: Any = None) -> FundingRateWriteReport:
+        self.entered.set()
+        await self.release.wait()
+        report = await super().write(rows, ingested_at_ms=ingested_at_ms, merge=merge)
+        key = FundingRateKey(VENUE, BTC, B0 - HOUR + 3, RateType.REGULAR)
+        conflict = FundingRateConflict(FundingRate(key, "0.0002", None), FundingRate(key, "0.0001", None), True)
+        return dataclasses.replace(report, conflicts=(conflict,))
+
+
+def test_a_page_that_finished_at_the_moment_of_stop_is_still_applied() -> None:
+    async def scenario(tmp_path: Path) -> None:
+        sink = GatedSink()
+        h = await start_task(tmp_path, symbols=(BTC,), backfill_days=1, sink=sink, t=t0())
+        await h.run_for(90 * S, step_ms=5 * S)
+        await sink.entered.wait()
+        sink.release.set()  # the worker's write ends ...
+        h.stop.set()  # ... in the same loop step as the stop
+        await h.t.settle()
+        await asyncio.wait({h.task}, timeout=5)
+        assert len(h.lines_starting("funding-conflict")) == 1  # its result was applied, not thrown away
         await h.finish()
 
     run(scenario)
