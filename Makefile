@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck imports check live bench bench-health bench-health-oi bench-indicators bench-oi-write bench-overview images compose-test
+.PHONY: test lint typecheck imports check live simulate bench bench-health bench-health-oi bench-indicators bench-oi-write bench-overview images compose-test
 
 test:
 	uv run pytest
@@ -13,6 +13,10 @@ imports:
 	uv run lint-imports
 
 check: lint typecheck imports test
+
+# Long capacity simulations of the funding rate task (ADR-0004 P-10, E-14: b = 150 and 250, 200 rounds); not part of `check`.
+simulate:
+	uv run pytest -m simulation tests -v -o addopts="--strict-markers"
 
 # Hits Binance public endpoints; not part of `check`.
 live:

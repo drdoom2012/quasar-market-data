@@ -500,3 +500,170 @@ def test_the_wait_is_rounded_up_to_a_whole_millisecond() -> None:
         await waiter
 
     run(scenario)
+
+
+def test_committed_is_counted_starts_plus_waiting_requests() -> None:
+    async def scenario() -> None:
+        t = ManualTime()
+        limiter = FundingRateLimiter(50, t, t.sleep)
+        grants: Grants = []
+        hold = asyncio.Event()
+        busy = [asyncio.create_task(use(limiter, t, C, grants, hold)) for _ in range(2)]
+        await t.settle()
+        assert limiter.committed(R, t.monotonic_ns()) == 0 and limiter.committed(C, t.monotonic_ns()) == 2
+        waiter = asyncio.create_task(use(limiter, t, R, grants))
+        await asyncio.sleep(0)
+        assert limiter.committed(R, t.monotonic_ns()) == 1 and limiter.committed(H, t.monotonic_ns()) == 2
+        hold.set()
+        await asyncio.gather(*busy, waiter)
+        assert limiter.committed(R, t.monotonic_ns()) == 1
+
+    run(scenario)
+
+
+def test_room_is_true_until_counted_plus_waiting_reaches_the_cap_for_each_group() -> None:
+    async def scenario() -> None:
+        t = ManualTime()
+        limiter = FundingRateLimiter(50, t, t.sleep)  # 25 + 25
+        grants: Grants = []
+        now = t.monotonic_ns
+        assert limiter.room(R, now()) and limiter.room(C, now()) and limiter.room(H, now())
+        for _ in range(24):
+            await use(limiter, t, R, grants)
+        assert limiter.room(R, now())
+        await use(limiter, t, R, grants)
+        assert not limiter.room(R, now()) and limiter.room(C, now()) and limiter.room(H, now())
+        for _ in range(25):
+            await use(limiter, t, H if _ % 2 else C, grants)
+        assert not limiter.room(C, now()) and not limiter.room(H, now())  # one shared group
+        await t.advance(WINDOW_MS)
+        assert limiter.room(R, now()) and limiter.room(C, now())
+
+    run(scenario)
+
+
+def test_a_request_waiting_in_grant_is_reserved_before_its_start_is_recorded() -> None:
+    async def scenario() -> None:
+        t = ManualTime()
+        limiter = FundingRateLimiter(50, t, t.sleep)
+        grants: Grants = []
+        hold = asyncio.Event()
+        busy = [asyncio.create_task(use(limiter, t, C, grants, hold)) for _ in range(2)]  # both slots held
+        await t.settle()
+        waiters = [asyncio.create_task(use(limiter, t, R, grants)) for _ in range(25)]
+        await asyncio.sleep(0)  # the workers run until their first real wait: the reservation exists
+        assert limiter.starts_in_window(t.monotonic_ns(), R) == 0
+        assert not limiter.room(R, t.monotonic_ns())  # 25 waiting == the cap
+        assert limiter.room(C, t.monotonic_ns())
+        hold.set()
+        await drain(t)
+        await asyncio.gather(*busy, *waiters)
+        assert limiter.starts_in_window(t.monotonic_ns(), R) == 25
+        assert not limiter.room(R, t.monotonic_ns())
+
+    run(scenario)
+
+
+def test_a_cancelled_waiter_releases_its_reservation() -> None:
+    async def scenario() -> None:
+        t = ManualTime()
+        limiter = FundingRateLimiter(50, t, t.sleep)
+        grants: Grants = []
+        hold = asyncio.Event()
+        busy = [asyncio.create_task(use(limiter, t, C, grants, hold)) for _ in range(2)]
+        await t.settle()
+        waiter = asyncio.create_task(use(limiter, t, R, grants))
+        await asyncio.sleep(0)
+        assert limiter._rounds.waiting == 1
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert limiter._rounds.waiting == 0 and limiter.room(R, t.monotonic_ns())
+        hold.set()
+        await asyncio.gather(*busy)
+
+    run(scenario)
+
+
+def test_next_room_is_now_with_room_and_otherwise_when_the_oldest_counted_start_leaves() -> None:
+    async def scenario() -> None:
+        t = ManualTime()
+        limiter = FundingRateLimiter(50, t, t.sleep)
+        grants: Grants = []
+        first = t.monotonic_ns()
+        assert limiter.next_room_ns(R, first) == first
+        for index in range(25):
+            if index == 10:
+                await t.advance(7_000)
+            await use(limiter, t, R, grants)
+        now = t.monotonic_ns()
+        assert limiter.next_room_ns(R, now) == first + WINDOW_NS  # exactly 305 s after the oldest start
+        assert limiter.next_room_ns(C, now) == now
+        await t.advance(WINDOW_MS)
+        assert limiter.next_room_ns(R, t.monotonic_ns()) == t.monotonic_ns()  # the first ten left, 15 remain
+
+    run(scenario)
+
+
+def test_next_room_with_waiters_beyond_the_counted_starts_is_bounded_by_one_window() -> None:
+    async def scenario() -> None:
+        t = ManualTime()
+        limiter = FundingRateLimiter(50, t, t.sleep)
+        grants: Grants = []
+        hold = asyncio.Event()
+        busy = [asyncio.create_task(use(limiter, t, C, grants, hold)) for _ in range(2)]
+        await t.settle()
+        waiters = [asyncio.create_task(use(limiter, t, R, grants)) for _ in range(25)]
+        await asyncio.sleep(0)
+        now = t.monotonic_ns()
+        assert now < limiter.next_room_ns(R, now) <= now + WINDOW_NS
+        hold.set()
+        await drain(t)
+        await asyncio.gather(*busy, *waiters)
+
+    run(scenario)
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_peak_starts_equals_the_largest_total_in_any_window_and_resets(seed: int) -> None:
+    async def scenario() -> None:
+        rng = random.Random(seed)
+        t = ManualTime()
+        limiter = FundingRateLimiter(50, t, t.sleep)
+        starts: list[int] = []
+
+        async def one() -> None:
+            await t.sleep(rng.randint(0, 700_000))
+            async with limiter.grant(rng.choice([R, C, H])):
+                starts.append(t.monotonic_ns())
+
+        tasks = [asyncio.create_task(one()) for _ in range(150)]
+        await t.settle()
+        while not all(task.done() for task in tasks):
+            await t.advance(rng.randint(1, 40_000))
+        await asyncio.gather(*tasks)
+        assert limiter.peak_starts() == max_in_any_window(starts)
+        assert limiter.peak_starts() == 0  # reset by the call
+
+    run(scenario)
+
+
+def test_next_room_counts_the_waiting_requests_ahead_of_the_asker() -> None:
+    async def scenario() -> None:
+        t = ManualTime()
+        limiter = FundingRateLimiter(50, t, t.sleep)
+        grants: Grants = []
+        for _ in range(25):
+            await use(limiter, t, R, grants)
+            await t.advance(10)
+        starts = [instant for _, instant in grants]
+        waiters = [asyncio.create_task(use(limiter, t, R, grants)) for _ in range(2)]
+        await t.settle()
+        now = t.monotonic_ns()
+        # 25 counted + 2 waiting: three starts must leave before a third waiter would find room
+        assert limiter.next_room_ns(R, now) == starts[2] + WINDOW_NS
+        await t.advance(WINDOW_MS)
+        await drain(t)
+        await asyncio.gather(*waiters)
+
+    run(scenario)

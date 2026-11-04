@@ -36,6 +36,8 @@ from quasar_market_data.domain.timestamps import ensure_timestamp_ms
 FUNDING_RATE_PAGE_LIMIT: Final = 1_000  # ADR-0004 P-5
 OFF_HOUR_TOLERANCE_MS: Final = 5_000  # ADR-0004 P-3: observed range, never a rejection
 HOUR_MS: Final = 3_600_000
+# ADR-0004 P-12: ``round_offset_ms`` is at most 600 000 and at least ``publication_delay_ms + 5 000``.
+MAX_FUNDING_RATE_PUBLICATION_DELAY_MS: Final = 595_000
 # ADR-0004 P-4: a margin from one settlement of three symbols, not a proven bound.
 DEFAULT_FUNDING_RATE_PUBLICATION_DELAY_MS: Final = 30_000
 

@@ -36,6 +36,7 @@ from quasar_market_data.domain.funding_rate import (
     DEFAULT_FUNDING_RATE_PUBLICATION_DELAY_MS,
     FUNDING_RATE_PAGE_LIMIT,
     HOUR_MS,
+    MAX_FUNDING_RATE_PUBLICATION_DELAY_MS,
     FundingRate,
     FundingRateSelection,
     count_off_hour_rows,
@@ -52,7 +53,7 @@ from quasar_market_data.domain.server_time import (
 
 MAX_HOURS: Final = 500
 DEFAULT_HOURS: Final = 24
-MAX_PUBLICATION_DELAY_MS: Final = 595_000  # ADR-0004 P-12: round_offset_ms <= 600 000 and at least delay + 5 000
+MAX_PUBLICATION_DELAY_MS: Final = MAX_FUNDING_RATE_PUBLICATION_DELAY_MS
 
 
 class FundingRateSelectionError(SourceError):
