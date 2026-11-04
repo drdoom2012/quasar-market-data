@@ -95,6 +95,25 @@ Every request obeys the P-5 rules (aligned bounds, at most 500 period ends inclu
 | `130` | interrupted; whether the last batch was stored is unknown; re-run to reconcile |
 | `2` | usage error |
 
+### `quasar-collector fetch-funding-once`
+
+```
+quasar-collector fetch-funding-once --db market.db --symbol BTC/USDT:USDT [--hours 24] [--publication-delay-ms 30000]
+```
+
+Fetches **one page** (class `R`, `limit` 1000) of funding rate history of one active Binance USDT-M perpetual on its own CCXT client (ADR-0004 P-1, P-5), migrates the database on first use (the directory of `--db` must exist), stores only eligible rows and prints three `key=value` lines: `symbol`/`start_ms`/`end_ms`/`fetched`; `time` (`trusted`, or `untrusted reason=...`); `inserted`/`duplicates`/`conflicts`/`pending`/`off_hour_rows`/`full_page` (`true` or `false`). The range is `[E - hours x 1 h, E]` with `E = lower_bound - publication_delay_ms` (the latest eligible settlement), `--hours` is 1..500 (default 24) and `--publication-delay-ms` 0..595000 (default 30000). A row is eligible when `fundingTime + publication delay` is at or before the server-time lower bound; the end bound makes every row of a valid answer eligible, and a pending row would fail the run before any write. The command **never writes the verified span**: it claims no coverage, and `full_page=true` (exactly 1000 rows) only says that older rows of the range were not requested. A row more than 5 s after a whole hour is stored, counted in `off_hour_rows` and reported on stderr as a warning (a heuristic, never a rejection, ADR-0004 P-3). With untrusted server time no request is made (exit `1`).
+
+Every request obeys the P-5 rules (`startTime` always sent, `limit` 1000, `start <= end`, a known, **active** USDT-M perpetual) and the P-9 limiter; see "Funding rate requests" in the README for the 429/418 behaviour and the IP requirement. The modules: `extension_pause.py` (the shared stop after 429/418), `funding_rate_limiter.py` (the 305 s window, class caps and in-flight slots), `binance_usdm_funding_rate.py` (the source), `fetch_funding_rate_once.py` (the use case).
+
+| Exit | Meaning |
+|---|---|
+| `0` | every eligible row stored; nothing conflicting |
+| `3` | eligible rows stored, but a re-delivered row differed from the stored one (see the output) |
+| `1` | failed; nothing was written, with certainty (source error, malformed response, a 429 pause or 418 stop, a symbol that is unknown, inactive or not a USDT-M perpetual, untrusted server time, a pending row in the answer (defensive), schema or directory problem) |
+| `4` | the write's outcome is unknown, or a page failed after at least one transaction (of at most 100 rows) committed: those rows stay stored; re-run the same command to complete it |
+| `130` | interrupted; whether the last batch was stored is unknown; re-run to reconcile |
+| `2` | usage error |
+
 ### `quasar-collector run`
 
 Optional table `[open_interest]` (ADR-0003 P-13): `enabled` (bool), `period` (only `"5m"`), `publication_delay_ms` (0..300000), `round_offset_ms` (60000..280000), `budget_per_5min` (integer 100..400); all required, unknown keys rejected, and the number of symbols must fit a cadence of at most 12 (432 symbols at 100, 1788 at 400). When enabled, `run` also starts the open interest task described in the README; exit codes are unchanged (the task never changes them).

@@ -10,6 +10,7 @@ from quasar_market_data.domain.funding_rate_capacity import (
     MIN_ROUND_OFFSET_MS,
     ROUND_LAST_START_BUDGET_MS,
     CapacityError,
+    RequestClass,
     assess_capacity,
     full_groups_per_round,
     groups_k,
@@ -172,3 +173,7 @@ def test_planned_start_offset_uses_the_round_share_not_the_other_share() -> None
     assert planned_start_offset_ms(74, 151) == 0
     assert planned_start_offset_ms(75, 151) == 305_000
     assert planned_start_offset_ms(76, 151) == 305_000
+
+
+def test_request_class_has_exactly_the_three_classes_of_the_adr() -> None:
+    assert [member.name for member in RequestClass] == ["R", "C", "H"]

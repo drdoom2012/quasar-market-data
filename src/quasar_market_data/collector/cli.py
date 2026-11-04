@@ -5,6 +5,12 @@ source's own client, stores the eligible ones and reports what happened. Exit co
 ``4`` also when a page failed after at least one of its transactions committed (those rows stay stored; re-run
 to complete the page), and ``1`` when server time is untrusted (no request is made, nothing is written).
 
+``fetch-funding-once`` (ADR-0004, FR-3) fetches one page of funding rate history of one symbol on the funding
+source's own client (its own limiter and ``ExtensionPause``), stores the eligible rows and reports what happened. It
+claims no coverage (the verified span is the funding task's business). Exit codes as for ``fetch-oi-once``: ``4`` also
+when a page failed after at least one of its transactions committed, ``1`` when server time is untrusted (no
+request is made, nothing is written), ``3`` when a re-delivered row differed from the stored one.
+
 ``run`` also collects open interest when the configuration has an enabled ``[open_interest]`` table (ADR-0003, OI-4):
 one extra asyncio task, started after round one and its post-check, with its own client, writer, budget and gate. It
 never changes the exit status: whatever happens to it is printed as ``oi-warning`` / ``oi-error`` lines (stderr) and
@@ -55,11 +61,14 @@ from importlib.metadata import version
 from pathlib import Path
 
 from quasar_market_data.collector.async_candle_writer import AsyncCandleWriter
+from quasar_market_data.collector.async_funding_rate_writer import AsyncFundingRateWriter, FundingRatePageError
 from quasar_market_data.collector.async_open_interest_writer import AsyncOpenInterestWriter, OpenInterestPageError
 from quasar_market_data.collector.backfill import BackfillConfig, Backfiller, SliceReport
+from quasar_market_data.collector.binance_funding_rate import FundingRateParseError
 from quasar_market_data.collector.binance_klines import VENUE_BINANCE_USDM, KlineParseError
 from quasar_market_data.collector.binance_open_interest import OpenInterestParseError
 from quasar_market_data.collector.binance_usdm import BinanceUsdmSource
+from quasar_market_data.collector.binance_usdm_funding_rate import BinanceUsdmFundingRateSource
 from quasar_market_data.collector.binance_usdm_open_interest import (
     DEFAULT_BUDGET_PER_5MIN,
     BinanceUsdmOpenInterestSource,
@@ -77,6 +86,16 @@ from quasar_market_data.collector.collection_loop import (
     SymbolOutcome,
     run_collection_loop,
 )
+from quasar_market_data.collector.extension_pause import ExtensionPause
+from quasar_market_data.collector.fetch_funding_rate_once import (
+    DEFAULT_HOURS,
+    MAX_HOURS,
+    MAX_PUBLICATION_DELAY_MS,
+    FetchFundingRateOnceConfig,
+    FetchFundingRateOnceReport,
+    FundingRateOnceSource,
+    fetch_funding_rate_once,
+)
 from quasar_market_data.collector.fetch_once import (
     MAX_LIMIT,
     FetchOnceConfig,
@@ -91,6 +110,8 @@ from quasar_market_data.collector.fetch_open_interest_once import (
     OpenInterestOnceSource,
     fetch_open_interest_once,
 )
+from quasar_market_data.collector.funding_rate_limiter import FundingRateLimiter
+from quasar_market_data.collector.funding_rate_writer import FundingRateWriteOutcomeUnknown
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
 from quasar_market_data.collector.open_interest_gate import OpenInterestGate
@@ -107,6 +128,8 @@ from quasar_market_data.collector.reconcile_reader import (
 )
 from quasar_market_data.config.settings import DEFAULT_CONFIG_PATH, ConfigError, Settings, load_settings
 from quasar_market_data.domain.closed_candles import DEFAULT_PUBLICATION_DELAY_MS
+from quasar_market_data.domain.funding_rate import DEFAULT_FUNDING_RATE_PUBLICATION_DELAY_MS
+from quasar_market_data.domain.funding_rate_capacity import DEFAULT_BUDGET_PER_5MIN as DEFAULT_FUNDING_BUDGET_PER_5MIN
 from quasar_market_data.domain.open_interest import DEFAULT_OPEN_INTEREST_PUBLICATION_DELAY_MS
 from quasar_market_data.domain.reconcile import (
     REACH_MARGIN_SLOTS,
@@ -130,6 +153,10 @@ type OpenSource = Callable[[], Awaitable[KlineSource]]
 type OpenInterestOpenSource = Callable[
     [OpenInterestBudget, OpenInterestGate, Clock], Awaitable[OpenInterestOnceSource]
 ]  # BinanceUsdmOpenInterestSource.open in production: its own client, the caller's budget and gate
+
+type FundingRateOpenSource = Callable[
+    [FundingRateLimiter, ExtensionPause, Clock], Awaitable[FundingRateOnceSource]
+]  # BinanceUsdmFundingRateSource.open in production: its own client, the caller's limiter and pause
 
 OPEN_INTEREST_STOP_GRACE_MS = (
     5_000  # how long shutdown waits (real time) for the open interest task before cancelling it
@@ -160,6 +187,20 @@ def _periods(text: str) -> int:
     value = int(text)
     if not 1 <= value <= MAX_PERIODS:
         raise argparse.ArgumentTypeError(f"must be in 1..{MAX_PERIODS}")
+    return value
+
+
+def _hours(text: str) -> int:
+    value = int(text)
+    if not 1 <= value <= MAX_HOURS:
+        raise argparse.ArgumentTypeError(f"must be in 1..{MAX_HOURS}")
+    return value
+
+
+def _funding_delay(text: str) -> int:
+    value = int(text)
+    if not 0 <= value <= MAX_PUBLICATION_DELAY_MS:
+        raise argparse.ArgumentTypeError(f"must be in 0..{MAX_PUBLICATION_DELAY_MS}")
     return value
 
 
@@ -194,6 +235,21 @@ def _parser() -> argparse.ArgumentParser:
         type=_delay,
         default=DEFAULT_OPEN_INTEREST_PUBLICATION_DELAY_MS,
         help="publication delay (ADR-0003 P-4)",
+    )
+    funding = commands.add_parser(
+        "fetch-funding-once",
+        help="fetch one page of funding rate history of one symbol and store the eligible rows (claims no coverage)",
+    )
+    funding.add_argument("--db", required=True, type=Path, help="SQLite database file (its directory must exist)")
+    funding.add_argument("--symbol", required=True, help="CCXT unified symbol, e.g. BTC/USDT:USDT")
+    funding.add_argument(
+        "--hours", type=_hours, default=DEFAULT_HOURS, help=f"width of the requested range in hours (1..{MAX_HOURS})"
+    )
+    funding.add_argument(
+        "--publication-delay-ms",
+        type=_funding_delay,
+        default=DEFAULT_FUNDING_RATE_PUBLICATION_DELAY_MS,
+        help=f"publication delay (ADR-0004 P-4), 0..{MAX_PUBLICATION_DELAY_MS}",
     )
     run = commands.add_parser(
         "run", help="collect the newest closed 5m candles of the configured symbols until stopped"
@@ -273,6 +329,45 @@ async def _run_open_interest(
         stack.push_async_callback(_close_quietly, "the open interest writer", writer.close)
         report = await fetch_open_interest_once(source, writer, config, clock)
         return _print_open_interest_report(config, report)
+
+
+def _print_funding_rate_report(config: FetchFundingRateOnceConfig, report: FetchFundingRateOnceReport) -> int:
+    selection, write = report.selection, report.write
+    reason = selection.untrusted_reason
+    conflicts = len(write.conflicts) if write else 0
+    start = "none" if report.start_ms is None else report.start_ms
+    end = "none" if report.end_ms is None else report.end_ms
+    print(f"symbol={config.symbol} start_ms={start} end_ms={end} fetched={report.fetched}")
+    print("time=trusted" if reason is None else f"time=untrusted reason={reason.value}")
+    print(
+        f"inserted={write.inserted if write else 0} duplicates={write.duplicates if write else 0} "
+        f"conflicts={conflicts} pending={len(selection.pending)} off_hour_rows={report.off_hour_rows} "
+        f"full_page={'true' if report.full_page else 'false'}"
+    )
+    if report.off_hour_rows:
+        _error(
+            f"warning: {report.off_hour_rows} off-hour row(s) (fundingTime more than 5 s after a whole hour); stored"
+        )
+    if reason is not None:
+        _error(
+            f"error: server time is untrusted ({reason.value}); no funding rate row was confirmed"
+            " and nothing was written"
+        )
+        return EXIT_FAILED
+    return EXIT_FINDINGS if conflicts else 0
+
+
+async def _run_funding_rate(
+    config: FetchFundingRateOnceConfig, db: Path, open_source: FundingRateOpenSource, clock: Clock, sleep: Sleep
+) -> int:
+    async with AsyncExitStack() as stack:
+        limiter = FundingRateLimiter(DEFAULT_FUNDING_BUDGET_PER_5MIN, clock, sleep)
+        source = await open_source(limiter, ExtensionPause(clock), clock)
+        stack.push_async_callback(_close_quietly, "the exchange client", source.close)
+        writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity())
+        stack.push_async_callback(_close_quietly, "the funding rate writer", writer.close)
+        report = await fetch_funding_rate_once(source, writer, config, clock)
+        return _print_funding_rate_report(config, report)
 
 
 def run_exit_code(outcome: LoopExit | FatalLoopError) -> int:
@@ -783,6 +878,41 @@ def _open_interest_page_failure(error: OpenInterestPageError) -> int:
     return EXIT_FAILED
 
 
+def _funding_rate_page_failure(error: FundingRatePageError) -> int:
+    if error.committed_transactions > 0:
+        _error(
+            f"write incomplete: {error.committed_transactions} transaction(s) committed and stay stored,"
+            f" the rest of the page is not stored or its outcome is unknown ({error.cause});"
+            " re-run the same command to complete it (writes are idempotent)"
+        )
+        return EXIT_UNKNOWN_OUTCOME
+    if isinstance(error.cause, FundingRateWriteOutcomeUnknown):
+        _error(_UNKNOWN_OUTCOME_MESSAGE)
+        return EXIT_UNKNOWN_OUTCOME
+    _error(f"error: {error.cause}")  # the first transaction failed with certainty: nothing was written
+    return EXIT_FAILED
+
+
+def _fetch_funding_rate_once(
+    args: argparse.Namespace, open_source: FundingRateOpenSource, clock: Clock, sleep: Sleep
+) -> int:
+    db: Path = args.db
+    if not db.parent.is_dir():
+        _error(f"error: database directory {db.parent} does not exist; nothing was written")
+        return EXIT_FAILED
+    config = FetchFundingRateOnceConfig(
+        symbol=args.symbol, hours=args.hours, publication_delay_ms=args.publication_delay_ms
+    )
+    try:
+        _migrate(db, clock)
+        return asyncio.run(_run_funding_rate(config, db, open_source, clock, sleep))
+    except FundingRatePageError as error:
+        return _funding_rate_page_failure(error)
+    except (SourceError, FundingRateParseError, StorageError, sqlite3.Error) as error:  # raised before any write
+        _error(f"error: {error}")
+        return EXIT_FAILED
+
+
 def _fetch_open_interest_once(
     args: argparse.Namespace, open_source: OpenInterestOpenSource, clock: Clock, sleep: Sleep
 ) -> int:
@@ -808,6 +938,7 @@ def main(
     *,
     open_source: OpenSource = BinanceUsdmSource.open,
     open_oi_source: OpenInterestOpenSource = BinanceUsdmOpenInterestSource.open,
+    open_funding_source: FundingRateOpenSource = BinanceUsdmFundingRateSource.open,
     clock: Clock | None = None,
     sleep: Sleep = system_sleep,
 ) -> int:
@@ -826,6 +957,8 @@ def main(
     try:
         if args.command == "fetch-oi-once":
             return _fetch_open_interest_once(args, open_oi_source, clock or SystemClock(), sleep)
+        if args.command == "fetch-funding-once":
+            return _fetch_funding_rate_once(args, open_funding_source, clock or SystemClock(), sleep)
         return _fetch_once(args, open_source, clock or SystemClock())
     except KeyboardInterrupt:
         _error(
