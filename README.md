@@ -103,6 +103,14 @@ Log lines (stdout unless noted): `oi-reconcile` (per series and a total, once at
 
 **429 and 418.** A `429` pauses every open interest request of the process for `max(Retry-After, 300 s)`, doubling on consecutive pauses up to 1 hour (a larger `Retry-After` is honoured). A `418` stops open interest until the process restarts and logs an error. Candle collection has its own client and limiter and is not paused by either. Whether a `418` caused by open interest would also ban klines for the IP is not known; the budget exists to make it unlikely.
 
+## Funding rate requests (ADR-0004)
+
+`quasar-collector fetch-funding-once --db market.db --symbol BTC/USDT:USDT [--hours 24]` fetches one page of funding rate history of one symbol (Binance USDT-M, `GET /fapi/v1/fundingRate`, public, no credentials) and stores the eligible rows. It **stores rows and claims no coverage**: the verified span is written only by the funding task (FR-4). Output lines and exit codes are in [`docs/reference.md`](docs/reference.md).
+
+**Operational requirement: nothing else on the IP may call `fundingRate` or `fundingInfo` more than `500 - b` times per 5 minutes** (default `b = 150`, so 350). Binance documents "500/5min/IP" for both endpoints together and sends no used-weight header. The funding source counts its own request starts (history and server time together) in a window of 305 s (the documented 300 s plus a 5 s guard), at most `b` of them (50..250), split into two shares that are never lent: rounds and seeds at most `floor(b / 2)`, catch-up and history together the rest. It has at most 2 requests in flight and never retries a failed request itself. A local limiter cannot see other consumers: do not run a second Collector with funding enabled, and know what else calls these endpoints from that address.
+
+**429 and 418.** A `429` pauses every funding request of the process for `max(Retry-After, 300 s)`, doubling on consecutive pauses up to 1 hour (a larger `Retry-After` is honoured). A `418` stops funding until the process restarts. This is one in-process `ExtensionPause` that funding sets and honours. Candle collection has its own client and limiter and neither reads nor is paused by it. Until amendment A-3 to ADR-0003 is applied, open interest keeps its own gate, so a `429` on funding does not stop open interest.
+
 ## Deployment (S21)
 
 Two images, `ghcr.io/drdoom2012/quasar-market-data-collector` and `ghcr.io/drdoom2012/quasar-market-data-api` (`linux/amd64`, user `10001`), run as two services of `compose.yaml`. They share the volume `quasar-data` (mounted at `/app/data`, writable for both, because a WAL reader needs the shared-memory file) and read `config/quasar.compose.toml`, mounted read-only at `/app/config/`. That file must stay identical to `config/quasar.toml` except `[api].host = "0.0.0.0"` (`tests/config/test_compose_config.py`). The API stays read-only at the SQLite connection (INV-014); the Collector is the only writer.

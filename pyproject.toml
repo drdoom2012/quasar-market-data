@@ -140,6 +140,53 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
+name = "funding rate is independent of candle limiter, time and open interest"
+type = "forbidden"
+source_modules = [
+    "quasar_market_data.collector.binance_usdm_funding_rate",
+    "quasar_market_data.collector.funding_rate_limiter",
+    "quasar_market_data.collector.extension_pause",
+    "quasar_market_data.collector.fetch_funding_rate_once",
+]
+forbidden_modules = [
+    "quasar_market_data.collector.rate_limiter",
+    "quasar_market_data.collector.shared_server_time",
+    "quasar_market_data.collector.binance_usdm_open_interest",
+    "quasar_market_data.collector.open_interest_budget",
+    "quasar_market_data.collector.open_interest_gate",
+]
+
+[[tool.importlinter.contracts]]
+name = "candle collection does not use extension datasets"
+type = "forbidden"
+source_modules = [
+    "quasar_market_data.collector.collection_loop",
+    "quasar_market_data.collector.fetch_once",
+    "quasar_market_data.collector.binance_usdm",
+    "quasar_market_data.collector.rate_limiter",
+    "quasar_market_data.collector.shared_server_time",
+    "quasar_market_data.collector.candle_writer",
+    "quasar_market_data.collector.async_candle_writer",
+    "quasar_market_data.collector.backfill",
+    "quasar_market_data.collector.deadline_source",
+    "quasar_market_data.collector.binance_klines",
+    "quasar_market_data.collector.kline_source",
+    "quasar_market_data.collector.clock_lead",
+    "quasar_market_data.collector.hole_reader",
+    "quasar_market_data.collector.reconcile_reader",
+    "quasar_market_data.collector.candle_write_activity",
+]
+forbidden_modules = [
+    "quasar_market_data.collector.extension_pause",
+    "quasar_market_data.collector.binance_usdm_funding_rate",
+    "quasar_market_data.collector.funding_rate_limiter",
+    "quasar_market_data.collector.fetch_funding_rate_once",
+    "quasar_market_data.collector.binance_funding_rate",
+    "quasar_market_data.collector.funding_rate_writer",
+    "quasar_market_data.collector.async_funding_rate_writer",
+]
+
+[[tool.importlinter.contracts]]
 name = "api reaches no network client"
 type = "forbidden"
 source_modules = ["quasar_market_data.api"]

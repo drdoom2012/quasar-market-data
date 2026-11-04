@@ -24,6 +24,8 @@ NO_NETWORK_CONTRACT = "api reaches no network client"
 ENGINE_ONLY_CONTRACT = "talib and numpy are imported only by the indicator engine"
 CONFIG_CONTRACT = "config depends only on domain and the standard library"
 OI_INDEPENDENCE_CONTRACT = "open interest is independent of candle limiter and time"
+FUNDING_INDEPENDENCE_CONTRACT = "funding rate is independent of candle limiter, time and open interest"
+CANDLE_ISOLATION_CONTRACT = "candle collection does not use extension datasets"
 CONTRACT_NAMES = (
     DOMAIN_CONTRACT,
     INDEPENDENCE_CONTRACT,
@@ -34,6 +36,8 @@ CONTRACT_NAMES = (
     ENGINE_ONLY_CONTRACT,
     CONFIG_CONTRACT,
     OI_INDEPENDENCE_CONTRACT,
+    FUNDING_INDEPENDENCE_CONTRACT,
+    CANDLE_ISOLATION_CONTRACT,
 )
 
 
@@ -147,6 +151,45 @@ CASES = {
     ),
     "candle_modules_importing_the_rate_limiter_stay_allowed": Case(
         "collector/_probe.py", f"import {PACKAGE}.collector.rate_limiter\n", None
+    ),
+    "funding_limiter_importing_shared_server_time_fails_funding_independence": Case(
+        "collector/funding_rate_limiter.py",
+        f"import {PACKAGE}.collector.shared_server_time\n",
+        FUNDING_INDEPENDENCE_CONTRACT,
+    ),
+    "extension_pause_importing_the_open_interest_gate_fails_funding_independence": Case(
+        "collector/extension_pause.py",
+        f"import {PACKAGE}.collector.open_interest_gate\n",
+        FUNDING_INDEPENDENCE_CONTRACT,
+    ),
+    "funding_source_importing_the_candle_rate_limiter_fails_funding_independence": Case(
+        "collector/binance_usdm_funding_rate.py",
+        f"import ccxt\nimport {PACKAGE}.collector.rate_limiter\n",  # keeps the adapter's ignored ccxt import matched
+        FUNDING_INDEPENDENCE_CONTRACT,
+    ),
+    "fetch_funding_rate_once_importing_the_open_interest_budget_fails_funding_independence": Case(
+        "collector/fetch_funding_rate_once.py",
+        f"import {PACKAGE}.collector.open_interest_budget\n",
+        FUNDING_INDEPENDENCE_CONTRACT,
+    ),
+    "collection_loop_importing_extension_pause_fails_candle_isolation": Case(
+        "collector/collection_loop.py", f"import {PACKAGE}.collector.extension_pause\n", CANDLE_ISOLATION_CONTRACT
+    ),
+    "fetch_once_importing_the_funding_source_fails_candle_isolation": Case(
+        "collector/fetch_once.py", f"import {PACKAGE}.collector.binance_usdm_funding_rate\n", CANDLE_ISOLATION_CONTRACT
+    ),
+    "candle_adapter_importing_the_funding_limiter_fails_candle_isolation": Case(
+        "collector/binance_usdm.py",
+        f"import ccxt\nimport {PACKAGE}.collector.funding_rate_limiter\n",  # keeps the adapter's ignored ccxt import matched
+        CANDLE_ISOLATION_CONTRACT,
+    ),
+    "candle_write_activity_importing_the_funding_writer_fails_candle_isolation": Case(
+        "collector/candle_write_activity.py",
+        f"import {PACKAGE}.collector.async_funding_rate_writer\n",
+        CANDLE_ISOLATION_CONTRACT,
+    ),
+    "funding_writer_importing_candle_write_activity_is_allowed": Case(
+        "collector/async_funding_rate_writer.py", f"import {PACKAGE}.collector.candle_write_activity\n", None
     ),
 }
 
