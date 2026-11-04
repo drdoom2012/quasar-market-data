@@ -165,8 +165,9 @@ Rules [P]:
   ADR-0001 P-9 check, INV-035), so rule 5 cannot turn a typo or a delisted contract into an empty "answer".
 - The whole response is a parse error (fail closed, nothing of it stored, nothing verified) in the cases of the
   **contract** rows of P-3: not a list (this includes the error object of rule 4); a row outside `[startTime,
-  endTime]` or with a non-int `fundingTime`; a repeated key; rows not strictly ascending by `(fundingTime,
-  rateType)`; `symbol` differs from the request; `fundingRate` not a string in the decimal grammar; `markPrice`
+  endTime]` or with a non-int `fundingTime`; a repeated key; a `fundingTime` that decreases (a Regular and a
+  Special row of one `fundingTime` are accepted in either order; wording amended 2026-11-04 with the user's approval,
+  see the Amendment note below); `symbol` differs from the request; `fundingRate` not a string in the decimal grammar; `markPrice`
   neither `""` nor a non-negative decimal string; `rateType` neither `Regular` nor `Special`; more than `limit` rows.
 - **Page coverage** (the interval one valid response verifies; request `[a, b]`, `n` rows, `last` the `fundingTime`
   of the last row):
@@ -945,3 +946,9 @@ were throwaway in the session scratchpad and are not in the repository.
   4. the planned latency table is unchanged: its rows are below `S_sustained` and the simulation reproduces them
      exactly (E-14, P-10).
 - **Approval** (2026-11-03): the user accepted revision 4 as written, including O-1 to O-6 as proposed.
+- **Amendment note** (2026-11-04), with the user's approval, found in the independent review of the FR-1 plan: P-5 first listed "rows not
+  strictly ascending by `(fundingTime, rateType)`" as a parse error. That would fix the order of a Regular and a Special
+  row that share one `fundingTime`, which no evidence in this ADR supports (the page-coverage rule above is already
+  stated "whatever the order of two rows with the same `fundingTime`"). The rule is now: `fundingTime` is
+  non-decreasing, the key `(fundingTime, rateType)` is unique, and either order of a coincident pair is accepted.
+  Nothing else changes; the implementation (FR-1, `parse_funding_rate_history`) and its tests follow this wording.
