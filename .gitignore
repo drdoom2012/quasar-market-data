@@ -10,3 +10,6 @@ dist/
 .superpowers/
 /data/*
 !/data/.gitkeep
+
+# make dev: process output
+/logs/

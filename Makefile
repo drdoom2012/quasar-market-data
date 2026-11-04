@@ -1,4 +1,36 @@
-.PHONY: test lint typecheck imports check live simulate bench bench-health bench-health-oi bench-indicators bench-oi-write bench-overview images compose-test
+.PHONY: collector api overview wait-api dev dev-api test lint typecheck imports check live simulate bench bench-health bench-health-oi bench-indicators bench-oi-write bench-overview images compose-test
+
+# Local development: the Collector, the API and the symbol overview page, each its own process (README, "Locally").
+# CONFIG is the file both processes read; API_URL must match [api] host and port in it (it is only used by the page).
+CONFIG ?= config/quasar.toml
+API_URL ?= http://localhost:8000
+UI_PORT ?= 8765
+
+collector:
+	uv run quasar-collector run $(CONFIG)
+
+api:
+	uv run quasar-api serve $(CONFIG)
+
+overview:
+	uv run python -m tools.symbol_overview --api-url $(API_URL) --port $(UI_PORT)
+
+# Waits until the API answers /health; the page is started after it so that it does not open onto errors.
+wait-api:
+	@until curl -sf $(API_URL)/health >/dev/null; do sleep 1; done
+
+# All three in one terminal (mprocs.yaml): s start, x stop, r restart the selected one, q quit. Output also goes to logs/.
+# Closing the terminal or quitting stops every process; nothing keeps running in the background.
+dev:
+	@command -v mprocs >/dev/null || { echo "mprocs is not installed: brew install mprocs" >&2; exit 1; }
+	@mkdir -p logs
+	mprocs --log-dir logs --log-mode truncate
+
+# The API and the page only, over the database that is already in CONFIG (no Collector, nothing is written).
+dev-api:
+	@command -v mprocs >/dev/null || { echo "mprocs is not installed: brew install mprocs" >&2; exit 1; }
+	@mkdir -p logs
+	mprocs --log-dir logs --log-mode truncate --names api,ui "make api" "make wait-api overview"
 
 test:
 	uv run pytest

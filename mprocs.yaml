@@ -1,0 +1,9 @@
+# `make dev` (README, "Locally"). Local development only; production runs on Docker Compose.
+# The commands are the Makefile targets, so CONFIG, API_URL and UI_PORT given to `make dev` reach them.
+procs:
+  collector:
+    shell: make collector
+  api:
+    shell: make api
+  ui:
+    shell: make wait-api overview

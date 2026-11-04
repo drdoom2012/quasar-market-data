@@ -16,6 +16,16 @@ uv run quasar-api serve config/quasar.toml       # terminal 2: API on http://127
 curl localhost:8000/health
 ```
 
+All three in one terminal (the Collector, the API and the [symbol overview](#symbol-overview-tool) page on `http://127.0.0.1:8765/`) with [mprocs](https://github.com/pvolok/mprocs) (`brew install mprocs`; local development only, the VPS runs Compose):
+
+```sh
+make dev        # in the process list: s start, x stop, r restart the selected process, q quit
+make dev-api    # the API and the page only, over the database that is already there (no Collector)
+make dev CONFIG=path/to/quasar.toml API_URL=http://localhost:9000 UI_PORT=9765   # defaults: config/quasar.toml, http://localhost:8000, 8765
+```
+
+The processes are separate (`make collector`, `make api` and `make overview` start one each; `mprocs.yaml` lists them), each restarts alone, and closing the terminal or quitting stops all of them. Everything they print is also written to `logs/<process>.log` (replaced at each start, not tracked by git). `API_URL` must match `[api]` in the configuration file; it is only used by the page and to wait until the API answers `/health` before the page starts.
+
 With Docker (images from GHCR, `linux/amd64`):
 
 ```sh
