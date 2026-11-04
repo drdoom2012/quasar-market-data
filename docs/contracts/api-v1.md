@@ -23,8 +23,8 @@ What the API does **not** promise: that a closed candle can never be revised by 
 | Methods | `GET` only. `HEAD`, `OPTIONS` and everything else is `405 method_not_allowed` with an `Allow: GET` header and the standard error body. |
 | Request target | Origin form only (`/v1/candles?...`). The absolute form (`GET http://host/v1/candles?...`) is not supported and answers `404 not_found`; clients and proxies are expected to send the origin form. |
 | Encoding | `application/json; charset=utf-8`, UTF-8. Symbols may contain non-ASCII characters (ADR-0001 P-8). In a query string `/` and `:` are legal unencoded; `%`, `+`, `&`, `#`, spaces and non-ASCII characters must be percent-encoded. |
-| Time | Integer epoch **milliseconds**, UTC (`open_time_ms`, `time_ms`, `start`, `end`, `next`, `series.*`, `span.*`, `as_of_ms`, `rule.*_ms`, `runs[*].start`, `runs[*].end`). No ISO strings, no time zones. A candle covers `[open_time_ms, open_time_ms + timeframe)`; an open interest row with `time_ms = T` covers `[T - period, T)` (section 6.5.1). Valid times are `946684800000 <= t <= 4102444800000` (the range the schema accepts); anything else is `400`. The one exception is the exclusive `end`, which may be up to one timeframe past that maximum (`4102445100000` for `5m`), so the slot at the maximum can be requested and an echoed `end` is always valid as the next `start` or `end`. |
-| Decimals | JSON **strings** in the canonical stored form: digits and at most one `.`, no sign, no exponent, no leading zero (except `0.x`), no trailing fractional zero (`"82709"`, not `"82709.0"`). Consumers must parse them as decimals, never as floats. `turnover` is `null` when the venue did not provide it; it is never computed. |
+| Time | Integer epoch **milliseconds**, UTC (`open_time_ms`, `time_ms`, `start`, `end`, `next`, `series.*`, `span.*`, `as_of_ms`, `rule.*_ms`, `runs[*].start`, `runs[*].end`). No ISO strings, no time zones. A candle covers `[open_time_ms, open_time_ms + timeframe)`; an open interest row with `time_ms = T` covers `[T - period, T)` (section 6.5.1); a funding rate row is the instant `funding_time_ms` of a settlement and covers no interval (section 6.7.1), and its `start`, `end`, `next`, `series.*` and `coverage.verified_*_ms` are not aligned to anything. Valid times are `946684800000 <= t <= 4102444800000` (the range the schema accepts); anything else is `400`. The one exception is the exclusive `end`, which may be up to one timeframe past that maximum (`4102445100000` for `5m`), so the slot at the maximum can be requested and an echoed `end` is always valid as the next `start` or `end`. |
+| Decimals | JSON **strings** in the canonical stored form: digits and at most one `.`, no sign (the one exception is `funding_rate`, which may begin with `-`, section 6.7.1), no exponent, no leading zero (except `0.x`), no trailing fractional zero (`"82709"`, not `"82709.0"`). Consumers must parse them as decimals, never as floats. `turnover` is `null` when the venue did not provide it; it is never computed. |
 | Integers | Counts and times are JSON integers. Integer query parameters must match `^[0-9]{1,16}$` (ASCII digits only, no sign, no `_`, no spaces, no decimal point); anything else is `400`. |
 | Strings | `venue` and `timeframe` are matched exactly. `symbol` is 1–64 characters, no whitespace or control characters, valid UTF-8 after percent-decoding, matched case-sensitively and without Unicode normalization (ADR-0001 P-8). A syntactically invalid symbol is `400`; a valid but unknown one is `404`. |
 | Parameters | Unknown query parameters, repeated parameters and empty values are rejected (`400`), so a typo such as `limt=10` fails instead of being ignored. Names and values are case-sensitive. |
@@ -56,13 +56,14 @@ Out of this contract: errors the HTTP server itself produces before the applicat
 | 404 | `unknown_series` | No **candle** of this `(venue, symbol, timeframe)` has ever been stored. A typo and a not-yet-ingested symbol look the same, and a newly configured instrument answers 404 until its first candle is stored. An *existing* series with nothing in the window is a `200` with an empty list. For `GET /v1/open-interest` (section 6.5) and `GET /v1/open-interest/coverage` (section 6.6) the series is `(venue, symbol, period)` and the test is "no open interest row has ever been stored" and the message says so (decision OA11; a series that has only conflict records has no row) | `venue`, `symbol`, `timeframe` (`period` instead of `timeframe` for `/v1/open-interest` and `/v1/open-interest/coverage`) |
 | 404 | `not_found` | Unknown path | none |
 | 404 | `open_interest_disabled` | `GET /v1/open-interest` or `GET /v1/open-interest/coverage` while the configuration file has no `[open_interest]` table or it has `enabled = false` (sections 6.5.5 and 6.6.5). The deployment does not collect open interest, so the endpoint cannot judge its slots | none |
+| 404 | `funding_rate_disabled` | `GET /v1/funding-rates` while the configuration file has no `[funding_rate]` table or it has `enabled = false` (section 6.7.6). The deployment does not collect funding rates, so the endpoint cannot judge a window. Answered without opening the database | none |
 | 405 | `method_not_allowed` | Not `GET` | `allow` |
 | 500 | `internal_error` | A bug | none (a correlation id is logged, not returned) |
 | 503 | `not_ready` | The database file is missing, is empty (the Collector has not initialised it yet), is not this project's, has a schema version other than the one this API was built for, or cannot be read. The API stays up and answers every `/v1` request this way until the condition clears (INV-028) | `reason`: `database_missing`, `schema_mismatch` or `database_unreadable` |
 
 Rules:
 
-- **Order of checks:** parameter validation (`400`) comes first because it needs no database; then database readiness (`503`); then the series lookup (`404`). A request that is both malformed and hits a broken database answers `400`. `GET /v1/open-interest` and `GET /v1/open-interest/coverage` add `404 open_interest_disabled` between the parameters and the database (sections 6.5.5 and 6.6.5).
+- **Order of checks:** parameter validation (`400`) comes first because it needs no database; then database readiness (`503`); then the series lookup (`404`). A request that is both malformed and hits a broken database answers `400`. `GET /v1/open-interest` and `GET /v1/open-interest/coverage` add `404 open_interest_disabled` between the parameters and the database (sections 6.5.5 and 6.6.5), and `GET /v1/funding-rates` adds `404 funding_rate_disabled` at the same place (section 6.7.6).
 - **Readiness is checked on every request** (the file exists, the project's `application_id`, the schema version), not only at startup, so a deleted or replaced file is noticed.
 - `database_unreadable` also covers a file that exists but holds nothing yet (no application id, no tables), which is a normal moment while the Collector starts, corruption, I/O errors, a busy timeout and a WAL database that cannot be opened read-only. `500` is reserved for bugs.
 - `503` carries `Retry-After: 5` for `database_missing` and `database_unreadable`, and **no** `Retry-After` for `schema_mismatch` (it needs a deployment, not a retry). Clients must treat `503` as "no data", never as "empty data".
@@ -232,6 +233,7 @@ Each is specified in its own section of this document and approved before its sl
 | `GET /v1/indicators` | S18 | Specified in section 6.3 below (indicators computed on demand from stored closed candles; no value across a gap, a conflicted or unavailable slot, or before warm-up; says why). |
 | `GET /v1/open-interest` | OI-5 | Specified in section 6.5 below (open interest history at 5m from stored rows, with the slot states of ADR-0003 P-7; no value is inferred for an absent row). |
 | `GET /v1/open-interest/coverage` | OI-6a | Specified in section 6.6 below (counts and runs of open interest slots for a window of at most 10 000 slots, from stored times, with the slot states of section 6.5.3; no value is read or returned). |
+| `GET /v1/funding-rates` | FR-5 | Specified in section 6.7 below (funding rate history at settlement time from stored rows, with a verified-span coverage of the whole window; no rate is inferred for an absent settlement). **APPROVED** (2026-11-04). |
 | Health | S17 | Specified in section 6.2 below (`/health`, `/health/ready`, `/health/ingest`). |
 
 ## 6.1 `GET /v1/coverage`
@@ -369,7 +371,8 @@ Information, never a gate: `200` whenever the database is readable, `503 not_rea
   - **What `missing` means and does not mean.** Zero rows for a configured series at the snapshot. It does not say why (never started, first write failed, a symbol the exchange does not serve, a Collector running on another file or database) and it does not judge time: a configured series with any row is never missing, however stale. It never changes `status`, any HTTP status or the order of checks of section 6.2. All configured instruments missing gives `status: no_series`, `series_count: 0` and `missing_count == configured_count`.
   - One read transaction serves both the fields above and `universe`. The API holds the universe in memory from the file it read at start; a change of the file takes effect after a restart.
 - **What it cannot tell.** It reads only the newest stored candle per series. A series with holes behind its newest candle is `current` (`/v1/coverage` reports holes). A stopped Collector, an exchange outage, a halted or delisted symbol and a wrong publication delay all show as `stale`; the endpoint does not know the cause or whether the Collector runs. A retired symbol stays a stored series and keeps `status` at `behind`. A mismatch between the API's rule and the Collector's delay shifts `current`/`due` by the difference.
-- **`open_interest`** (added by OI-5, ADR-0003 P-11; an additive amendment, section 6.2 compatibility): an object about the stored open interest series, or `null` when open interest is not enabled in the configuration. Specified in section 6.5.8. It is the **last key** of the body, after `universe`. Every field above keeps its meaning and its value; a request before and a request after OI-5 on the same database give the same values for them.
+- **`funding_rate`** (added by FR-5, ADR-0004 P-13; an additive amendment, section 6.2 compatibility; **APPROVED** 2026-11-04): an object about the stored funding rate series, or `null` when funding is not enabled in the configuration. Specified in section 6.7.8. Once FR-5 is implemented it is the **last key** of the body, after `open_interest`; the statement below that `open_interest` is the last key holds until then.
+- **`open_interest`** (added by OI-5, ADR-0003 P-11; an additive amendment, section 6.2 compatibility): an object about the stored open interest series, or `null` when open interest is not enabled in the configuration. Specified in section 6.5.8. It is the **last key** of the body, after `universe` (until FR-5, see above). Every field above keeps its meaning and its value; a request before and a request after OI-5 on the same database give the same values for them.
 - The answer reflects one read transaction, like every other endpoint.
 - A series that cannot be judged (a timeframe label this software does not know, or an open time not aligned to its timeframe; the Collector cannot write either, a hand-edited row can) makes the whole answer `500 internal_error`, never a made-up status.
 - **A round longer than the lag threshold shows up as `stale`.** The Collector serves its symbols one after another through one rate limiter, so with a large universe the last symbols of a round can be written more than `lag_threshold_ms` after their slot was expected; those series are `stale`, and `status` is `behind`, for part of every cycle. This is not a fault of the Collector. Set `rule.lag_threshold_ms` in `config/quasar.toml` above the Collector's round duration for the universe, and alert on `behind` that persists for more than one cycle, not on a single answer. (The size of the effect depends on the Collector's request spacing and was not measured.)
@@ -741,6 +744,146 @@ What it cannot tell: **when collection began** (`O` is the oldest *stored* row; 
 
 **Cost:** one read transaction; two primary-key seeks for `O` and `N`, one range read of `time_ms` of rows and one of conflict records over at most 10 000 slots; no value column.
 
+## 6.7 `GET /v1/funding-rates` and the `funding_rate` object of `GET /health/ingest`
+
+- **Status:** APPROVED by the user on 2026-11-04, decisions FA1 to FA10 as proposed (section 9). Implemented by FR-5 (issue #20, ADR-0004 P-13, P-16). Plan: `docs/superpowers/plans/2026-11-04-fr-5-funding-rate-api.md`.
+- **What it answers:** for one series `(venue, symbol)` and a window `[start, end]` of at most 3 650 days, the funding rate settlements Binance reported and the Collector stored, and one `coverage` block that says how much of the **whole window** the Collector has verified (ADR-0004 P-7). It reads stored rows, the verified span, the server clock and the configuration file only; it never contacts an exchange and never writes.
+- **Sections 1 to 3 and 5.6 apply** (conventions, error body, pagination by time, one read transaction, work off the event loop), with the differences stated below.
+
+### 6.7.1 What a row is
+
+- A row is one **settlement**: the instant `funding_time_ms` at which Binance applied `funding_rate` to the contract. `"time_semantics": "settlement"` is stated in every response. It is an instant, not an interval: it covers nothing, and **it must not be joined to a candle or an open interest row by equal timestamps** (it lies a few milliseconds after a whole hour in all measured data, ADR-0004 P-3, but the contract does not promise that).
+- **`funding_rate` is the rate of one settlement, not per day or per year, and the length of the interval it applies to is not part of the row.** A symbol settles every 8, 4 or 1 hour and its interval has changed over time; the spacing of two consecutive rows is an observation, wrong across a gap, not a definition. Nothing in this API computes a cost, an average or an annualised rate (ADR-0004 NG-1).
+- `funding_rate` is a **signed** decimal string: the canonical form of section 1 with an optional leading `-` (`"0.0001"`, `"-0.00005123"`, `"0"`; never `"-0"`, never an exponent). Binance's own figure, exactly as stored; the unit (a fraction per settlement, `0.0001` = 0.01 %) is inferred, not documented (ADR-0004 P-2). `mark_price` is a canonical non-negative decimal string, or **`null`**: Binance sends an empty value for settlements before 2023-10-31 08:00 UTC, and a price is never computed, copied from a candle or filled in.
+- `rate_type` is `"Regular"` or `"Special"` (an extra charge, for example for stock dividends on TradFi perpetuals). Both can occur in one hour of one symbol with different `funding_time_ms`. Identity is `(venue, symbol, funding_time_ms, rate_type)`. The response carries no `ingested_at_ms` (decision Q5).
+
+### 6.7.2 Request
+
+| Parameter | Required | Meaning |
+|---|---|---|
+| `venue` | yes | `binance-usdm` in v1. |
+| `symbol` | yes | CCXT unified symbol, exactly as stored, e.g. `BTC/USDT:USDT`. |
+| `start` | yes | Inclusive window start, epoch ms, **not aligned to anything** (section 1, valid range). |
+| `end` | no | **Inclusive** window end, epoch ms, valid range of section 1, `>= start`. Default: `max(as_of_ms, start)`, **capped at `start + 3 650 days`** (below). |
+| `limit` | no | Maximum rows in this response, `2` to `1000`, default `1000` (fixed, as decision R6). |
+
+- **The window is the closed interval `[start, end]`**, because the verified span of ADR-0004 P-7 is a closed interval of integer milliseconds and the comparison must not need a conversion. This differs from `GET /v1/candles` and `GET /v1/open-interest`, whose `end` is exclusive (decision FA1). A row is selected when `start <= funding_time_ms <= end`. An explicit `end < start` is `400`; `end == start` is a one-millisecond window.
+- **Size.** An explicit `end - start` is at most **3 650 days** (`315 360 000 000` ms, the maximum `backfill_days`) or `400` with `details.maximum` (in milliseconds; decision FA2). A defaulted `end` is **capped** at `start + 315 360 000 000`, as a defaulted candle window is capped (section 5.1): the response echoes the capped `end`, `coverage` describes that echoed window, and to read past it a consumer uses the echoed `end` as the next `start` (decision FA2, amended 2026-11-04 on the user's answer). There is no slot count: the series has no grid. Cost: at most `limit + 1` rows read, plus one range count of `funding_rates` and one of `funding_rate_conflicts` over the window, in the primary key and the `funding_rate_conflicts_event` index; at most about 90 000 rows of one series are counted (a 1 h symbol over 3 650 days).
+- **Defaulted `end`.** `end = max(as_of_ms, start)`: the window runs to the server's now. Because the verified span ends at least `publication_delay_ms` behind the exchange's clock, and the Collector's last round is older still, **a window with a defaulted `end` is `partly_verified` at best and `complete` is `false`** (section 6.7.5); only a host clock that lags the exchange's by more than the span's age could make it `verified`, and the contract promises nothing about that case. To ask for a complete answer a consumer passes an explicit `end <= coverage.verified_through_ms`. A stopped series therefore cannot look current by a defaulted window (the weakness noted for open interest, decision OA10, does not arise). The response echoes the effective `start` and `end`.
+- Parameter rules of section 1 apply (unknown, repeated, empty values; `timeframe` and `period` are not parameters of this endpoint).
+
+Example:
+
+```text
+GET /v1/funding-rates?venue=binance-usdm&symbol=BTC/USDT:USDT&start=1792656000000&end=1792720000000
+```
+
+### 6.7.3 Paging
+
+Pagination is by time, ascending by `(funding_time_ms, rate_type)` (`Regular` before `Special`), as section 3 with these differences (decision FA3):
+
+- `next` is an **integer**: the `funding_time_ms` of the first stored row **not** returned, or `null` when no stored row exists in `[last returned funding_time_ms + 1, end]` (also when nothing was returned). It is `<= end`, strictly greater than the last returned `funding_time_ms`, and passed unchanged as `start` together with the echoed `end`. A paging loop always makes progress and terminates.
+- **A page never splits the rows of one `funding_time_ms`.** At most two rows can share a millisecond (one per `rate_type`). The implementation reads `limit + 1` rows; if the last returned row and the first row not returned share a `funding_time_ms`, the last returned row is dropped from the page. A page can therefore hold `limit - 1` rows, never fewer unless the window ends; this is why `limit` is at least `2`. With an integer `next` no row is repeated and none is skipped.
+- Pages are not a snapshot (section 3), and the `coverage` of a page does not promise consistency with the coverage of another page (section 6.7.5).
+
+### 6.7.4 Response `200`
+
+```json
+{
+  "venue": "binance-usdm",
+  "symbol": "BTC/USDT:USDT",
+  "time_semantics": "settlement",
+  "start": 1792656000000,
+  "end": 1792720000000,
+  "series": {
+    "oldest_funding_time_ms": 1792627200000,
+    "newest_funding_time_ms": 1792713600650
+  },
+  "rows": [
+    { "funding_time_ms": 1792656000000, "rate_type": "Regular", "funding_rate": "0.0001", "mark_price": "82709.1", "conflicted": false },
+    { "funding_time_ms": 1792684800000, "rate_type": "Regular", "funding_rate": "-0.00005123", "mark_price": "82744.5", "conflicted": false },
+    { "funding_time_ms": 1792713600000, "rate_type": "Regular", "funding_rate": "0.00011", "mark_price": "82790", "conflicted": true },
+    { "funding_time_ms": 1792713600650, "rate_type": "Special", "funding_rate": "0.0003", "mark_price": "82801", "conflicted": false }
+  ],
+  "next": null,
+  "coverage": {
+    "as_of_ms": 1792727045000,
+    "verified_from_ms": 1792569600000,
+    "verified_through_ms": 1792727000000,
+    "verified_at_ms": 1792727040000,
+    "window_state": "verified",
+    "events_in_window": 4,
+    "conflicted_events": 1,
+    "complete": false
+  }
+}
+```
+
+- The example is **illustrative and computed by hand**; the values are not real. Four stored settlements in a window that lies entirely inside the verified span, so `window_state` is `verified`; the third is conflicted, so `conflicted_events` is `1` and `complete` is `false` although the whole window was verified. The fourth is a `Special` record 650 ms after the third.
+- `start` and `end` echo the effective window. `series` is present on every `200`: the `funding_time_ms` of the oldest and newest stored **row** of the series, whole series, not only the window, or `null` for both when the series has a verified span but no row yet (decision FA4). A conflict record never moves them.
+- `rows` are ascending, unique by `(funding_time_ms, rate_type)`, each with exactly the fields shown; `conflicted` is always present and `mark_price` may be `null`. `next` is always present (section 6.7.3). A returned row with `conflicted: true` carries its **first stored** values; the rejected value is not exposed.
+
+### 6.7.5 The `coverage` block
+
+`coverage` speaks for the **whole requested window `[start, end]`, never for the page** (the opposite of sections 5.3 and 6.5.6, decision FA5). It is computed in the request's own read snapshot from the verified span row of the series and two range counts, not from the rows of the page. Paging changes `rows`, `next` and the per-row `conflicted`, and nothing in `coverage` except what the Collector changed between two requests.
+
+| Field | Meaning |
+|---|---|
+| `as_of_ms` | The server clock, read once for this request. |
+| `verified_from_ms`, `verified_through_ms` | The ends of the series' verified span `[from, through]` (ADR-0004 P-7), a closed interval of settlement times; `null` when the series has no span. Whole series, not the window. |
+| `verified_at_ms` | The latest time at which any part of the span was verified; `null` without a span. It is the freshness of the span, **not** of this window. |
+| `window_state` | `verified`: `verified_from_ms <= start` and `end <= verified_through_ms`. `unverified`: no span, or the window and the span are disjoint (`end < verified_from_ms` or `start > verified_through_ms`). `partly_verified`: anything else. |
+| `events_in_window` | Stored rows with `start <= funding_time_ms <= end`, counted over the whole window. Equals the number of rows of the window summed over its pages read from one unchanged database. |
+| `conflicted_events` | Distinct `(funding_time_ms, rate_type)` in the window with at least one conflict record, a record without a stored row included. A conflict outside the window is not counted. |
+| `complete` | `true` only when `window_state = verified` and `conflicted_events = 0`. |
+
+- **What `verified` says.** For every millisecond of the window, a valid response of the exchange to a request containing it was received and all its rows are stored, and together those responses listed exactly the stored settlements (ADR-0004 P-7). `verified` with `events_in_window: 0` is therefore the statement "Binance listed no settlement in this window when `verified_at_ms` was recorded" and nothing more. It is the exchange's list at the time of asking, not a proof that the list is complete in the world: **a settlement can still appear later inside the span** (a late event, ADR-0004 P-8, INV-124) and a stored row can have been published with a different value (a conflict).
+- **What `complete` says.** Nothing is missing from the window as far as the Collector verified it, and no stored event in it is known to disagree with a later delivery. It is not "will never change", and it says nothing about a settlement between `verified_through_ms` and `as_of_ms`.
+- **What `unverified` and `partly_verified` say.** Only that the Collector has not verified the window or part of it: not that settlements are missing, and **not that none occurred**. The response lists no gap and no missing settlement; the series has no grid, so none can be named (ADR-0004 Context 1).
+- **Snapshot scope: one HTTP request.** The rows and the `coverage` block of one response come from one read snapshot (section 5.6). Different pages of one window are different requests with different snapshots, and the API promises **nothing** about how they relate: between two requests the Collector may have extended the span, stored a row or recorded a conflict, so `window_state`, `events_in_window`, `conflicted_events` and `complete` of one page may differ from those of another, in either direction (a window becomes `verified` as the span grows, and `complete` turns `false` when a conflict appears). The response contains no cross-page change detection. A consumer that needs one consistent answer for a window reads it in a single request (where the window fits one page); otherwise it treats the coverage of each page as describing that response's moment only.
+- A row is never fabricated, interpolated or carried forward. The absence of a row is never evidence that the rate was zero.
+
+### 6.7.6 Errors and order of checks
+
+`400 invalid_parameter`, `404 funding_rate_disabled`, `404 unknown_series`, `503 not_ready`, `500 internal_error`. Order: parameters (`400`, `details.maximum` for `limit` and for the window) -> the configuration has an enabled `[funding_rate]` table (`404 funding_rate_disabled`, **without opening the database**) -> the host clock (outside the valid range is `500`, as in section 6.1.5) -> the database (`503`, never an empty `200`) -> the series (`404 unknown_series`, message "no funding rate span or row of this series has been stored", `details` `venue`, `symbol`, when the series has neither a verified span nor a stored row: a typo and a symbol not yet collected look the same; a series that has only conflict records is unknown). An existing series with nothing in the window is a `200` with empty `rows`. A data-quality situation (an unverified window, a conflict) is never an error.
+
+### 6.7.7 What a consumer can rely on
+
+- `time_semantics: "settlement"`; the rate is per settlement; the interval is not part of the row (6.7.1).
+- Stored values are returned byte-for-byte as stored; `funding_rate` is never rounded, scaled or converted to a float.
+- `coverage` describes the window of this request at `as_of_ms`; `verified` is a statement about the exchange's list at `verified_at_ms`, not a guarantee (6.7.5).
+- A `conflicted: true` row is **untrusted** (section 0, point 5): the first stored value may be the wrong one.
+- The API reads the same configuration file as the Collector (section 6.1.5) for `[funding_rate]` `enabled`, `publication_delay_ms`, `recheck_ms` and `backfill_days`; a change of the file takes effect after a restart of each process. The endpoint itself uses none of them to judge a window; the health object does (6.7.8).
+- `Cache-Control: no-store` applies.
+
+### 6.7.8 The `funding_rate` object of `GET /health/ingest`
+
+```json
+"funding_rate": {
+  "as_of_ms": 1792727045000,
+  "rule": {
+    "publication_delay_ms": 30000, "behind_after_ms": 7230000,
+    "quiet_after_ms": 172800000, "backfill_days": 365
+  },
+  "scope": "stored_series",
+  "status": "degraded",
+  "series_count": 600, "current": 598, "behind": 2, "catching_up": 12,
+  "conflicted_series": 1, "quiet_series": 0
+}
+```
+
+- The example is **illustrative and computed by hand**: 600 series, of which two have a span that ends at least `behind_after_ms` before `as_of_ms`, twelve have not yet grown their history to `backfill_days`, and one has a conflict in a settlement of the last 24 hours, hence `degraded`.
+- **`null`** (the key is present) when the configuration has no enabled `[funding_rate]` table. Otherwise an object, judged in the **same read transaction** and at the same `as_of_ms` (repeated inside the object) as the candle fields. The shape of the other keys does not change.
+- **A series** is a `(venue, symbol)` with a row in `funding_rate_verified` (a verified span); `scope` is always `"stored_series"`. A configured symbol that has no span yet is invisible here, and `no_series` does not mean the funding task is healthy, idle, broken or not started. Rows stored without a span (a crash before the first span growth) are not counted until the span exists.
+- **Per series**, with `[F, T]` the span and `N` the `funding_time_ms` of the newest stored row, if any:
+  - `behind`: `as_of_ms - publication_delay_ms - T >= 2 h`, that is `as_of_ms - T >= behind_after_ms` (`behind_after_ms = publication_delay_ms + 7 200 000`); the boundary is inclusive and the API uses the Collector's function `is_behind`, so both agree to the millisecond. `current` is a series that is not `behind`.
+  - `catching_up`: `T - F < backfill_days x 86 400 000`: the history is not yet as deep as configured. It is a function of the stored span and the configuration only, **with no clock**, and independent of `behind`.
+  - `quiet`: there is no stored row, or `as_of_ms - N > quiet_after_ms` (48 h, strictly). The longest spacing within a series in the sampled data was 16 h except one of 955 h (ADR-0004 E-5, E-13), so a genuine pause of two days is reported until the next event arrives, which is accepted. Quiet is the only signal that tells a valid empty answer from a wrong symbol (ADR-0004 P-13). A listing that has not yet had its first settlement is quiet too (decision FA6).
+- `series_count = current + behind`; `catching_up` and `quiet_series` count series independently of that partition.
+- **`conflicted_series`:** the number of series with at least one `funding_rate_conflicts` record whose `funding_time_ms` satisfies `as_of_ms - 86 400 000 < funding_time_ms`. An older conflict stays visible per window in `GET /v1/funding-rates`.
+- **`status`** (closed list), the first that matches: `no_series` when `series_count` is `0`; `degraded` when `conflicted_series > 0` or `quiet_series > 0`; `behind` when `behind > 0`; `catching_up` when `catching_up > 0`; `current`. `degraded` takes precedence over `behind` and `catching_up`: a consumer that needs freshness reads the counts, which are always complete.
+- **What it cannot tell.** There is no `suspended_series`: a series the Collector suspended after repeated failures (ADR-0004 P-10) is state in the Collector's memory and is not visible to the API; the API shows the effect (`behind`), the Collector's log shows the cause. A stopped funding task, a `418`, a `429` pause and a Collector that is down all show as `behind`, then `quiet`; the endpoint does not know the cause. It reads the span, the newest row and the conflict records per series, not the rows between them. Candle, open interest and funding health are independent: a funding condition never changes a candle or open interest field or any HTTP status.
+
 ## 7. Out of scope for v1
 
 Authentication, rate limiting, CORS, write endpoints, streaming, candle revision history, exposing rejected conflict values, a configurable page limit, timeframes other than `5m`, venues other than `binance-usdm`, and any trading functionality.
@@ -770,6 +913,9 @@ Authentication, rate limiting, CORS, write endpoints, streaming, candle revision
 | `/v1/open-interest`: `time_ms` is the period end, seven slot states with the first match winning, `not_yet_expected` after `c x 5 min + round_offset`, `no_longer_recoverable` after 29 days, `due`/`stale` at the newest edge, `conflicted` rows returned with their first stored values | ADR-0003 P-3, P-5, P-7, P-8, P-10, P-11; decisions OA1 to OA11 |
 | `/health/ingest` `open_interest` object: additive, `null` when not enabled, per-series freshness with the open interest expectation, `conflicted_series` makes the status `degraded` | ADR-0003 P-8, P-11, O-4; decisions OA5, OA6 |
 | `/v1/open-interest/coverage`: counts and runs of the section 6.5.3 states for at most 10 000 slots from one slot sequence, the slot-model properties of 6.6.4, only times read, a conflict without a row accepted | ADR-0003 P-7, amendment A-2; OI-6 design sections 5 and 6; decisions OB1 to OB6 |
+| `/v1/funding-rates`: rows at `funding_time_ms` (an instant, per settlement, no interval), signed `funding_rate`, nullable `mark_price`, `rate_type` in the key, first stored values for a conflicted row | ADR-0004 P-2, P-3, P-6; decisions FA1 to FA4 |
+| `/v1/funding-rates` `coverage`: one block for the whole window from the verified span and two range counts, `verified` / `partly_verified` / `unverified`, `complete` needs `verified` and no conflicted event, no cross-page promise | ADR-0004 P-7, P-8, P-13; decision FA5 |
+| `/health/ingest` `funding_rate` object: additive, `null` when not enabled, `behind` reuses the Collector's `is_behind`, `catching_up` has no clock, `quiet` after 48 h makes the status `degraded`, no `suspended_series` | ADR-0004 P-10, P-13; decisions FA6 to FA8 |
 | `/health/ingest` `universe` block and `configured` on `behind` entries; the S17 fields keep their meaning; the two equalities | S20 design, decisions U5, U6, INV-066, INV-067 |
 
 ## 9. Decisions (answered by the user on 2026-10-23: all as recommended)
@@ -882,3 +1028,18 @@ OI-6a decisions (APPROVED by the user on 2026-11-03, all as proposed; section 6.
 | OB4 | Which parameters? | `venue`, `symbol`, `period`, `start`, `end`, all required; no `limit` and no default `end`; at most 10 000 slots. | A defaulted `end` (as `/v1/open-interest`): the window would depend on the newest row and could hide a stopped series (decision OA10); the page needs an explicit window. |
 | OB5 | Errors and the `404` body | The errors and the order of checks of 6.5.5; the `unknown_series` message and `details` of decision OA11; a series with only conflict records is unknown. | A different `404` for this endpoint: one more body shape for no gain. |
 | OB6 | Are the slot-model properties part of the contract? | Yes: 6.6.4 states them as what a consumer may rely on, and they are tested over generated windows. | Leaving them implicit: a consumer that validates (the symbol overview page does) would have to guess which inconsistencies are possible. |
+
+FR-5 decisions (APPROVED by the user on 2026-11-04, all as proposed; section 6.7):
+
+| # | Question | Proposal | Alternative that is not proposed, and its cost |
+|---|---|---|---|
+| FA1 | Is `end` inclusive or exclusive? | **Inclusive**: the window is the closed interval `[start, end]`, as the verified span of ADR-0004 P-7 and the text of P-13 (`start <= funding_time_ms <= end`). Differs from candles and open interest. | Exclusive `end` as elsewhere: one rule for all endpoints, but the span comparison would need `end - 1` everywhere and a `window_state` edge test would be off by one in the contract wording. |
+| FA2 | How is the window bounded, with no grid and no slot count? | At most 3 650 days (the maximum `backfill_days`): an explicit longer window is `400` with `details.maximum` (ms); a defaulted `end` is capped at `start + 3 650 days` and echoed (user's answer 2026-11-04, as candles); at most about 90 000 rows counted per request. | No bound: the cost depends on the stored history of one series (a 1 h symbol grows 8 800 rows a year), unbounded in principle. A bound in rows: cannot be checked before reading. |
+| FA3 | How is the cursor `(funding_time_ms, rate_type)` of ADR-0004 P-13 carried? | `next` stays an **integer** (the first not-returned `funding_time_ms`); a page never splits the at most two rows of one millisecond, so it can hold `limit - 1` rows and `limit` is `2` to `1000`. | A composite cursor (`next` an object, plus a `start_rate_type` parameter): exact page sizes, but a second cursor kind and a new request parameter. `limit` from `1`: a one-row page cannot always advance past a same-millisecond pair. |
+| FA4 | When does a series exist (`404 unknown_series`), and what are `series.*` for a series with a span and no row? | A series exists when it has a verified span **or** a stored row; `series.oldest_funding_time_ms` and `newest_funding_time_ms` are rows only and `null` when there is none. A series that has only conflict records is unknown (as OA11). | Rows only: a symbol that verified an honest empty history (a young listing) would be `404`, indistinguishable from a typo. |
+| FA5 | Is `coverage` about the page or the window? | The **whole window**, per request, from the request's snapshot; paging changes only `rows`, `next` and per-row `conflicted`; nothing is promised across pages (ADR-0004 P-13). | Page-scoped coverage as in 5.3 and 6.5.6: a consumer could read `complete` of page 1 as the window's, which the ADR rejects. |
+| FA6 | What is `quiet` for a series with no stored row? | Quiet at once; with a row, quiet when `as_of_ms - N > 48 h`. A listing before its first settlement (at most 8 h) is `degraded`, accepted. | Use the span start as the reference: a wrong symbol with a verified empty history would stay un-quiet for a time that depends on the backfill. A grace period: one more constant and a rule for a wrong symbol that fails open. |
+| FA7 | Counts only, or also a list of behind series? | Counts only: `series_count = current + behind`, `catching_up` and `quiet_series` independent, status precedence `no_series`, `degraded`, `behind`, `catching_up`, `current` (as ADR-0003 P-8). No `behind` list. | A list as for candles and open interest (at most 50): which symbol is behind without a log; one more field to specify, truncate and test. It can be added later without breaking anything. |
+| FA8 | Does the response carry `rule`, `ingested_at_ms` or the interval? | `/v1/funding-rates`: no `rule` and no `ingested_at_ms` (decision Q5); no interval, ever (ADR-0004 P-2). `coverage` carries `as_of_ms`. The health object carries `as_of_ms` and `rule` (`publication_delay_ms`, `behind_after_ms`, `quiet_after_ms`, `backfill_days`). | `rule` in the rows response: the endpoint judges no slot with it. |
+| FA9 | What is a defaulted `end`? | `max(as_of_ms, start)` (ADR-0004 P-13), so a defaulted window is `partly_verified` at best and never `complete`; the contract says how to ask for a complete answer (explicit `end <= verified_through_ms`). | `newest + 1` as for candles: a stopped series would look `verified` and `complete`, the exact weakness of open interest decision OA10. |
+| FA10 | Which errors? | `400`, `404 funding_rate_disabled` (new closed-list code, checked after the parameters and before the database, without opening it), `404 unknown_series`, `503`, `500`, in the order of 6.7.6; section 2 gets the new code. | The plain `not_found`: indistinguishable from a typo in the path. |
