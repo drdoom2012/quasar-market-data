@@ -11,9 +11,10 @@ is the enforcement and must agree with ``merge_span`` at every boundary.
   is fetched again), which is correct whatever the order of two rows with the same ``fundingTime``.
 * ``merge_span``: the union with a covered interval, only when the two touch (overlap or are one
   millisecond apart); otherwise ``NotAdjacentError``.
-* ``history_pending``, ``next_history_chunk``: history grows backward from the span in chunks of at most
-  90 days, until the span is as wide as the configured depth. No clock and no tolerance are involved,
-  so the Collector and the API agree.
+* ``history_pending``, ``next_history_chunk``: history grows backward from the span until the span is as
+  wide as the configured depth, which is at most 30 days (``MAX_BACKFILL_DAYS``): the whole missing depth is
+  one range, fetched page by page and merged once. No clock and no tolerance are involved, so the Collector
+  and the API agree.
 
 Integer arithmetic only.
 """
@@ -26,10 +27,9 @@ from quasar_market_data.domain.funding_rate import FUNDING_RATE_PAGE_LIMIT, Fund
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
 
 DAY_MS: Final = 86_400_000
-HISTORY_CHUNK_MS: Final = 90 * DAY_MS  # ADR-0004 P-7: at most 90 days per backward chunk
 BEHIND_THRESHOLD_MS: Final = 7_200_000  # ADR-0004 P-10
 MIN_BACKFILL_DAYS: Final = 1
-MAX_BACKFILL_DAYS: Final = 3_650
+MAX_BACKFILL_DAYS: Final = 30  # ADR-0004 A-4: a larger depth is a configuration error, the process does not start
 
 
 class NotAdjacentError(ValueError):
@@ -118,14 +118,15 @@ def history_pending(span: Interval, backfill_days: int) -> bool:
 
 
 def next_history_chunk(span: Interval, backfill_days: int) -> Interval | None:
-    """The next backward chunk ``[max(target_from, from_ms - 90 d), from_ms - 1]``, or ``None`` when not pending.
+    """The backward range ``[target_from, from_ms - 1]`` that completes the configured depth, or ``None`` when not pending.
 
-    A chunk that would start below the schema's minimum timestamp raises ``ValueError`` (fail closed).
+    It is never longer than ``MAX_BACKFILL_DAYS``. A range that would start below the schema's minimum timestamp
+    raises ``ValueError`` (fail closed).
     """
     if not history_pending(span, backfill_days):
         return None
     target = history_target_from_ms(span.through_ms, backfill_days)
-    return Interval(max(target, span.from_ms - HISTORY_CHUNK_MS), span.from_ms - 1)
+    return Interval(target, span.from_ms - 1)
 
 
 def is_behind(b_now_ms: int, span: Interval) -> bool:

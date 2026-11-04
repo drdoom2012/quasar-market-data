@@ -7,6 +7,7 @@ configuration: the endpoint answers ``404 open_interest_disabled`` and ``/health
 
 from quasar_market_data.config.settings import Settings
 from quasar_market_data.domain.open_interest_coverage import OpenInterestRule, open_interest_rule
+from quasar_market_data.domain.open_interest_holes import DAY_MS
 from quasar_market_data.domain.timeframe import Timeframe
 
 
@@ -20,4 +21,5 @@ def rule_from_settings(settings: Settings) -> OpenInterestRule | None:
         table.round_offset_ms,
         settings.rule.lag_threshold_ms,
         Timeframe(table.period),
+        table.backfill_days * DAY_MS,  # the depth of the file: the Collector and the API cannot disagree (A-4)
     )

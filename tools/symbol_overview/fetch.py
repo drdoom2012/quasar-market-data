@@ -1,13 +1,21 @@
-"""The only code that talks to the API: read-only GETs of four paths (spec 5.1, OI-6 design 8.1)."""
+"""The only code that talks to the API: read-only GETs of five paths (spec 5.1, OI-6 design 8.1, FR-6 design 5)."""
 
 import http.client
 from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
 
-from tools.symbol_overview.model import MAX_BODY_BYTES, OI_PATH, InstrumentRow, Window
+from tools.symbol_overview.model import (
+    FUNDING_LIMIT,
+    FUNDING_PATH,
+    MAX_BODY_BYTES,
+    OI_PATH,
+    FundingWindow,
+    InstrumentRow,
+    Window,
+)
 
-ALLOWED_PATHS = frozenset({"/health/ingest", "/v1/instruments", "/v1/coverage", OI_PATH})
+ALLOWED_PATHS = frozenset({"/health/ingest", "/v1/instruments", "/v1/coverage", OI_PATH, FUNDING_PATH})
 
 
 @dataclass(frozen=True)
@@ -48,8 +56,20 @@ def open_interest_path(instrument: InstrumentRow, oi_window: Window) -> str:
     )
 
 
+def funding_path(instrument: InstrumentRow, window: FundingWindow) -> str:
+    """The funding request with exactly the documented parameters (C§6.7.2); same encoding as above.
+
+    ``end`` is explicit (a defaulted ``end`` is the server's now and could never be ``verified``) and ``limit`` is
+    the minimum: the answer's ``coverage`` describes the whole window whatever the limit (C§6.7.5).
+    """
+    return (
+        f"{FUNDING_PATH}?venue={quote(instrument.venue, safe='')}&symbol={quote(instrument.symbol, safe='/:')}"
+        f"&start={window.start}&end={window.end}&limit={FUNDING_LIMIT}"
+    )
+
+
 def http_fetch(base_url: str, timeout_s: float = 10.0) -> Fetch:
-    """A ``Fetch`` for the API at ``base_url``: GET only, four allowed paths, no redirects, capped body.
+    """A ``Fetch`` for the API at ``base_url``: GET only, five allowed paths, no redirects, capped body.
 
     ``timeout_s`` applies to each socket operation, not to the whole call; the refresh deadline bounds the total.
     """

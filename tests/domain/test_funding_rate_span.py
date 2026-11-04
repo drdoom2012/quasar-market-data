@@ -7,7 +7,7 @@ from quasar_market_data.domain.funding_rate import FUNDING_RATE_PAGE_LIMIT, Fund
 from quasar_market_data.domain.funding_rate_span import (
     BEHIND_THRESHOLD_MS,
     DAY_MS,
-    HISTORY_CHUNK_MS,
+    MAX_BACKFILL_DAYS,
     Interval,
     NotAdjacentError,
     history_pending,
@@ -156,7 +156,7 @@ def test_page_coverage_rejects_inconsistent_input() -> None:
 
 
 def test_history_pending_boundary_has_no_tolerance() -> None:
-    days = 365
+    days = 30
     width = days * DAY_MS
     assert history_pending(Interval(X - width, X), days) is False
     assert history_pending(Interval(X - width + 1, X), days) is True
@@ -165,8 +165,8 @@ def test_history_pending_boundary_has_no_tolerance() -> None:
 
 
 def test_moving_target_does_not_reopen_finished_history() -> None:
-    days = 365
-    span = Interval(X - 300 * DAY_MS, X)
+    days = 30
+    span = Interval(X - 20 * DAY_MS, X)
     assert history_pending(span, days) is True
     chunk = next_history_chunk(span, days)
     assert chunk is not None
@@ -184,7 +184,7 @@ def test_moving_target_does_not_reopen_finished_history() -> None:
 def test_history_pending_property(mode: str, seed: int) -> None:
     rng = random.Random(seed)
     span = Interval(X - DAY_MS, X)
-    days = 365
+    days = 30 if mode == "lower" else 2
     for _ in range(200):
         previous_span, previous_days = span, days
         previous_pending = history_pending(span, days)
@@ -197,9 +197,9 @@ def test_history_pending_property(mode: str, seed: int) -> None:
             span = merge_span(span, Interval(span.through_ms + 1, span.through_ms + HOUR))
         elif action == "days":
             if mode == "raise":
-                days = min(3_650, days + rng.randint(0, 400))
+                days = min(MAX_BACKFILL_DAYS, days + rng.randint(0, 10))
             else:
-                days = max(1, days - rng.randint(0, 200))
+                days = max(1, days - rng.randint(0, 10))
         # "crash" (a planned chunk is never merged) and "restart" (state recomputed from the span only) change nothing.
         now_pending = history_pending(span, days)
         if not previous_pending and now_pending:
@@ -212,38 +212,34 @@ def test_history_pending_property(mode: str, seed: int) -> None:
             assert chunk.from_ms >= history_target_from_ms(span.through_ms, days)
 
 
-@pytest.mark.parametrize(
-    ("days", "seed_width", "steps"),
-    [(365, 0, 5), (365, DAY_MS, 5), (90, 0, 1), (90, DAY_MS, 1), (91, 0, 2), (91, DAY_MS, 1)],
-)
-def test_next_history_chunk(days: int, seed_width: int, steps: int) -> None:
+@pytest.mark.parametrize(("days", "seed_width"), [(30, 0), (30, DAY_MS), (2, 0), (1, 0), (1, HOUR)])
+def test_next_history_chunk_is_the_whole_missing_depth_in_one_step(days: int, seed_width: int) -> None:
     span = Interval(X - seed_width, X)
-    done = 0
-    while history_pending(span, days):
-        chunk = next_history_chunk(span, days)
-        assert chunk is not None
-        assert chunk.through_ms == span.from_ms - 1
-        target = history_target_from_ms(span.through_ms, days)
-        remaining = span.from_ms - target
-        if remaining > HISTORY_CHUNK_MS:
-            assert chunk.through_ms - chunk.from_ms + 1 == HISTORY_CHUNK_MS
-        else:
-            assert chunk.from_ms == target
-        span = merge_span(span, chunk)
-        done += 1
-    assert done == steps
+    chunk = next_history_chunk(span, days)
+    assert chunk is not None
+    target = history_target_from_ms(span.through_ms, days)
+    assert (chunk.from_ms, chunk.through_ms) == (target, span.from_ms - 1)
+    assert chunk.through_ms - chunk.from_ms + 1 <= MAX_BACKFILL_DAYS * DAY_MS
+    span = merge_span(span, chunk)
     assert span.through_ms - span.from_ms == days * DAY_MS
+    assert history_pending(span, days) is False
     assert next_history_chunk(span, days) is None
+
+
+def test_a_range_never_exceeds_the_largest_allowed_depth() -> None:
+    for days in range(1, MAX_BACKFILL_DAYS + 1):
+        chunk = next_history_chunk(Interval(X, X), days)
+        assert chunk is not None and chunk.through_ms - chunk.from_ms + 1 == days * DAY_MS <= 30 * DAY_MS
 
 
 def test_chunk_near_the_minimum_timestamp_fails_closed() -> None:
     at_minimum = Interval(MIN_TIMESTAMP_MS, MIN_TIMESTAMP_MS + 10)
-    assert history_pending(at_minimum, 365) is True
+    assert history_pending(at_minimum, 30) is True
     with pytest.raises(ValueError):
-        next_history_chunk(at_minimum, 365)
+        next_history_chunk(at_minimum, 30)
     below = Interval(MIN_TIMESTAMP_MS + DAY_MS, MIN_TIMESTAMP_MS + 2 * DAY_MS)
     with pytest.raises(ValueError):
-        next_history_chunk(below, 365)
+        next_history_chunk(below, 30)
 
 
 def test_is_behind() -> None:
@@ -257,14 +253,15 @@ def test_is_behind() -> None:
 
 def test_backfill_days_bounds() -> None:
     assert history_target_from_ms(X, 1) == X - DAY_MS
-    assert history_target_from_ms(X, 3_650) == X - 3_650 * DAY_MS
-    for bad in (0, 3_651):
+    assert history_target_from_ms(X, MAX_BACKFILL_DAYS) == X - 30 * DAY_MS
+    assert MAX_BACKFILL_DAYS == 30  # ADR-0004 A-4
+    for bad in (0, 31, 365, 3_650):
         with pytest.raises(ValueError):
             history_target_from_ms(X, bad)
-    for wrong in (True, 365.0):
+    for wrong in (True, 30.0):
         with pytest.raises(TypeError):
             history_target_from_ms(X, untyped(wrong))
     with pytest.raises(ValueError):
-        history_target_from_ms(MIN_TIMESTAMP_MS - 1, 365)
+        history_target_from_ms(MIN_TIMESTAMP_MS - 1, 30)
     with pytest.raises(TypeError):
-        history_target_from_ms(untyped(True), 365)
+        history_target_from_ms(untyped(True), 30)

@@ -16,6 +16,7 @@ VALID_TABLE = {
     "publication_delay_ms": "15000",
     "round_offset_ms": "200000",
     "budget_per_5min": "400",
+    "backfill_days": "29",
 }
 
 
@@ -45,7 +46,7 @@ def test_an_absent_table_means_disabled() -> None:
 
 def test_the_table_is_parsed() -> None:
     settings = parse_settings(text(table()), base_dir=BASE)
-    assert settings.open_interest == OpenInterestSettings(True, "5m", 15_000, 200_000, 400)
+    assert settings.open_interest == OpenInterestSettings(True, "5m", 15_000, 200_000, 400, 29)
 
 
 def test_a_disabled_table_is_parsed_and_still_validated() -> None:
@@ -63,6 +64,22 @@ def test_budget_per_5min_outside_the_contract_is_rejected_by_key(value: str) -> 
 def test_budget_per_5min_inside_the_contract_is_accepted(value: str) -> None:
     settings = parse_settings(text(table(budget_per_5min=value)), base_dir=BASE)
     assert settings.open_interest is not None and settings.open_interest.budget_per_5min == int(value)
+
+
+@pytest.mark.parametrize("value", ["0", "31", "365", "-1", "29.0", '"29"', "true"])
+def test_a_backfill_depth_outside_1_to_30_days_is_a_configuration_error(value: str) -> None:
+    error = fails(text(table(backfill_days=value)))  # ADR-0003 A-4: the process does not start
+    assert error.key == "open_interest.backfill_days"
+
+
+@pytest.mark.parametrize("value", ["1", "29", "30"])
+def test_a_backfill_depth_of_1_to_30_days_is_accepted(value: str) -> None:
+    settings = parse_settings(text(table(backfill_days=value)), base_dir=BASE)
+    assert settings.open_interest is not None and settings.open_interest.backfill_days == int(value)
+
+
+def test_a_disabled_table_is_refused_too_when_the_depth_is_above_30_days() -> None:
+    assert fails(text(table(enabled="false", backfill_days="31"))).key == "open_interest.backfill_days"
 
 
 @pytest.mark.parametrize("key", list(VALID_TABLE))
@@ -143,6 +160,7 @@ def test_the_collector_derives_the_adr_cadence_from_the_parsed_file(count: int, 
 
 
 @pytest.mark.parametrize("name", ["quasar.toml", "quasar.compose.toml"])
-def test_the_shipped_files_leave_open_interest_off(name: str) -> None:
+def test_the_shipped_files_switch_open_interest_on(name: str) -> None:
     path = REPO / "config" / name
-    assert parse_settings(path.read_text(encoding="utf-8"), base_dir=path.parent).open_interest is None
+    parsed = parse_settings(path.read_text(encoding="utf-8"), base_dir=path.parent)
+    assert parsed.open_interest == OpenInterestSettings(True, "5m", 15_000, 200_000, 400, 29)

@@ -315,6 +315,7 @@ async def make_rig(
     db: Path | None = None,
     connect: Any = None,
     t: ManualTime | None = None,
+    backfill_days: int = 29,
 ) -> Rig:
     t = t or ManualTime()
     db = db or migrated_db(tmp_path, t.wall_ms())
@@ -336,6 +337,7 @@ async def make_rig(
         publication_delay_ms=publication_delay_ms,
         round_offset_ms=round_offset_ms,
         budget_per_5min=budget_per_5min,
+        backfill_days=backfill_days,
     )
     return Rig(t, config, source, writer, budget, activity, db)
 

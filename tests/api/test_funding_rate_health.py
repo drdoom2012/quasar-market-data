@@ -32,7 +32,7 @@ from tests.api.test_health_universe import GOLDEN, golden_database, s17_fields
 DAY = 86_400_000
 H = 3_600_000
 DELAY = 30_000
-BACKFILL_DAYS = 365
+BACKFILL_DAYS = 30  # the contract example (6.7.8) shows the maximum
 RULE = FundingRateRule(publication_delay_ms=DELAY, backfill_days=BACKFILL_DAYS)
 OI_RULE = OpenInterestRule(cadence=1, expected_after_ms=500_000, lag_threshold_ms=60_000, period=Timeframe("5m"))
 AS_OF = 1_792_727_045_000

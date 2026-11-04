@@ -6,6 +6,10 @@ generated database (never production data): ``/health/ingest``, ``/v1/instrument
 connection per call, the refresh deadline checked before every call. ``--oi-mode proxy`` asks ``/v1/coverage`` for the
 open interest slot (the G0 stand-in, before the endpoint exists); ``real`` asks ``/v1/open-interest/coverage``.
 Run by hand: ``make bench-overview``.
+
+FR-6: ``--funding-mode real`` adds a third phase (one ``/v1/funding-rates`` call per symbol, the tool's own window), a
+generated funding history, and reports the total time of a refresh **and what each phase of it took**, with and
+without the funding phase from the same run (refreshes alternate, so drift hits both), plus the difference.
 """
 
 import argparse
@@ -15,12 +19,13 @@ import math
 import platform
 import shutil
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -31,10 +36,10 @@ from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.api.bench_server import BenchError, peak_rss_bytes, reap, start_api
 from tools.bench_open_interest_write import INSERT_OPEN_INTEREST, nearest_rank
-from tools.symbol_overview.fetch import Fetch, RawResponse, TransportError, coverage_path, http_fetch
+from tools.symbol_overview.fetch import Fetch, RawResponse, TransportError, coverage_path, funding_path, http_fetch
 from tools.symbol_overview.model import MAX_BODY_BYTES, Health, InstrumentRow, Invalid, Window
-from tools.symbol_overview.validate import health_result, instruments_result
-from tools.symbol_overview.window import window_for
+from tools.symbol_overview.validate import funding_health, health_result, instruments_result
+from tools.symbol_overview.window import funding_window, window_for
 
 TF_MS: Final = 300_000
 VENUE: Final = "binance-usdm"
@@ -47,6 +52,8 @@ WRITER_MAX_ROWS: Final = 100
 COVERAGE_KINDS: Final = ("candle", "oi")
 
 type OiMode = Literal["real", "proxy"]
+type FundingMode = Literal["off", "real"]
+PHASES: Final = ("head", "candle", "oi", "funding")
 
 _INSERT_CANDLE: Final = (
     "INSERT OR IGNORE INTO candles (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume,"
@@ -56,7 +63,7 @@ _INSERT_CANDLE: Final = (
 
 @dataclass(frozen=True)
 class CallRecord:
-    kind: str  # health | instruments | candle | oi
+    kind: str  # health | instruments | candle | oi | funding
     path: str
     started_s: float
     duration_s: float
@@ -72,6 +79,10 @@ class RefreshResult:
     candle_not_asked: int
     oi_not_asked: int
     failed: int  # calls whose status is not 200
+    funding_not_asked: int = 0
+    phases: Mapping[str, float] = field(
+        default_factory=dict
+    )  # wall time of each phase in seconds (head, candle, oi, funding)
 
 
 def _call(fetch: Fetch, kind: str, path: str, monotonic: Callable[[], float]) -> tuple[CallRecord, RawResponse | None]:
@@ -114,17 +125,27 @@ def run_refresh(
     fetch: Fetch,
     *,
     oi_mode: OiMode,
+    funding_mode: FundingMode = "off",
     workers: int = 4,
     deadline_s: float = 60.0,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> RefreshResult:
-    """One refresh in the order of the overview tool (spec 8.1): head calls, candle phase, open interest phase."""
+    """One refresh in the order of the overview tool (spec 8.1): head calls, candle phase, open interest phase and,
+    with ``funding_mode="real"``, the funding phase (FR-6 design 5). The wall time of each phase is recorded."""
     started = monotonic()
     health_record, raw_health = _call(fetch, "health", "/health/ingest", monotonic)
     health: Health = _head("/health/ingest", raw_health, health_result)
     instruments_record, raw_instruments = _call(fetch, "instruments", "/v1/instruments", monotonic)
     instruments: tuple[InstrumentRow, ...] = _head("/v1/instruments", raw_instruments, instruments_result)
     window = window_for(health.as_of_ms)
+    funding_window_ = None
+    if funding_mode == "real":
+        assert raw_health is not None
+        funding_state = funding_health(raw_health.status, raw_health.content_type, raw_health.body, health=health)
+        if funding_state is None or isinstance(funding_state, Invalid):
+            raise BenchError("funding mode needs an API with an enabled [funding_rate] table")
+        funding_window_ = funding_window(window, funding_state.rule, health.as_of_ms)
+    phases: dict[str, float] = {"head": monotonic() - started}
 
     def candle_path(instrument: InstrumentRow) -> str:
         return coverage_path(instrument, window)
@@ -146,16 +167,27 @@ def run_refresh(
             return [o for o in outcomes if o is not None], sum(1 for o in outcomes if o is None)
 
         stored = [i for i in instruments if i.newest_open_time_ms is not None]
+        mark = monotonic()
         candle_calls, candle_not_asked = phase(stored, "candle", candle_path)
+        phases["candle"], mark = monotonic() - mark, monotonic()
         oi_calls, oi_not_asked = phase(instruments, "oi", oi_path)
+        phases["oi"], mark = monotonic() - mark, monotonic()
+        funding_calls: list[CallRecord] = []
+        funding_not_asked = 0
+        if funding_window_ is not None:
+            fwindow = funding_window_
+            funding_calls, funding_not_asked = phase(instruments, "funding", lambda i: funding_path(i, fwindow))
+        phases["funding"] = monotonic() - mark if funding_window_ is not None else 0.0
 
-    calls = (health_record, instruments_record, *candle_calls, *oi_calls)
+    calls = (health_record, instruments_record, *candle_calls, *oi_calls, *funding_calls)
     return RefreshResult(
         duration_s=monotonic() - started,
         calls=calls,
         candle_not_asked=candle_not_asked,
         oi_not_asked=oi_not_asked,
         failed=sum(1 for call in calls if call.status != 200),
+        funding_not_asked=funding_not_asked,
+        phases=phases,
     )
 
 
@@ -183,22 +215,30 @@ def summarize(calls: Sequence[CallRecord]) -> dict[str, dict[str, float]]:
     return summary
 
 
-def evaluate(results: Sequence[RefreshResult], *, series: int, l_tunnel_ms: float | None) -> dict[str, Any]:
-    """AC1, AC2, AC3, AC6 and AC7 of spec 7.2 over a list of fresh refreshes."""
+def evaluate(
+    results: Sequence[RefreshResult], *, series: int, l_tunnel_ms: float | None, funding: bool = False
+) -> dict[str, Any]:
+    """AC1, AC2, AC3, AC6 and AC7 of spec 7.2 over a list of fresh refreshes.
+
+    With ``funding`` the refreshes have a third phase: AC7 uses the factor 3, the mean latency includes the funding
+    calls and AC2 also counts the funding symbols not asked."""
     if not results:
         raise ValueError("no refresh results")
     calls = [call for result in results for call in result.calls]
     longest = max(result.duration_s for result in results)
-    coverage = [_microseconds(c.duration_s) for c in calls if c.kind in COVERAGE_KINDS and c.status == 200]
+    kinds = (*COVERAGE_KINDS, "funding") if funding else COVERAGE_KINDS
+    coverage = [_microseconds(c.duration_s) for c in calls if c.kind in kinds and c.status == 200]
     l_mean_ms = sum(coverage) / len(coverage) / 1000 if coverage else None
     d_pred: float | None = None
     if l_tunnel_ms is not None and l_mean_ms is not None:
-        d_pred = (2 + math.ceil(series / 4) * 2) * (l_mean_ms + l_tunnel_ms) / 1000
+        d_pred = (2 + math.ceil(series / 4) * (3 if funding else 2)) * (l_mean_ms + l_tunnel_ms) / 1000
     counts = {
         "failed": sum(result.failed for result in results),
         "candle_not_asked": sum(result.candle_not_asked for result in results),
         "oi_not_asked": sum(result.oi_not_asked for result in results),
     }
+    if funding:
+        counts["funding_not_asked"] = sum(result.funding_not_asked for result in results)
     largest = max((call.body_bytes for call in calls), default=0)
     return {
         "AC1": {"value": longest, "pass": longest <= AC1_LIMIT_S},
@@ -210,6 +250,76 @@ def evaluate(results: Sequence[RefreshResult], *, series: int, l_tunnel_ms: floa
         },
         "AC7": {"value": d_pred, "pass": None if d_pred is None else d_pred <= AC1_LIMIT_S},
     }
+
+
+def _stats(values: Sequence[float]) -> dict[str, float]:
+    """``min``, ``p50``, ``p95``, ``max`` and ``mean`` of ``values`` (seconds)."""
+    ordered = sorted(_microseconds(v) for v in values)
+    return {
+        "min": ordered[0] / 1_000_000,
+        "p50": nearest_rank(ordered, 50) / 1_000_000,
+        "p95": nearest_rank(ordered, 95) / 1_000_000,
+        "max": ordered[-1] / 1_000_000,
+        "mean": sum(ordered) / len(ordered) / 1_000_000,
+    }
+
+
+def breakdown(results: Sequence[RefreshResult]) -> dict[str, Any]:
+    """The total time of a refresh and what each phase of it took (the user's request of 2026-11-04).
+
+    ``total`` and every phase carry ``min``, ``p50``, ``p95``, ``max``, ``mean`` in seconds; ``share`` is the mean
+    time of the phase over the mean total; ``calls`` is the mean number of calls the phase made.
+    """
+    if not results:
+        raise ValueError("no refresh results")
+    total = _stats([r.duration_s for r in results])
+    phases: dict[str, Any] = {}
+    for name in PHASES:
+        times = [r.phases.get(name, 0.0) for r in results]
+        kind = {"head": None, "candle": "candle", "oi": "oi", "funding": "funding"}[name]
+        made = [
+            sum(1 for c in r.calls if (c.kind in ("health", "instruments") if kind is None else c.kind == kind))
+            for r in results
+        ]
+        stats = _stats(times)
+        phases[name] = {
+            **stats,
+            "share": stats["mean"] / total["mean"] if total["mean"] else 0.0,
+            "calls": sum(made) / len(made),
+        }
+    return {"refreshes": len(results), "total": total, "phases": phases}
+
+
+def funding_cost(without: Sequence[RefreshResult], with_funding: Sequence[RefreshResult]) -> dict[str, float]:
+    """What the funding phase added, measured in one run: the difference of the mean totals (seconds) and the mean
+    funding call (milliseconds)."""
+    off = sum(r.duration_s for r in without) / len(without)
+    on = sum(r.duration_s for r in with_funding) / len(with_funding)
+    calls = [c.duration_s for r in with_funding for c in r.calls if c.kind == "funding" and c.status == 200]
+    return {
+        "mean_total_without_s": off,
+        "mean_total_with_s": on,
+        "added_s": on - off,
+        "added_share_of_with": (on - off) / on if on else 0.0,
+        "mean_funding_call_ms": sum(calls) / len(calls) * 1000 if calls else 0.0,
+    }
+
+
+def format_breakdown(title: str, data: Mapping[str, Any]) -> str:
+    """A table of ``breakdown`` for a human (printed to stderr; the JSON line on stdout has the same numbers)."""
+    lines = [
+        f"{title} ({data['refreshes']} refreshes)",
+        f"{'':8}{'min':>9}{'p50':>9}{'p95':>9}{'max':>9}{'mean':>9}{'share':>8}{'calls':>8}",
+    ]
+    total = data["total"]
+    lines.append(
+        f"{'TOTAL':8}{total['min']:9.2f}{total['p50']:9.2f}{total['p95']:9.2f}{total['max']:9.2f}{total['mean']:9.2f}{'100%':>8}{'':>8}"
+    )
+    for name, p in data["phases"].items():
+        lines.append(
+            f"{name:8}{p['min']:9.2f}{p['p50']:9.2f}{p['p95']:9.2f}{p['max']:9.2f}{p['mean']:9.2f}{p['share'] * 100:7.1f}%{p['calls']:8.0f}"
+        )
+    return "\n".join(lines) + "\n(seconds; share = mean phase time over mean total)"
 
 
 def evaluate_sustained(
@@ -277,15 +387,62 @@ def _open_interest_rows(
         yield (VENUE, symbol, "5m", newest - k * TF_MS, f"{95_000 + k % 997}.5", f"{7_000_000_000 + k}.25", ingested)
 
 
+_INSERT_FUNDING: Final = (
+    "INSERT INTO funding_rates (venue, symbol, funding_time_ms, rate_type, funding_rate, mark_price, ingested_at_ms)"
+    " VALUES (?, ?, ?, 'Regular', ?, ?, ?)"
+)
+_INSERT_FUNDING_SPAN: Final = (
+    "INSERT INTO funding_rate_verified (venue, symbol, from_ms, through_ms, verified_at_ms) VALUES (?, ?, ?, ?, ?)"
+)
+_INSERT_FUNDING_CONFLICT: Final = (
+    "INSERT INTO funding_rate_conflicts (venue, symbol, funding_time_ms, rate_type, funding_rate, mark_price,"
+    " first_seen_at_ms) VALUES (?, ?, ?, 'Regular', ?, ?, ?)"
+)
+HOUR_MS: Final = 3_600_000
+
+
+type FundingRows = tuple[
+    list[tuple[str, str, int, str, str, int]], tuple[str, str, int, int, int], list[tuple[str, str, int, str, str, int]]
+]
+
+
+def funding_rows(index: int, symbol: str, now_ms: int) -> FundingRows:
+    """The funding history of one generated series: ``(rows, span, conflicts)``.
+
+    A healthy series has a span from 31 days back to an hour ago and 30 days of settlements (every 8 h, every 5th
+    series every hour). Series 1 is shallow (its span starts 3 days back), series 2 is behind (its span ended 5 h
+    ago), series 3 is quiet (a span, no row), every 7th series has a conflict record on its newest settlement.
+    """
+    through = now_ms - (5 * HOUR_MS if index == 2 else HOUR_MS)
+    start = through - (3 * 86_400_000 if index == 1 else 31 * 86_400_000)
+    step = HOUR_MS if index % 5 == 0 else 8 * HOUR_MS
+    newest = through - 5
+    count = 0 if index == 3 else 30 * 24 * HOUR_MS // step
+    rows = [
+        (VENUE, symbol, newest - k * step, f"0.0000{k % 9 + 1}", f"{95_000 + k % 997}.5", now_ms) for k in range(count)
+    ]
+    span = (VENUE, symbol, start, through, now_ms)
+    conflicts = [(VENUE, symbol, newest, "0.0009", "95001.5", now_ms)] if index % 7 == 0 and count else []
+    return rows, span, conflicts
+
+
 def build_database(
-    path: Path, *, series: int, candle_rows: int, oi_rows: int = 8_640, stress: bool = False, now_ms: int
+    path: Path,
+    *,
+    series: int,
+    candle_rows: int,
+    oi_rows: int = 8_640,
+    stress: bool = False,
+    now_ms: int,
+    funding: bool = False,
 ) -> list[str]:
     """Candles and open interest for ``series`` symbols ending at the last closed period before ``now_ms``.
 
     Every 7th series has a few holes in both and one open interest conflict record; series 1 has only three days of
     open interest. With ``stress`` every even open interest slot has a row **and** a conflict record and every odd
     slot has no row, so an answer alternates ``conflicted`` and ``missing`` (the largest number of runs). Returns the
-    symbols. Plain SQL, canonical decimal text, one transaction per series.
+    symbols. With ``funding`` every series also gets the history of ``funding_rows``. Plain SQL, canonical decimal text,
+    one transaction per series.
     """
     newest_oi = now_ms // TF_MS * TF_MS  # the end of the last closed period
     newest_candle = newest_oi - TF_MS  # the open of the candle it belongs to
@@ -312,6 +469,11 @@ def build_database(
             else:
                 conflicts = []
             conn.executemany(_INSERT_CONFLICT, conflicts)
+            if funding:
+                rows, span, fconflicts = funding_rows(index, symbol, now_ms)
+                conn.executemany(_INSERT_FUNDING, rows)
+                conn.execute(_INSERT_FUNDING_SPAN, span)
+                conn.executemany(_INSERT_FUNDING_CONFLICT, fconflicts)
             conn.execute("COMMIT")
     finally:
         conn.close()
@@ -438,6 +600,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--series", type=int, default=300, help="number of symbols (default %(default)s)")
     parser.add_argument("--profile", choices=sorted(PROFILES), default="smoke")
     parser.add_argument("--oi-mode", choices=("real", "proxy"), default="real")
+    parser.add_argument(
+        "--funding-mode",
+        choices=("off", "real"),
+        default="off",
+        help="real: the API runs with [funding_rate], every refresh is also run with the funding phase (FR-6)",
+    )
     parser.add_argument("--refreshes", type=int, default=10)
     parser.add_argument("--sustained-minutes", type=float, default=10.0, help="0 skips the sustained run")
     parser.add_argument("--writer-interval-s", type=float, default=300.0)
@@ -474,12 +642,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             candle_rows=candle_rows,
             stress=args.stress,
             now_ms=time.time_ns() // 1_000_000,
+            funding=args.funding_mode == "real",
         )
-        proc, port = start_api(tmp / "bench.db", symbols, tmp / "api.log")
+        proc, port = start_api(tmp / "bench.db", symbols, tmp / "api.log", funding=args.funding_mode == "real")
         base_url = f"http://127.0.0.1:{port}"
         try:
             fetch = make_fetch(base_url)
-            results = [run_refresh(fetch, oi_mode=args.oi_mode) for _ in range(args.refreshes)]
+            without: list[RefreshResult] = []
+            results: list[RefreshResult] = []
+            if args.funding_mode == "real":  # one discarded refresh: the first one meets cold caches
+                run_refresh(fetch, oi_mode=args.oi_mode, funding_mode="off")
+            for index in range(args.refreshes):  # alternating, and the order inside a pair alternates too (ABBA)
+                if args.funding_mode != "real":
+                    results.append(run_refresh(fetch, oi_mode=args.oi_mode, funding_mode="off"))
+                    continue
+                variants: tuple[FundingMode, FundingMode] = ("off", "real") if index % 2 == 0 else ("real", "off")
+                for variant in variants:
+                    refreshed = run_refresh(fetch, oi_mode=args.oi_mode, funding_mode=variant)
+                    (results if variant == "real" else without).append(refreshed)
             sustained = (
                 run_sustained(
                     base_url,
@@ -505,17 +685,41 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "profile": args.profile,
                 "candle_rows": candle_rows,
                 "oi_mode": args.oi_mode,
+                "funding_mode": args.funding_mode,
                 "refreshes": args.refreshes,
                 "sustained_minutes": args.sustained_minutes,
                 "writer_interval_s": args.writer_interval_s,
                 "l_tunnel_ms": args.l_tunnel_ms,
                 "stress": args.stress,
             },
-            "evaluate": evaluate(results, series=args.series, l_tunnel_ms=args.l_tunnel_ms),
+            "evaluate": evaluate(
+                results, series=args.series, l_tunnel_ms=args.l_tunnel_ms, funding=args.funding_mode == "real"
+            ),
+            "breakdown": breakdown(results),
             "durations_s": [result.duration_s for result in results],
             "server": {"stopped": stopped, "peak_rss_bytes": peak},
             "sustained": None,
         }
+        print(format_breakdown(f"refresh with funding={args.funding_mode}", output["breakdown"]), file=sys.stderr)
+        if without:
+            output["without_funding"] = {
+                "evaluate": evaluate(without, series=args.series, l_tunnel_ms=args.l_tunnel_ms),
+                "breakdown": breakdown(without),
+            }
+            output["funding_cost"] = funding_cost(without, results)
+            print(
+                format_breakdown(
+                    "the same refreshes without the funding phase", output["without_funding"]["breakdown"]
+                ),
+                file=sys.stderr,
+            )
+            cost = output["funding_cost"]
+            print(
+                f"funding added {cost['added_s']:.2f} s to a refresh of {cost['mean_total_without_s']:.2f} s "
+                f"({cost['added_share_of_with'] * 100:.1f} % of the refresh with funding); "
+                f"mean funding call {cost['mean_funding_call_ms']:.1f} ms",
+                file=sys.stderr,
+            )
         if sustained is not None:
             output["sustained"] = {
                 **sustained,

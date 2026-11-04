@@ -5,7 +5,7 @@
   schema (P-11) is contract section 6.5 of `docs/contracts/api-v1.md`, approved by the user on 2026-11-03 and implemented by OI-5. Amendment A-1 (2026-11-02, approved by
   the user): the 100-row transaction criterion of P-9 is checked from production measurements after OI-4, not by
   a benchmark in OI-2 (see the revision history). Amendment A-2 (2026-11-03, approved by the user with contract section 6.6): a per-run gap listing for open interest and the split
-  of the OI-6 slice (see the revision history). Amendment A-3 (2026-11-03 approved, 2026-11-04 applied, ADR-0004 O-6): the open interest task shares the Collector's `ExtensionPause` with funding, so a `429` or `418` seen by either dataset stops both. OI-6a (the endpoint, contract section 6.6) and OI-6b (the overview page) are implemented on one branch at the user's request (one pull request, not two); the OI-6b gate of P-16 (the benchmark numbers read and approved by the user) is recorded in the OI-6 design, section 14: the numbers are measured, the user's reading of them is pending.
+  of the OI-6 slice (see the revision history). Amendment A-4 (2026-11-04, by the user's explicit instruction): the retrieval horizon `H` is the new configuration key `backfill_days` (1 to 30, a larger value stops the process at start), no longer the constant 29 days (see the revision history). Amendment A-3 (2026-11-03 approved, 2026-11-04 applied, ADR-0004 O-6): the open interest task shares the Collector's `ExtensionPause` with funding, so a `429` or `418` seen by either dataset stops both. OI-6a (the endpoint, contract section 6.6) and OI-6b (the overview page) are implemented on one branch at the user's request (one pull request, not two); the OI-6b gate of P-16 (the benchmark numbers read and approved by the user) is recorded in the OI-6 design, section 14: the numbers are measured, the user's reading of them is pending.
 - **Date:** 2026-11-02
 - **Scope:** collecting, storing and serving Binance USDT-M open interest history at a 5m period for the
   configured symbols. It is the first extension dataset (`docs/architecture.md` §7); funding, liquidations and
@@ -113,8 +113,11 @@ Rules [P]:
   `[startTime, endTime]`; a `timestamp` is unaligned, duplicated or not an int; a `symbol` differs from the request;
   a value is not a string in the decimal grammar; there are more rows than period ends in the range; the response
   is not a list. Missing rows are **not** an error (P-7).
-- No request uses a `startTime` older than the **retrieval horizon** `H = 29 days` before the current server lower
-  bound [P: one day of margin under the observed 30/31-day edge, which may itself vary].
+- No request uses a `startTime` older than the **retrieval horizon** `H` before the current server lower bound. `H` is
+  the configured `backfill_days` (P-13, amendment A-4; **1 to 30 days**, the shipped files use **29**, one day of
+  margin under the observed 30/31-day edge of Binance, which may itself vary [P]). The request check of the
+  adapter is the largest value the file allows (30 days), so a smaller configured `H` is enforced by the plan
+  (P-12), not by a second constant.
 
 ### P-6 Schema version 2
 
@@ -467,12 +470,13 @@ period = "5m"
 publication_delay_ms = 15000
 round_offset_ms = 200000
 budget_per_5min = 400        # integer, validated 100 <= value <= 400
+backfill_days = 29           # integer, validated 1 <= value <= 30 (A-4): the retrieval horizon H of P-5
 ```
 
 Absent means disabled, so existing configuration files and `config/quasar.compose.toml` keep working. Inside the
 table every key is required and unknown keys are an error (S20 rule) [C `config/settings.py`]. Open interest is
 collected for every symbol of the venue; there is no second symbol list. The cadence `c` is derived, not
-configured (P-10). Validation at start: `budget_per_5min` an integer in `[100, 400]`; `c(S, budget_per_5min) ≤ 12`
+configured (P-10). Validation at start: `budget_per_5min` an integer in `[100, 400]`; **`backfill_days` an integer in `[1, 30]`: a larger value is a configuration error, the process exits with code 2 and starts nothing, also when the table is disabled (A-4)**; `c(S, budget_per_5min) ≤ 12`
 (at most 1 788 symbols at 400, 432 at 100); `round_offset_ms` in `[60 000, 280 000]`. A failed check names the key
 and the computed values.
 
@@ -690,3 +694,15 @@ were throwaway in the session scratchpad and are not in the repository.
   (`oi-warning round-paused ... paused (429 seen by an extension dataset)` also appears when funding set the pause and
   open interest sent nothing), the task's fatal line names `ExtensionStopped`, and an open interest `429` right after
   a funding `429` with no success in between pauses 600 s. `fetch-oi-once` creates its own pause. INV-082 and INV-132.
+- **Amendment A-4** (2026-11-04, by the user's explicit instruction "chci to konfigurace max. hodnota 30 jinak to spadne",
+  made in the branch of FR-6 and delivered with its pull request): the retrieval horizon `H` of P-5 was the constant
+  `RETRIEVAL_HORIZON_MS` of 29 days. It is now the required key `backfill_days` of `[open_interest]`, an integer in
+  `[1, 30]` (P-13). A value outside the range is a configuration error: `quasar-collector run` and `quasar-api serve`
+  exit with code 2 and start nothing, also when the table is disabled. The shipped files use **29**, the earlier
+  value. The Collector plans holes and requests only within `H` (P-12); the API derives `rule.retrieval_horizon_ms`
+  from the same key, so the states `no_longer_recoverable` and the contract's `retrieval_horizon_ms` follow the
+  file (contract 6.5.7); the adapter refuses any request older than 30 days. What does not change: the slot states, the
+  cadence, the budget, the schema, the endpoints. **A value of 30 sits on the edge** Binance was observed to accept
+  (E-4: 30 days accepted, 31 rejected, and the edge may vary with the server clock): a refused request is a failed
+  page and is retried, so use 30 only knowingly. Existing configuration files that enable open interest must add the
+  key (every key is required, P-13); `config/quasar.toml` and `config/quasar.compose.toml` do.

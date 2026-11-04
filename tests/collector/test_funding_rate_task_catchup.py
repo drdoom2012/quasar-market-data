@@ -10,7 +10,7 @@ import pytest
 from quasar_market_data.collector.async_funding_rate_writer import FundingRatePageError, FundingRateWriteReport
 from quasar_market_data.collector.funding_rate_reader import read_span
 from quasar_market_data.collector.funding_rate_writer import FundingRateWriteOutcomeUnknown, SpanMerge
-from quasar_market_data.domain.funding_rate_span import DAY_MS, HISTORY_CHUNK_MS, Interval, history_pending
+from quasar_market_data.domain.funding_rate_span import DAY_MS, Interval, history_pending
 from quasar_market_data.storage.connection import open_reader
 from tests.collector.funding_rate_task_fakes import (
     HOUR,
@@ -111,49 +111,77 @@ def test_restart_mid_forward_catch_up_continues_from_through_plus_one(monkeypatc
     run(scenario)
 
 
-def test_backward_history_progresses_chunk_by_chunk_survives_failures_and_a_crash_loop_still_finishes(
+def test_a_backward_range_of_two_pages_is_claimed_whole_and_a_stop_between_the_pages_repeats_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def scenario(tmp_path: Path) -> None:
         t = ManualTime(wall_start_ms=B0 + 3_000)
-        rig = await make_rig(tmp_path, symbols=(SYMBOL,), t=t, request_ms=2_000)
+        # one-minute settlements: the 24 h range is 1 440 rows, two pages of at most 1 000
+        rig = await make_rig(tmp_path, symbols=(SYMBOL,), t=t, period_ms=60_000, request_ms=500)
+        rig.exchange.offset_ms = 0
         start_span = Interval(B0 - 2 * HOUR, B0 - HOUR)
         await seed_span(rig, SYMBOL, start_span)
-        days = 365
-        target = start_span.through_ms - days * DAY_MS
-        edges = {start_span.from_ms - k * HISTORY_CHUNK_MS for k in range(6)} | {target}
-        current = rig
-        seen: set[int] = set()
-        for run_number in range(30):  # a crash loop: each run is killed after it completed at most one chunk
-            h = await start_task(tmp_path, symbols=(SYMBOL,), rig=current, backfill_days=days)
-            before = (await span(h)).from_ms  # type: ignore[union-attr]
-            for _ in range(400):
-                await h.t.advance(500)
-                now = await span(h)
-                assert now is not None and now.from_ms in edges, now  # only whole chunks are ever claimed
-                if now.from_ms != before:
-                    break
-            seen.add((await span(h)).from_ms)  # type: ignore[union-attr]
-            await h.finish()
-            if (await span(h)).from_ms == target:  # type: ignore[union-attr]
+        target = start_span.through_ms - DAY_MS
+        plans = record_plans(monkeypatch)
+        h = await start_task(tmp_path, symbols=(SYMBOL,), rig=rig, backfill_days=1)
+        for _ in range(600):  # until page 1 of the range is stored, before page 2 can be
+            await h.t.advance(100)
+            if oldest_row(rig.db, start_span.from_ms) is not None:
                 break
-            current = await reopen(current)
-        final = await span(current)
-        assert final is not None and final.from_ms == target and not history_pending(final, days)
-        assert len(seen) >= 4  # several chunks, each in its own run
-        assert rows_and_conflicts(rig.db)[1] == 0
+        await h.finish()  # the process ends between the two pages
+        stopped = await span(h)
+        assert stopped == start_span  # nothing is claimed by the first page
+        assert oldest_row(rig.db, start_span.from_ms) is not None  # but its rows are stored
+        stored_before = rows_and_conflicts(rig.db)[0]
+        again = await reopen(rig)
+        plans.clear()
+        h2 = await start_task(tmp_path, symbols=(SYMBOL,), rig=again, backfill_days=1)
+        await h2.run_for(120 * S, step_ms=5 * S)
+        history = [p for p in plans if p.kind == "H"]
+        assert history and history[0].start_ms == target  # the range starts again from its beginning
+        final = await span(h2)
+        assert final is not None and final.from_ms == target and not history_pending(final, 1)
+        assert rows_and_conflicts(rig.db)[1] == 0 and rows_and_conflicts(rig.db)[0] > stored_before
+        await h2.finish()
 
     run(scenario, timeout=600)
 
 
-def test_a_failed_page_inside_a_chunk_repeats_the_same_start_and_claims_nothing() -> None:
+def oldest_row(db: Path, below_ms: int) -> int | None:
+    """The oldest stored settlement older than ``below_ms``, or ``None``."""
+    conn = open_reader(db)
+    try:
+        value = conn.execute("SELECT min(funding_time_ms) FROM funding_rates WHERE funding_time_ms < ?", (below_ms,))
+        row = value.fetchone()[0]
+    finally:
+        conn.close()
+    return None if row is None else int(row)
+
+
+def test_the_start_up_reconcile_lines_name_the_flags_of_a_series_and_the_totals() -> None:
     async def scenario(tmp_path: Path) -> None:
         t = ManualTime(wall_start_ms=B0 + 3_000)
         rig = await make_rig(tmp_path, symbols=(SYMBOL,), t=t)
+        await seed_span(rig, SYMBOL, Interval(B0 - 2 * HOUR, B0 - HOUR))
+        h = await start_task(tmp_path, symbols=(SYMBOL,), rig=rig, backfill_days=1)
+        await h.run_for(5 * S, step_ms=S)
+        line, summary = h.lines_starting("funding-reconcile")[:2]
+        assert line.startswith(f"funding-reconcile symbol={SYMBOL} state=active span={B0 - 2 * HOUR}..{B0 - HOUR}")
+        assert line.endswith("behind_estimate=no history_pending=yes")  # no history_chunks_planned any more (A-4)
+        assert summary == "funding-reconcile summary symbols=1 stored=0 conflicted_events=0 behind_estimate=0"
+        await h.finish()
+
+    run(scenario)
+
+
+def test_a_failed_page_inside_a_range_repeats_the_same_start_and_claims_nothing() -> None:
+    async def scenario(tmp_path: Path) -> None:
+        t = ManualTime(wall_start_ms=B0 + 3_000)
+        rig = await make_rig(tmp_path, symbols=(SYMBOL,), t=t, period_ms=60_000)  # a 24 h range of two pages
         start_span = Interval(B0 - 2 * HOUR, B0 - HOUR)
         await seed_span(rig, SYMBOL, start_span)
         rig.exchange.errors = [None, None, ccxt.NetworkError("reset")]  # the observation is not a funding request
-        h = await start_task(tmp_path, symbols=(SYMBOL,), rig=rig, backfill_days=365)
+        h = await start_task(tmp_path, symbols=(SYMBOL,), rig=rig, backfill_days=1)
         await h.run_for(60 * S, step_ms=2 * S)
         starts = [s.start_ms for s in rig.exchange.served]
         assert len(starts) != len(set(starts))  # the failed page was asked again from the same start
@@ -170,20 +198,20 @@ def test_raising_the_depth_continues_below_from_and_lowering_it_requests_nothing
         t = ManualTime(wall_start_ms=B0 + 3_000)
         rig = await make_rig(tmp_path, symbols=(SYMBOL,), t=t)
         await seed_span(rig, SYMBOL, Interval(B0 - 2 * HOUR, B0 - HOUR))
-        h = await start_task(tmp_path, symbols=(SYMBOL,), rig=rig, backfill_days=90)
+        h = await start_task(tmp_path, symbols=(SYMBOL,), rig=rig, backfill_days=1)
         await h.run_for(120 * S, step_ms=5 * S)
         done = await span(h)
-        assert done is not None and not history_pending(done, 90)
+        assert done is not None and not history_pending(done, 1)
         await h.finish()
         deeper = await reopen(rig)
-        h2 = await start_task(tmp_path, symbols=(SYMBOL,), rig=deeper, backfill_days=180)
+        h2 = await start_task(tmp_path, symbols=(SYMBOL,), rig=deeper, backfill_days=2)
         await h2.run_for(120 * S, step_ms=5 * S)
         wider = await span(h2)
-        assert wider is not None and wider.from_ms < done.from_ms and not history_pending(wider, 180)
+        assert wider is not None and wider.from_ms < done.from_ms and not history_pending(wider, 2)
         await h2.finish()
         plans = record_plans(monkeypatch)
         shallower = await reopen(deeper)
-        h3 = await start_task(tmp_path, symbols=(SYMBOL,), rig=shallower, backfill_days=30)
+        h3 = await start_task(tmp_path, symbols=(SYMBOL,), rig=shallower, backfill_days=1)
         await h3.run_for(120 * S, step_ms=5 * S)
         assert not [p for p in plans if p.kind == "H"] and await span(h3) is not None
         await h3.finish()
@@ -191,17 +219,17 @@ def test_raising_the_depth_continues_below_from_and_lowering_it_requests_nothing
     run(scenario, timeout=600)
 
 
-def test_a_young_symbol_extends_the_span_with_empty_chunks_until_the_depth_is_reached() -> None:
+def test_a_young_symbol_extends_the_span_with_an_empty_range_until_the_depth_is_reached() -> None:
     async def scenario(tmp_path: Path) -> None:
         t = ManualTime(wall_start_ms=B0 + 3_000)
-        listing = B0 - 20 * DAY_MS
+        listing = B0 - 12 * HOUR  # younger than the depth of one day
         rig = await make_rig(tmp_path, symbols=(SYMBOL,), t=t, listing_ms=listing)
         await seed_span(rig, SYMBOL, Interval(B0 - 2 * HOUR, B0 - HOUR))
-        h = await start_task(tmp_path, symbols=(SYMBOL,), rig=rig, backfill_days=365)
+        h = await start_task(tmp_path, symbols=(SYMBOL,), rig=rig, backfill_days=1)
         await h.run_for(300 * S, step_ms=5 * S)
         final = await span(h)
-        assert final is not None and not history_pending(final, 365)
-        assert final.through_ms - final.from_ms >= 365 * DAY_MS  # width claimed although nothing was listed before
+        assert final is not None and not history_pending(final, 1)
+        assert final.through_ms - final.from_ms >= DAY_MS  # width claimed although nothing was listed before
         conn = open_reader(rig.db)
         try:
             oldest = conn.execute("SELECT min(funding_time_ms) FROM funding_rates").fetchone()[0]
@@ -303,21 +331,22 @@ def test_history_cannot_starve_behind_catch_up_at_the_task_level(b: int, monkeyp
         )
         rig.exchange.offset_ms = 0
         for symbol in h_symbols:
-            rig.exchange.periods[symbol] = 8 * HOUR  # a 90-day chunk is 270 rows: one page
+            rig.exchange.periods[symbol] = 8 * HOUR  # a one-day range is 3 rows: one page
         through = B0 - 3_600_000
         for symbol in c_symbols:  # 12 000 s of one-second settlements missing: a dozen full pages each, 200 series
             seed_state(
-                rig, symbol, Interval(through - 3651 * DAY_MS, through - 12_000_000)
-            )  # history done: only class C
+                rig, symbol, Interval(through - 2 * DAY_MS, through - 12_000_000)
+            )  # history done (the depth is one day): only class C
         for symbol in h_symbols:
             seed_state(rig, symbol, Interval(through - 3 * HOUR, through))
         plans = record_plans(monkeypatch)
-        h = await start_task(tmp_path, symbols=(*c_symbols, *h_symbols), rig=rig, budget_per_5min=b, backfill_days=3650)
+        h = await start_task(tmp_path, symbols=(*c_symbols, *h_symbols), rig=rig, budget_per_5min=b, backfill_days=1)
         windows = 50
         await h.run_for(windows * 305 * S + 60 * S, step_ms=5 * S)
         ch = [p for p in plans if p.kind in ("C", "H")]
         assert len(ch) >= windows * per_window * 9 // 10
-        for n in range(1, len(ch) + 1):  # every prefix: H gets at least floor(n / 2) while it has work
+        last_h = max(index for index, p in enumerate(ch) if p.kind == "H")
+        for n in range(1, last_h + 2):  # every prefix: H gets at least floor(n / 2) while it has work
             assert sum(1 for p in ch[:n] if p.kind == "H") >= n // 2 - 1, n
         first_chunk: dict[str, int] = {}
         for index, plan in enumerate(ch):
@@ -326,29 +355,30 @@ def test_history_cannot_starve_behind_catch_up_at_the_task_level(b: int, monkeyp
         bound = 2 * len(h_symbols)  # H gets every second selection: P pending series are all served within 2P
         served_h = [index for index in first_chunk.values()]
         assert len(first_chunk) >= min(len(h_symbols), (len(ch) // 2) - 1) and max(served_h) <= bound + per_window
-        assert sum(1 for p in ch if p.kind == "C") >= windows * h_per_window * 8 // 10  # C keeps its half
+        active = ch[: last_h + 1]  # while H still has work, C still gets at least h starts per window (P-10)
+        assert sum(1 for p in active if p.kind == "C") >= (len(active) // per_window) * h_per_window * 8 // 10
         await h.finish()
 
     run(scenario, timeout=1_800)
 
 
-def test_a_history_chunk_whose_final_page_was_committed_with_an_unknown_answer_is_dropped_after_the_re_read(
+def test_a_history_range_whose_final_page_was_committed_with_an_unknown_answer_is_dropped_after_the_re_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def scenario(tmp_path: Path) -> None:
         t = ManualTime(wall_start_ms=B0 + 3_000)
-        rig = await make_rig(tmp_path, symbols=(SYMBOL,), t=t)
+        rig = await make_rig(tmp_path, symbols=(SYMBOL,), t=t, period_ms=60_000)  # a 24 h range of two pages
         await seed_span(rig, SYMBOL, Interval(B0 - 2 * HOUR, B0 - HOUR))
-        rig.writer = FlakyOnce(rig.writer, committed=True)  # the first merge (the final page of chunk one) is lost
+        rig.writer = FlakyOnce(rig.writer, committed=True)  # the first merge (the final page of the range) is lost
         plans = record_plans(monkeypatch)
-        h = await start_task(tmp_path, symbols=(SYMBOL,), rig=rig, backfill_days=365)
+        h = await start_task(tmp_path, symbols=(SYMBOL,), rig=rig, backfill_days=1)
         await h.run_for(60 * S, step_ms=2 * S)
         first_chunk = next(p.chunk for p in plans if p.kind == "H")
         assert first_chunk is not None
         same_chunk = [p for p in plans if p.kind == "H" and p.chunk and p.chunk.through_ms == first_chunk.through_ms]
-        assert len(same_chunk) == 3  # three pages, once: the claimed chunk is not requested a second time
+        assert len(same_chunk) == 2  # two pages, once: the claimed range is not requested a second time
         later = [p for p in plans if p.kind == "H" and p.chunk and p.chunk.through_ms < first_chunk.from_ms]
-        assert later  # and the history went on below it
+        assert not later  # and the history is finished: the depth is one day
         assert rows_and_conflicts(rig.db)[1] == 0
         await h.finish()
 

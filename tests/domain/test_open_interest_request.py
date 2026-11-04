@@ -1,7 +1,11 @@
 import pytest
 
 from quasar_market_data.domain.open_interest_request import (
+    DEFAULT_BACKFILL_DAYS,
+    MAX_BACKFILL_DAYS,
     MAX_PERIOD_ENDS,
+    MAX_RETRIEVAL_HORIZON_MS,
+    MIN_BACKFILL_DAYS,
     RETRIEVAL_HORIZON_MS,
     OpenInterestRequestError,
     validate_open_interest_request,
@@ -18,7 +22,8 @@ START = AS_OF - 3 * STEP
 
 def test_constants() -> None:
     assert MAX_PERIOD_ENDS == 500
-    assert RETRIEVAL_HORIZON_MS == 29 * 86_400_000
+    assert (MIN_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS, MAX_BACKFILL_DAYS) == (1, 29, 30)  # ADR-0003 A-4
+    assert RETRIEVAL_HORIZON_MS == 29 * 86_400_000 and MAX_RETRIEVAL_HORIZON_MS == 30 * 86_400_000
 
 
 def test_single_period_end() -> None:
@@ -57,13 +62,13 @@ def test_start_after_end_is_refused() -> None:
 
 def test_start_exactly_at_the_horizon_is_accepted() -> None:
     as_of = AS_OF
-    start = as_of - RETRIEVAL_HORIZON_MS
+    start = as_of - MAX_RETRIEVAL_HORIZON_MS
     assert start % STEP == 0
     assert validate_open_interest_request(start, start + STEP, P5, as_of) == 2
 
 
 def test_start_one_period_before_the_horizon_is_refused() -> None:
-    start = AS_OF - RETRIEVAL_HORIZON_MS - STEP
+    start = AS_OF - MAX_RETRIEVAL_HORIZON_MS - STEP  # the request rule is the largest depth the file allows
     with pytest.raises(OpenInterestRequestError, match="horizon"):
         validate_open_interest_request(start, start + STEP, P5, AS_OF)
 

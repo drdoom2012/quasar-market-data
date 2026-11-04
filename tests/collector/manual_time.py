@@ -20,6 +20,11 @@ YIELDS = 100  # event-loop hops granted after every wake-up so awakened tasks ru
 MAX_WAIT_YIELDS = 1_000
 
 
+def _ready_queue_is_empty(loop: asyncio.AbstractEventLoop) -> bool:
+    ready = getattr(loop, "_ready", None)
+    return ready is not None and len(ready) == 0
+
+
 class _ThreadJobs:
     """The jobs a loop has handed to an executor and that have not completed."""
 
@@ -64,8 +69,12 @@ class ManualTime:
         mono_start_ns: int = 18_053_000_000_000,
         *,
         wait_for_threads: bool = True,
+        idle_settle: bool = False,
     ) -> None:
         self._wait_for_threads = wait_for_threads  # False: a test that blocks a worker thread on purpose
+        # True: ``settle`` stops hopping as soon as the loop has nothing else to run (see ``settle``). Off by default:
+        # a test that waits for real I/O relies on the full ``YIELDS`` hops. For long simulations without real I/O.
+        self._idle_settle = idle_settle
         self._mono_ns = mono_start_ns
         self._wall_ms = wall_start_ms
         self._waiters: list[_Waiter] = []
@@ -117,10 +126,23 @@ class ManualTime:
         executor.submit = submit  # type: ignore[method-assign]
 
     async def settle(self) -> None:
-        jobs = _thread_jobs(asyncio.get_running_loop())
+        loop = asyncio.get_running_loop()
+        jobs = _thread_jobs(loop)
         while True:
+            quiet = 0
             for _ in range(YIELDS):
                 await asyncio.sleep(0)
+                # ``idle_settle``: when the loop's ready queue is empty after two hops in a row, no other task or
+                # callback is runnable, which is what the fixed number of hops waits for (two, because a worker
+                # thread's completion is queued with ``call_soon_threadsafe`` a moment before the wake of the task
+                # that awaits it). A loop without that queue (``_ready`` is an asyncio implementation detail) keeps
+                # all ``YIELDS`` hops.
+                if self._idle_settle and _ready_queue_is_empty(loop):
+                    quiet += 1
+                    if quiet == 2:
+                        break
+                else:
+                    quiet = 0
             if jobs.pending == 0 or not self._wait_for_threads:
                 return
             await asyncio.sleep(0.001)  # real time: a worker thread is still running

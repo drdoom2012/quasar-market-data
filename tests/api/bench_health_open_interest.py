@@ -39,7 +39,7 @@ ROWS = int(os.environ.get("QUASAR_BENCH_ROWS", "300"))  # 8352 = 29 days of 5m, 
 FUNDING_ROWS = 100
 REPEATS = 9
 H2_TARGET_MS = 250
-FUNDING_RULE = FundingRateRule(publication_delay_ms=30_000, backfill_days=365)
+FUNDING_RULE = FundingRateRule(publication_delay_ms=30_000, backfill_days=30)
 RULE = OpenInterestRule(cadence=5, expected_after_ms=1_700_000, lag_threshold_ms=60_000, period=Timeframe("5m"))
 
 

@@ -10,12 +10,30 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
-from tools.symbol_overview.fetch import Fetch, RawResponse, TransportError, coverage_path, open_interest_path
-from tools.symbol_overview.judge import OiPart, build_overview, judge_open_interest, judge_symbol, page_error
+from tools.symbol_overview.fetch import (
+    Fetch,
+    RawResponse,
+    TransportError,
+    coverage_path,
+    funding_path,
+    open_interest_path,
+)
+from tools.symbol_overview.judge import (
+    FundingPart,
+    OiPart,
+    build_overview,
+    judge_funding,
+    judge_funding_failure,
+    judge_open_interest,
+    judge_symbol,
+    page_error,
+)
 from tools.symbol_overview.model import (
     TIMEFRAME,
     VENUE,
     Coverage,
+    FundingHealth,
+    FundingReport,
     Health,
     InstrumentRow,
     Invalid,
@@ -26,12 +44,14 @@ from tools.symbol_overview.model import (
 )
 from tools.symbol_overview.validate import (
     coverage_result,
+    funding_health,
+    funding_result,
     health_result,
     instruments_result,
     open_interest_coverage_result,
     open_interest_health,
 )
-from tools.symbol_overview.window import open_interest_window, window_for
+from tools.symbol_overview.window import funding_window, open_interest_window, window_for
 
 
 @dataclass(frozen=True)
@@ -143,6 +163,14 @@ class Overviewer:
         open_interest = self._open_interest_phase(
             instruments, oi_health, open_interest_window(window), health, started, candle_not_asked
         )
+        # The funding phase starts only when every open interest outcome is final (FR-6 design 5); the same one deadline.
+        funding = self._funding_phase(
+            instruments,
+            funding_health(health_raw.status, health_raw.content_type, health_raw.body, health=health),
+            window,
+            health,
+            started,
+        )
         duration_ms = int((self._monotonic() - started) * 1000)
         return Snapshot(
             200,
@@ -153,6 +181,7 @@ class Overviewer:
                 duration_ms=duration_ms,
                 deadline_hit=deadline_hit.is_set(),
                 open_interest=open_interest,
+                funding=funding,
             ),
         )
 
@@ -201,3 +230,61 @@ class Overviewer:
         with ThreadPoolExecutor(max_workers=self._concurrency) as pool:
             reports = tuple(pool.map(one, instruments))
         return OiPart("enabled", "", reports, deadline_hit.is_set(), candle_not_asked, len(not_asked))
+
+    def _funding_phase(
+        self,
+        instruments: tuple[InstrumentRow, ...],
+        funding_health_: FundingHealth | None | Invalid,
+        window: Window,
+        health: Health,
+        started: float,
+    ) -> FundingPart:
+        if funding_health_ is None:  # the key is present and null: disabled, no call is made
+            return FundingPart("disabled", "", (), False, 0)
+
+        def unknown(invalid: Invalid) -> FundingPart:  # no call is made; unknown for every symbol
+            detail = f"{invalid.code}:{invalid.detail}" if invalid.detail else invalid.code
+            return FundingPart("unknown", detail, tuple(judge_funding_failure(invalid) for _ in instruments), False, 0)
+
+        if isinstance(funding_health_, Invalid):
+            return unknown(funding_health_)
+        try:
+            fwindow = funding_window(window, funding_health_.rule, health.as_of_ms)
+        except ValueError:
+            return unknown(Invalid("schema", "funding_window"))
+
+        deadline_hit = threading.Event()
+        not_asked: list[str] = []  # appended from the workers; a list append is atomic
+
+        def one(instrument: InstrumentRow) -> FundingReport:
+            if instrument.venue != VENUE or instrument.timeframe != TIMEFRAME:
+                return judge_funding_failure(Invalid("schema", "unsupported_series"))
+            if self._monotonic() - started > self._deadline_s:
+                deadline_hit.set()
+                not_asked.append(instrument.symbol)
+                return judge_funding_failure(Invalid("deadline"))
+            answer = self._call(funding_path(instrument, fwindow))
+            if isinstance(answer, Invalid):
+                return judge_funding_failure(answer)
+            outcome = funding_result(
+                answer.status,
+                answer.content_type,
+                answer.body,
+                instrument=instrument,
+                funding_window=fwindow,
+                health=health,
+            )
+            return judge_funding(outcome, fwindow, funding_health_, health.as_of_ms)  # nothing else is kept
+
+        with ThreadPoolExecutor(max_workers=self._concurrency) as pool:
+            reports = tuple(pool.map(one, instruments))
+        return FundingPart(
+            "enabled",
+            "",
+            reports,
+            deadline_hit.is_set(),
+            len(not_asked),
+            fwindow,
+            funding_health_,
+            clamped=fwindow.start > window.start,
+        )

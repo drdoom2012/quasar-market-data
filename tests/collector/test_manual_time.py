@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import time
+from typing import Any, cast
 
 from tests.collector.manual_time import ManualTime
 
@@ -91,3 +92,63 @@ def test_an_untracked_executor_is_not_waited_for() -> None:
         executor.shutdown()
 
     asyncio.run(scenario())
+
+
+def test_idle_settle_runs_a_woken_chain_to_its_end_and_still_waits_for_a_worker_thread() -> None:
+    async def scenario() -> None:
+        t = ManualTime(idle_settle=True)
+        reached: list[int] = []
+
+        async def chain() -> None:
+            for hop in range(40):  # a long chain of loop hops, as a dispatcher starting a group of requests
+                await asyncio.sleep(0)
+                reached.append(hop)
+
+        finished = threading.Event()
+
+        def job() -> None:
+            time.sleep(0.2)
+            finished.set()
+
+        task = asyncio.ensure_future(chain())
+        work = asyncio.ensure_future(asyncio.to_thread(job))
+        await asyncio.sleep(0)
+        await t.settle()
+        assert reached == list(range(40)) and task.done()
+        assert finished.is_set(), "settle returned while a worker thread was still running"
+        await work
+
+    asyncio.run(scenario())
+
+
+def test_idle_settle_takes_fewer_hops_than_the_default_when_nothing_is_runnable() -> None:
+    async def hops(idle: bool) -> int:
+        count = 0
+        loop = asyncio.get_running_loop()
+        original = loop.call_soon
+
+        def counting(*args: object, **kwargs: object) -> object:
+            nonlocal count
+            count += 1
+            return original(*args, **kwargs)  # type: ignore[arg-type]
+
+        loop.call_soon = cast(Any, counting)  # type: ignore[method-assign]
+        try:
+            await ManualTime(idle_settle=idle).settle()
+        finally:
+            loop.call_soon = original  # type: ignore[method-assign]
+        return count
+
+    async def scenario() -> None:
+        assert await hops(True) < await hops(False)
+
+    asyncio.run(scenario())
+
+
+def test_the_event_loop_still_has_the_ready_queue_idle_settle_looks_at() -> None:
+    """If a Python upgrade removes ``_ready``, ``idle_settle`` silently falls back to all hops: fail loudly instead."""
+    loop = asyncio.new_event_loop()
+    try:
+        assert hasattr(loop, "_ready") and len(loop._ready) == 0
+    finally:
+        loop.close()

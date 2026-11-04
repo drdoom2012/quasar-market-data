@@ -29,7 +29,7 @@ from tests.config_files import write_config
 
 TABLE = (
     '\n[open_interest]\nenabled = true\nperiod = "5m"\npublication_delay_ms = 15000\n'
-    "round_offset_ms = 200000\nbudget_per_5min = 250\n"
+    "round_offset_ms = 200000\nbudget_per_5min = 250\nbackfill_days = 29\n"
 )
 
 
@@ -135,6 +135,20 @@ def run_cli(
         clock=clock,
         sleep=stop_when_started(clock, rec, wait=wait and table is not None),
     )
+
+
+@pytest.mark.parametrize("enabled", ["true", "false"])
+def test_a_backfill_depth_above_30_days_stops_the_process_at_start_and_opens_nothing(
+    db: Path, rec: Recorder, capsys: pytest.CaptureFixture[str], enabled: str
+) -> None:
+    table = TABLE.replace("enabled = true", f"enabled = {enabled}").replace("backfill_days = 29", "backfill_days = 31")
+
+    with pytest.raises(SystemExit) as stopped:
+        run_cli(db, rec, table, wait=False)
+
+    assert stopped.value.code == 2  # ADR-0003 A-4: a larger depth is a configuration error
+    assert "open_interest.backfill_days: must be in 1..30, got 31" in capsys.readouterr().err
+    assert rec.events == [] and not db.exists()  # no source, no task and no database
 
 
 def test_absent_or_disabled_table_creates_nothing_and_prints_nothing_new(

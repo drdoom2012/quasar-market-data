@@ -165,7 +165,7 @@ def test_determinism_the_same_stored_data_clock_and_grants_give_the_same_request
             tmp_path,
             symbols=symbols_of(12 + extra),
             budget_per_5min=50,
-            backfill_days=60,
+            backfill_days=1,
             request_ms=300,
             sink=InMemorySink(),  # keeps the writer thread's real timing out of a comparison of two runs
         )
@@ -190,7 +190,15 @@ def test_determinism_the_same_stored_data_clock_and_grants_give_the_same_request
 def test_with_history_saturating_the_share_every_r_request_keeps_its_planned_start_and_the_caps_hold() -> None:
     async def scenario(tmp_path: Path) -> None:
         symbols = symbols_of(120)  # b = 50: m = 25; 120 series need five groups
-        h = await start_task(tmp_path, symbols=symbols, budget_per_5min=50, backfill_days=3650, sink=InMemorySink())
+        h = await start_task(
+            tmp_path,
+            symbols=symbols,
+            budget_per_5min=50,
+            backfill_days=1,
+            recheck_ms=3_600_000,  # the seed is one hour wide: 23 hours of history are pending
+            period_ms=30_000,  # 30 s settlements: that history is 2 760 rows, three pages per series
+            sink=InMemorySink(),
+        )
         await h.run_for(B0 + HOUR - h.t.wall_ms() + 20 * S, step_ms=20 * S)  # round one
         await h.run_for(
             B0 + 2 * HOUR + 60_000 - h.t.wall_ms() + 1_800 * S, step_ms=20 * S
@@ -247,12 +255,12 @@ def test_a_pause_that_outlasts_the_deadline_skips_that_round_only() -> None:
 
 def test_a_hanging_round_observation_does_not_stop_history_requests() -> None:
     async def scenario(tmp_path: Path) -> None:
-        symbols = symbols_of(2)
-        rig = await make_rig(tmp_path, symbols=symbols, t=t_at(B0 + 3_000), sink=InMemorySink())
+        symbols = symbols_of(40)
+        rig = await make_rig(tmp_path, symbols=symbols, t=t_at(B0 + 3_000), sink=InMemorySink(), period_ms=30_000)
         for symbol in symbols:
-            seed_state(rig, symbol, Interval(B0 - 400 * 86_400_000, B0 - HOUR))
+            seed_state(rig, symbol, Interval(B0 - 3 * HOUR, B0 - HOUR))  # history (one day deep) is pending: 3 pages
         rig.exchange.hang_time = True
-        h = await start_task(tmp_path, rig=rig, backfill_days=3650)
+        h = await start_task(tmp_path, rig=rig, backfill_days=1)
         await h.run_for(60 * S, step_ms=5 * S)  # up to the wake: the observation now hangs
         before = len(rig.exchange.served)
         await h.run_for(700 * S, step_ms=10 * S)

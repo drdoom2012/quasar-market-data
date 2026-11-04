@@ -50,13 +50,15 @@ bench-oi-write:
 # SERIES symbols; OVERVIEW_PROFILE smoke | target (target = 100 000 candle rows per series, the size of bench-health's target:
 # at 600 series tens of minutes and several GB of temp disk); OI_MODE proxy (G0: /v1/coverage stands in for the open interest
 # call) | real (/v1/open-interest/coverage). ARGS carries the rest, for example ARGS="--stress", ARGS="--l-tunnel-ms 40",
-# ARGS="--refreshes 3 --sustained-minutes 0".
+# ARGS="--refreshes 3 --sustained-minutes 0". FUNDING_MODE off | real (FR-6: the API runs with [funding_rate]; every refresh is run
+# with and without the funding phase, alternating, and the total time and the time of each phase are printed to stderr).
 SERIES ?= 300
 OVERVIEW_PROFILE ?= smoke
 OI_MODE ?= real
+FUNDING_MODE ?= off
 ARGS ?=
 bench-overview:
-	uv run python -m tests.api.bench_overview_refresh --series $(SERIES) --profile $(OVERVIEW_PROFILE) --oi-mode $(OI_MODE) $(ARGS)
+	uv run python -m tests.api.bench_overview_refresh --series $(SERIES) --profile $(OVERVIEW_PROFILE) --oi-mode $(OI_MODE) --funding-mode $(FUNDING_MODE) $(ARGS)
 
 # Builds the collector and api images (linux/amd64) with local tags; needs Docker, not part of `check`.
 images:

@@ -149,6 +149,19 @@ def test_a_long_outage_counts_what_is_no_longer_recoverable_and_requests_nothing
     run(scenario)
 
 
+def test_a_shorter_configured_depth_limits_the_holes_and_the_requests(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        rig = await make_rig(tmp_path, symbols=(BTC,), backfill_days=1)
+        await first_window(rig)
+        line = rig.lines_with("oi-reconcile symbol=")[0]
+        assert 280 <= int(field(line, "holes")) <= 300  # one day of 5 min slots, not 29 days of them
+        pages = page_calls(rig)
+        assert pages and all(c.start_ms >= c.as_of_ms - DAY for c in pages)
+        await rig.stop_and_wait()
+
+    run(scenario)
+
+
 def test_the_page_plan_is_deterministic_for_the_same_stored_rows_and_time(tmp_path: Path) -> None:
     async def scenario() -> list[list[tuple[str, int, int]]]:
         runs = []

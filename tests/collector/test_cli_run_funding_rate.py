@@ -30,11 +30,11 @@ from tests.config_files import write_config
 
 TABLE = (
     "\n[funding_rate]\nenabled = true\npublication_delay_ms = 30000\nround_offset_ms = 60000\n"
-    "budget_per_5min = 150\nbackfill_days = 365\nrecheck_ms = 86400000\n"
+    "budget_per_5min = 150\nbackfill_days = 1\nrecheck_ms = 86400000\n"
 )
 OI_TABLE = (
     '\n[open_interest]\nenabled = true\nperiod = "5m"\npublication_delay_ms = 15000\n'
-    "round_offset_ms = 200000\nbudget_per_5min = 250\n"
+    "round_offset_ms = 200000\nbudget_per_5min = 250\nbackfill_days = 29\n"
 )
 
 
@@ -156,6 +156,21 @@ def test_absent_or_disabled_table_creates_nothing_and_prints_nothing_new(
     assert "funding-" not in outputs[0][0] + outputs[0][1] + outputs[1][0] + outputs[1][1]
 
 
+@pytest.mark.parametrize("enabled", ["true", "false"])
+def test_a_backfill_depth_above_30_days_stops_the_process_at_start_and_opens_nothing(
+    db: Path, rec: Recorder, capsys: pytest.CaptureFixture[str], enabled: str
+) -> None:
+    table = TABLE.replace("enabled = true", f"enabled = {enabled}").replace("backfill_days = 1", "backfill_days = 31")
+
+    with pytest.raises(SystemExit) as stopped:
+        run_cli(db, rec, table, wait=False)
+
+    captured = capsys.readouterr()
+    assert stopped.value.code == 2  # ADR-0004 A-4: a larger depth is a configuration error
+    assert "funding_rate.backfill_days: must be in 1..30, got 31" in captured.err
+    assert rec.events == [] and not db.exists()  # no source, no task and no database
+
+
 def test_enabled_starts_the_task_after_round_one_with_its_own_limiter_and_closes_everything(
     db: Path, rec: Recorder, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -164,7 +179,7 @@ def test_enabled_starts_the_task_after_round_one_with_its_own_limiter_and_closes
     assert rec.events.index("klines") < rec.events.index("open") < rec.events.index("task")  # never before round one
     (call,) = rec.calls
     config = call["config"]
-    assert config.budget_per_5min == 150 and config.symbols == (SYMBOL,) and config.backfill_days == 365
+    assert config.budget_per_5min == 150 and config.symbols == (SYMBOL,) and config.backfill_days == 1
     assert (config.publication_delay_ms, config.round_offset_ms, config.recheck_ms) == (30_000, 60_000, 86_400_000)
     assert isinstance(call["writer"], AsyncFundingRateWriter) and isinstance(call["limiter"], FundingRateLimiter)
     assert isinstance(call["pause"], ExtensionPause)

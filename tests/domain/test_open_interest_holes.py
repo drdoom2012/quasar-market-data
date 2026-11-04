@@ -134,3 +134,22 @@ def test_slots_newer_than_the_margin_are_never_at_risk() -> None:
     as_of = 1_792_677_000_000 // STEP * STEP + RETRIEVAL_HORIZON_MS
     slot = as_of - RETRIEVAL_HORIZON_MS + 86_400_000  # exactly one day left: not judged
     assert slots_at_risk(pages_of_one(1000, slot), as_of, 1, P) == {}
+
+
+def test_a_configured_depth_moves_the_oldest_allowed_slot() -> None:
+    day = 86_400_000
+    for days in (1, 29, 30):
+        oldest = oldest_allowed_ms(AS_OF, P, days * day)
+        assert oldest % STEP == 0 and AS_OF - days * day <= oldest < AS_OF - days * day + STEP
+    assert oldest_allowed_ms(AS_OF, P) == oldest_allowed_ms(AS_OF, P, RETRIEVAL_HORIZON_MS)  # the default: 29 days
+    assert oldest_allowed_ms(AS_OF, P, 30 * day) < oldest_allowed_ms(AS_OF, P, 29 * day)
+
+
+def test_slots_at_risk_follow_the_configured_depth() -> None:
+    day = 86_400_000
+    as_of = 1_792_677_000_000 // STEP * STEP + 3 * day
+    slot = as_of - 3 * day + 10 * STEP  # leaves a depth of three days in 10 cycles
+    pages = pages_of_one(12, slot)
+
+    assert set(slots_at_risk(pages, as_of, 1, P, retrieval_horizon_ms=3 * day)) == {"S11/USDT:USDT"}
+    assert slots_at_risk(pages, as_of, 1, P) == {}  # with the default 29 days the same slot is far from leaving
