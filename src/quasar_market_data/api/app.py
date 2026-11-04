@@ -26,6 +26,7 @@ from quasar_market_data.api.database import (
     ConnectionFactory,
     read_candles,
     read_coverage,
+    read_funding_rates,
     read_indicators,
     read_ingest,
     read_ingest_open_interest,
@@ -36,12 +37,14 @@ from quasar_market_data.api.database import (
 )
 from quasar_market_data.api.errors import (
     ApiError,
+    funding_rate_disabled,
     internal_error,
     method_not_allowed,
     not_found,
     open_interest_disabled,
 )
 from quasar_market_data.api.float_text import float_text
+from quasar_market_data.api.funding_rate_page import FundingRatePage
 from quasar_market_data.api.health_reader import OpenInterestFacts, StoredOpenInterestSeries, StoredSeries
 from quasar_market_data.api.indicator_reader import IndicatorInputs
 from quasar_market_data.api.indicator_results import indicator_results
@@ -52,6 +55,7 @@ from quasar_market_data.api.params import (
     indicators_window_end,
     parse_candles_request,
     parse_coverage_request,
+    parse_funding_rates_request,
     parse_indicators_request,
     parse_open_interest_coverage_request,
     parse_open_interest_request,
@@ -60,6 +64,7 @@ from quasar_market_data.api.params import (
 from quasar_market_data.api.rule import checked_rule
 from quasar_market_data.config.settings import Instrument
 from quasar_market_data.domain.freshness import Freshness, series_freshness
+from quasar_market_data.domain.funding_rate_coverage import FundingRateRule, defaulted_window_end
 from quasar_market_data.domain.indicator_series import IndicatorPoint, IndicatorSeries, read_start_ms
 from quasar_market_data.domain.indicators import IndicatorSpec
 from quasar_market_data.domain.open_interest_coverage import OpenInterestRule, open_interest_freshness
@@ -88,6 +93,7 @@ def create_app(
     rule: ExpectationRule,
     universe: Sequence[Instrument],
     open_interest: OpenInterestRule | None = None,
+    funding_rate: FundingRateRule | None = None,
     open_connection: ConnectionFactory = open_reader,
     now_ms: Callable[[], int] = system_now_ms,
 ) -> FastAPI:
@@ -152,6 +158,17 @@ def create_app(
             open_connection=open_connection,
         )
         return _json(200, _open_interest_coverage_body(report, as_of_ms, open_interest))
+
+    @app.get("/v1/funding-rates")
+    async def funding_rates_endpoint(request: Request) -> Response:
+        # contract 6.7.6: parameters -> enabled in the configuration -> host clock -> database -> series
+        parsed = parse_funding_rates_request(request.scope["query_string"])
+        if funding_rate is None:
+            raise funding_rate_disabled()
+        as_of_ms = ensure_timestamp_ms(now_ms(), "as_of_ms")  # a wrong host clock is a 500, not a 503
+        end = parsed.end if parsed.end is not None else defaulted_window_end(parsed.start, as_of_ms)
+        page = await run_in_threadpool(read_funding_rates, db_path, parsed, end=end, open_connection=open_connection)
+        return _json(200, _funding_rates_body(page, as_of_ms))
 
     @app.get("/v1/instruments")
     async def instruments(request: Request) -> Response:
@@ -305,6 +322,40 @@ def _open_interest_body(page: OpenInterestPage, as_of_ms: int, rule: OpenInteres
             "stale_slots": c.stale,
             "missing_slots": c.missing,
             "gap_free": c.gap_free,
+        },
+    }
+
+
+def _funding_rates_body(page: FundingRatePage, as_of_ms: int) -> dict[str, object]:
+    """Keys in the order of contract 6.7.4."""
+    span = page.span
+    return {
+        "venue": page.venue,
+        "symbol": page.symbol,
+        "time_semantics": "settlement",
+        "start": page.start,
+        "end": page.end,
+        "series": {"oldest_funding_time_ms": page.oldest_ms, "newest_funding_time_ms": page.newest_ms},
+        "rows": [
+            {
+                "funding_time_ms": row.funding_time_ms,
+                "rate_type": row.rate_type,
+                "funding_rate": row.funding_rate,
+                "mark_price": row.mark_price,
+                "conflicted": row.conflicted,
+            }
+            for row in page.rows
+        ],
+        "next": page.next,
+        "coverage": {
+            "as_of_ms": as_of_ms,
+            "verified_from_ms": None if span is None else span.from_ms,
+            "verified_through_ms": None if span is None else span.through_ms,
+            "verified_at_ms": page.verified_at_ms,
+            "window_state": page.window_state.value,
+            "events_in_window": page.events_in_window,
+            "conflicted_events": page.conflicted_events,
+            "complete": page.complete,
         },
     }
 

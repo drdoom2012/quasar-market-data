@@ -40,12 +40,12 @@ def request(start: int, end: int | None = None, limit: int = 1000, symbol: str =
     return FundingRatesRequest(VENUE, symbol, start, end, limit)
 
 
-def read(path: Path, req: FundingRatesRequest, end: int | None = None, as_of: int = NOW) -> FundingRatePage:
+def read(path: Path, req: FundingRatesRequest, end: int | None = None) -> FundingRatePage:
     conn = open_reader(path)
     try:
         effective = req.end if end is None else end
         assert effective is not None
-        return read_funding_rate_page(conn, req, end=effective, as_of_ms=as_of)
+        return read_funding_rate_page(conn, req, end=effective)
     finally:
         conn.close()
 
@@ -331,7 +331,7 @@ def test_schema_mismatch_and_an_empty_database_raise_the_existing_errors(tmp_pat
     conn = open_reader(path)
     try:
         with pytest.raises(Exception) as caught:  # EmptyDatabaseError, a SchemaMismatchError subclass
-            read_funding_rate_page(conn, request(ev(0), ev(1)), end=ev(1), as_of_ms=NOW)
+            read_funding_rate_page(conn, request(ev(0), ev(1)), end=ev(1))
         assert isinstance(caught.value, SchemaMismatchError)
     finally:
         conn.close()
@@ -342,7 +342,7 @@ def test_a_limit_below_two_is_a_programming_error(tmp_path: Path) -> None:
     conn = open_reader(path)
     try:
         with pytest.raises(ValueError):
-            read_funding_rate_page(conn, request(ev(0), ev(1), limit=1), end=ev(1), as_of_ms=NOW)
+            read_funding_rate_page(conn, request(ev(0), ev(1), limit=1), end=ev(1))
     finally:
         conn.close()
 
@@ -367,7 +367,7 @@ def test_the_interleaving_probe_sees_one_snapshot(tmp_path: Path) -> None:
     reader = open_reader(subject)
     probe = InterleavingConnection(reader, hook)
     try:
-        page = read_funding_rate_page(cast(sqlite3.Connection, probe), window, end=ev(19), as_of_ms=NOW)
+        page = read_funding_rate_page(cast(sqlite3.Connection, probe), window, end=ev(19))
 
         assert page == read(pristine, window)  # none of the interleaved commits is visible: no mixed state
         assert len(injected) >= 3 and page.window_state is WindowState.PARTLY_VERIFIED
@@ -375,7 +375,7 @@ def test_the_interleaving_probe_sees_one_snapshot(tmp_path: Path) -> None:
             assert any(table in sql for _n, sql in injected), table
         assert reader.in_transaction is False
 
-        after = read_funding_rate_page(reader, window, end=ev(19), as_of_ms=NOW)
+        after = read_funding_rate_page(reader, window, end=ev(19))
         assert after != page
         assert (after.span, after.window_state) == (
             Interval(ev(0), ev(19)),
@@ -416,7 +416,7 @@ def test_the_statement_count_does_not_depend_on_the_rows(tmp_path: Path) -> None
         conn = open_reader(path)
         probe = InterleavingConnection(conn, lambda n, sql: None)
         try:
-            read_funding_rate_page(cast(sqlite3.Connection, probe), req, end=req.end or 0, as_of_ms=NOW)
+            read_funding_rate_page(cast(sqlite3.Connection, probe), req, end=req.end or 0)
             return sum(1 for s in probe.statements if s.n)
         finally:
             conn.close()
@@ -434,9 +434,7 @@ def test_every_statement_uses_a_primary_key_or_index_search(tmp_path: Path) -> N
     conn = open_reader(path)
     probe = InterleavingConnection(conn, lambda n, sql: None)
     try:
-        read_funding_rate_page(
-            cast(sqlite3.Connection, probe), request(ev(0), ev(19), limit=5), end=ev(19), as_of_ms=NOW
-        )
+        read_funding_rate_page(cast(sqlite3.Connection, probe), request(ev(0), ev(19), limit=5), end=ev(19))
         data = [s for s in probe.statements if s.n and "funding_rate" in s.sql]
         assert len(data) >= 6
         for statement in data:

@@ -140,13 +140,12 @@ def read_funding_rates(
     request: FundingRatesRequest,
     *,
     end: int,
-    as_of_ms: int,
     open_connection: ConnectionFactory = open_reader,
 ) -> FundingRatePage:
     return _with_reader(
         db_path,
         open_connection,
-        lambda conn: read_funding_rate_page(conn, request, end=end, as_of_ms=as_of_ms),
+        lambda conn: read_funding_rate_page(conn, request, end=end),
         request,
     )
 

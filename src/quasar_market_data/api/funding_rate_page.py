@@ -43,10 +43,8 @@ class FundingRatePage:
     complete: bool
 
 
-def read_funding_rate_page(
-    conn: sqlite3.Connection, request: FundingRatesRequest, *, end: int, as_of_ms: int
-) -> FundingRatePage:
-    """``end`` is the effective window end (the handler resolves a defaulted one); ``as_of_ms`` is for the caller only."""
+def read_funding_rate_page(conn: sqlite3.Connection, request: FundingRatesRequest, *, end: int) -> FundingRatePage:
+    """``end`` is the effective window end: the handler resolves a defaulted one (contract 6.7.2)."""
     if request.limit < 2:
         raise ValueError(f"limit must be at least 2, got {request.limit}")
     conn.execute("BEGIN")
