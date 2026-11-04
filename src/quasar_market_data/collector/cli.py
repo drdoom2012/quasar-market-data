@@ -5,6 +5,12 @@ source's own client, stores the eligible ones and reports what happened. Exit co
 ``4`` also when a page failed after at least one of its transactions committed (those rows stay stored; re-run
 to complete the page), and ``1`` when server time is untrusted (no request is made, nothing is written).
 
+``run`` also collects funding rate history when the configuration has an enabled ``[funding_rate]`` table (ADR-0004,
+FR-4): one more asyncio task, started after round one and its post-check, with its own client, limiter, pause and
+writer. Like the open interest task it never changes the exit status; its output is ``funding-round`` /
+``funding-reconcile`` / ``funding-conflict`` / ``funding-suspended`` / ``funding-measurement`` lines (stdout) and
+``funding-warning`` / ``funding-error`` lines (stderr). Without the table nothing funding-related is created or printed.
+
 ``fetch-funding-once`` (ADR-0004, FR-3) fetches one page of funding rate history of one symbol on the funding
 source's own client (its own limiter and ``ExtensionPause``), stores the eligible rows and reports what happened. It
 claims no coverage (the verified span is the funding task's business). Exit codes as for ``fetch-oi-once``: ``4`` also
@@ -111,6 +117,8 @@ from quasar_market_data.collector.fetch_open_interest_once import (
     fetch_open_interest_once,
 )
 from quasar_market_data.collector.funding_rate_limiter import FundingRateLimiter
+from quasar_market_data.collector.funding_rate_measurements import FundingRateMeasurements
+from quasar_market_data.collector.funding_rate_task import FundingRateTaskConfig, run_funding_rate_task
 from quasar_market_data.collector.funding_rate_writer import FundingRateWriteOutcomeUnknown
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
@@ -170,6 +178,18 @@ class OpenInterestRun:
     config: OpenInterestTaskConfig
     open_source: OpenInterestOpenSource
     stop_grace_ms: int = OPEN_INTEREST_STOP_GRACE_MS
+
+
+FUNDING_RATE_STOP_GRACE_MS = 5_000  # how long shutdown waits (real time) for the funding rate task before cancelling it
+
+
+@dataclass(frozen=True)
+class FundingRateRun:
+    """What ``run`` needs to start the funding rate task; ``None`` when the table is absent or disabled."""
+
+    config: FundingRateTaskConfig
+    open_source: FundingRateOpenSource
+    stop_grace_ms: int = FUNDING_RATE_STOP_GRACE_MS
 
 
 def _error(message: str) -> None:
@@ -534,6 +554,7 @@ async def _run_loop(
     sleep: Sleep,
     backfill: BackfillConfig | None,
     oi_run: OpenInterestRun | None,
+    funding_run: FundingRateRun | None = None,
 ) -> int:
     """Handlers first, so that a stop during the pre-start read is honoured; restored on every way out."""
     stop = asyncio.Event()
@@ -543,7 +564,7 @@ async def _run_loop(
         loop.add_signal_handler(sig, stop.set)
     try:
         return await _reconcile_and_collect(
-            config, db, min_interval_ms, open_source, clock, sleep, stop, backfill, oi_run
+            config, db, min_interval_ms, open_source, clock, sleep, stop, backfill, oi_run, funding_run
         )
     finally:
         for sig, handler in previous.items():
@@ -574,6 +595,22 @@ async def _finish_post_check(task: "asyncio.Task[None] | None", guard: ReadGuard
 def _emit_open_interest_line(line: str) -> None:
     """Warnings and errors of the open interest task go to stderr, everything else to stdout."""
     if line.startswith(("oi-warning", "oi-error")):
+        _error(line)
+    else:
+        print(line, flush=True)
+
+
+def _fan_out(callbacks: list[Callable[[int], None]]) -> Callable[[int], None]:
+    def record(duration_ns: int) -> None:
+        for callback in callbacks:
+            callback(duration_ns)
+
+    return record
+
+
+def _emit_funding_line(line: str) -> None:
+    """Warnings and errors of the funding rate task go to stderr, everything else to stdout."""
+    if line.startswith(("funding-warning", "funding-error")):
         _error(line)
     else:
         print(line, flush=True)
@@ -620,6 +657,35 @@ async def _open_interest_main(
         _error(f"oi-error task stopped: {type(error).__name__}: {error}")
 
 
+async def _funding_rate_main(
+    funding_run: FundingRateRun,
+    db: Path,
+    clock: Clock,
+    sleep: Sleep,
+    stop: asyncio.Event,
+    candle_ready: asyncio.Event,
+    activity: CandleWriteActivity,
+    measurements: FundingRateMeasurements,
+) -> None:
+    """The funding rate task of ``run``: starts after round one and its post-check, ends only itself (ADR-0004 P-9)."""
+    try:
+        if await _wait_for_event_or_stop(candle_ready, stop):
+            return
+        config = funding_run.config
+        limiter = FundingRateLimiter(config.budget_per_5min, clock, sleep)
+        pause = ExtensionPause(clock)
+        async with AsyncExitStack() as stack:
+            source = await funding_run.open_source(limiter, pause, clock)
+            stack.push_async_callback(_close_quietly, "the funding rate client", source.close)
+            writer = await AsyncFundingRateWriter.open(db, activity=activity)
+            stack.push_async_callback(_close_quietly, "the funding rate writer", writer.close)
+            await run_funding_rate_task(
+                source, writer, db, config, limiter, pause, clock, sleep, stop, _emit_funding_line, measurements
+            )
+    except Exception as error:  # noqa: BLE001 - the candle loop is not informed; CancelledError is not an Exception
+        _error(f"funding-error task stopped: {type(error).__name__}: {error}")
+
+
 async def _finish_open_interest(task: "asyncio.Task[None]", stop: asyncio.Event, grace_ms: int) -> None:
     """Give the task ``grace_ms`` of real time to end after ``stop``, then cancel it and wait for it."""
     stop.set()
@@ -639,6 +705,7 @@ async def _reconcile_and_collect(
     stop: asyncio.Event,
     backfill: BackfillConfig | None,
     oi_run: OpenInterestRun | None,
+    funding_run: FundingRateRun | None = None,
 ) -> int:
     inputs = ReconcileInputs(
         symbols=config.symbols,
@@ -667,6 +734,7 @@ async def _reconcile_and_collect(
     candle_ready = asyncio.Event()  # set when round one's post-check has ended: open interest may start (ADR-0003 P-9)
     activity = CandleWriteActivity()
     measurements = OpenInterestMeasurements()
+    funding_measurements = FundingRateMeasurements()
 
     async def report_post_check(report: RoundReport, lead_max: int | None, snapshot: asyncio.Event) -> None:
         try:
@@ -722,13 +790,24 @@ async def _reconcile_and_collect(
             else Backfiller(backfill, config, db, clock, sleep, _print_slice, _report_suspension)
         )
         hooks = None
+        durations: list[Callable[[int], None]] = []
         if oi_run is not None:
-            hooks = CandleWriteHooks(activity, measurements.record_candle_write)
+            durations.append(measurements.record_candle_write)
             oi_task = asyncio.create_task(
                 _open_interest_main(oi_run, db, clock, sleep, stop, candle_ready, activity, measurements),
                 name="open-interest",
             )
             stack.push_async_callback(_finish_open_interest, oi_task, stop, oi_run.stop_grace_ms)
+        if funding_run is not None:
+            durations.append(funding_measurements.record_candle_write)
+            funding_task = asyncio.create_task(
+                _funding_rate_main(funding_run, db, clock, sleep, stop, candle_ready, activity, funding_measurements),
+                name="funding-rate",
+            )
+            stack.push_async_callback(_finish_open_interest, funding_task, stop, funding_run.stop_grace_ms)
+        if durations:  # one dataset: its callback itself; several: a fan-out (a failing callback never reaches candles)
+            record = durations[0] if len(durations) == 1 else _fan_out(durations)
+            hooks = CandleWriteHooks(activity, record)
         outcome: LoopExit | FatalLoopError
         try:
             outcome = await run_collection_loop(
@@ -772,6 +851,7 @@ def _run_command(
     clock: Clock,
     sleep: Sleep,
     open_oi_source: OpenInterestOpenSource,
+    open_funding_source: FundingRateOpenSource = BinanceUsdmFundingRateSource.open,
 ) -> int:
     venue, collector = settings.venues[0], settings.collector
     config = LoopConfig(
@@ -788,6 +868,17 @@ def _run_command(
             _error(f"migrated to version {new_version} (from {old_version})")
         backfill = BackfillConfig(collector.backfill.days) if collector.backfill.enabled else None
         oi_run = _open_interest_run(settings, open_oi_source)
+        funding_run = _funding_rate_run(settings, open_funding_source)
+        if funding_run is not None:
+            warning = settings.funding_rate_capacity_warning()
+            if warning is not None:
+                _error(warning)
+            oi_budget = (
+                "off"
+                if settings.open_interest is None or not settings.open_interest.enabled
+                else str(settings.open_interest.budget_per_5min)
+            )
+            print(f"funding-budget funding={funding_run.config.budget_per_5min} open_interest={oi_budget}", flush=True)
         return asyncio.run(
             _run_loop(
                 config,
@@ -798,11 +889,29 @@ def _run_command(
                 sleep,
                 backfill,
                 oi_run,
+                funding_run,
             )
         )
     except (SourceError, StorageError, sqlite3.Error) as error:  # raised before the loop started
         _error(f"error: {error}")
         return EXIT_FAILED
+
+
+def _funding_rate_run(settings: Settings, open_funding_source: FundingRateOpenSource) -> FundingRateRun | None:
+    table = settings.funding_rate
+    if table is None or not table.enabled:
+        return None
+    venue = settings.venues[0]
+    config = FundingRateTaskConfig(
+        venue=venue.id,
+        symbols=venue.symbols,
+        publication_delay_ms=table.publication_delay_ms,
+        round_offset_ms=table.round_offset_ms,
+        budget_per_5min=table.budget_per_5min,
+        backfill_days=table.backfill_days,
+        recheck_ms=table.recheck_ms,
+    )
+    return FundingRateRun(config, open_funding_source, FUNDING_RATE_STOP_GRACE_MS)
 
 
 def _open_interest_run(settings: Settings, open_oi_source: OpenInterestOpenSource) -> OpenInterestRun | None:
@@ -953,7 +1062,9 @@ def main(
         except ConfigError as error:
             parser.error(f"config {args.config}: {error}")
         print(loaded.start_line(), flush=True)
-        return _run_command(loaded.settings, open_source, clock or SystemClock(), sleep, open_oi_source)
+        return _run_command(
+            loaded.settings, open_source, clock or SystemClock(), sleep, open_oi_source, open_funding_source
+        )
     try:
         if args.command == "fetch-oi-once":
             return _fetch_open_interest_once(args, open_oi_source, clock or SystemClock(), sleep)
