@@ -47,24 +47,27 @@ def conn(tmp_path: Path) -> sqlite3.Connection:
 
 
 def test_fresh_database_is_migrated_to_the_latest_version(conn: sqlite3.Connection) -> None:
-    assert migrate(conn, applied_at_ms=AT) == 2
+    assert migrate(conn, applied_at_ms=AT) == 3
     assert conn.execute("PRAGMA application_id").fetchone() == (APPLICATION_ID,)
     assert conn.execute("SELECT * FROM schema_migrations ORDER BY version").fetchall() == [
         (1, "schema_v1", M1.checksum, AT),
         (2, "open_interest", load_migrations()[1].checksum, AT),
+        (3, "funding_rate", load_migrations()[2].checksum, AT),
     ]
     tables = {name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"candles", "candle_conflicts", "unavailable_candles", "schema_migrations"} <= tables
     assert {"open_interest", "open_interest_conflicts"} <= tables
+    assert {"funding_rates", "funding_rate_conflicts", "funding_rate_verified"} <= tables
 
 
 def test_migrate_is_idempotent(conn: sqlite3.Connection) -> None:
     migrate(conn, applied_at_ms=AT)
     before = inventory(conn)
-    assert migrate(conn, applied_at_ms=AT + 1) == 2
+    assert migrate(conn, applied_at_ms=AT + 1) == 3
     assert conn.execute("SELECT version, applied_at_ms FROM schema_migrations ORDER BY version").fetchall() == [
         (1, AT),
         (2, AT),
+        (3, AT),
     ]
     assert inventory(conn) == before
 
@@ -290,11 +293,11 @@ def test_checksum_is_sha256_of_the_file_bytes() -> None:
 
 
 def test_migrated_database_matches_the_shipped_schema_fixture(
-    conn: sqlite3.Connection, schema_v2_conn: sqlite3.Connection
+    conn: sqlite3.Connection, schema_v3_conn: sqlite3.Connection
 ) -> None:
     migrate(conn, applied_at_ms=AT)
-    assert schema_sql(2)  # the fixture applied the same SQL directly
-    assert inventory(conn) == inventory(schema_v2_conn)
+    assert schema_sql(3)  # the fixture applied the same SQL directly
+    assert inventory(conn) == inventory(schema_v3_conn)
 
 
 V1_TABLES = {
@@ -304,8 +307,8 @@ V1_TABLES = {
 }
 
 
-def table_digest(conn: sqlite3.Connection, table: str) -> str:
-    rows = conn.execute(f"SELECT * FROM {table} ORDER BY {V1_TABLES[table]}").fetchall()
+def table_digest(conn: sqlite3.Connection, table: str, orders: dict[str, str] = V1_TABLES) -> str:
+    rows = conn.execute(f"SELECT * FROM {table} ORDER BY {orders[table]}").fetchall()
     return hashlib.sha256(repr(rows).encode()).hexdigest()
 
 
@@ -328,22 +331,66 @@ def test_upgrade_from_v1_keeps_every_v1_row(conn: sqlite3.Connection) -> None:
     before = {table: table_digest(conn, table) for table in V1_TABLES}
     assert conn.execute("SELECT count(*) FROM candles").fetchone() == (3,)
 
-    assert migrate(conn, applied_at_ms=AT + 1) == 2
-    assert versions(conn) == [1, 2]
+    assert migrate(conn, applied_at_ms=AT + 1) == 3
+    assert versions(conn) == [1, 2, 3]
     assert {table: table_digest(conn, table) for table in V1_TABLES} == before
 
     after = inventory(conn)
-    assert migrate(conn, applied_at_ms=AT + 2) == 2
+    assert migrate(conn, applied_at_ms=AT + 2) == 3
     assert inventory(conn) == after
-    assert versions(conn) == [1, 2]
+    assert versions(conn) == [1, 2, 3]
+
+
+V1_AND_V2_TABLES = {
+    **V1_TABLES,
+    "open_interest": "venue, symbol, period, time_ms",
+    "open_interest_conflicts": "conflict_id",
+}
+
+
+def test_upgrade_from_v2_keeps_every_v1_and_v2_row(conn: sqlite3.Connection) -> None:
+    migrations = load_migrations()
+    migrate(conn, applied_at_ms=AT, migrations=migrations[:2])
+    for offset in range(3):
+        conn.execute(
+            "INSERT INTO candles VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', ?, '1', '2', '1', '2', '3', NULL, 1)",
+            (1_792_676_700_000 + offset * 300_000,),
+        )
+        conn.execute(
+            "INSERT INTO open_interest VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', ?, '5', '6', 1)",
+            (1_792_676_700_000 + offset * 300_000,),
+        )
+    conn.execute(
+        "INSERT INTO candle_conflicts (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume,"
+        " turnover, first_seen_at_ms) VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', 1792676700000,"
+        " '1', '2', '1', '9', '3', NULL, 2)"
+    )
+    conn.execute(
+        "INSERT INTO unavailable_candles VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', 1792677600000,"
+        " 'EXCHANGE_NO_DATA', 3)"
+    )
+    conn.execute(
+        "INSERT INTO open_interest_conflicts (venue, symbol, period, time_ms, open_interest, open_interest_value,"
+        " first_seen_at_ms) VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', 1792676700000, '7', '8', 2)"
+    )
+    before = {table: table_digest(conn, table, V1_AND_V2_TABLES) for table in V1_AND_V2_TABLES}
+    assert conn.execute("SELECT count(*) FROM open_interest").fetchone() == (3,)
+
+    assert migrate(conn, applied_at_ms=AT + 1) == 3
+    assert versions(conn) == [1, 2, 3]
+    assert {table: table_digest(conn, table, V1_AND_V2_TABLES) for table in V1_AND_V2_TABLES} == before
+    assert conn.execute("SELECT count(*) FROM funding_rates").fetchone() == (0,)
+    assert migrate(conn, applied_at_ms=AT + 2) == 3
 
 
 def test_applied_version(conn: sqlite3.Connection, tmp_path: Path) -> None:
     assert applied_version(conn) == 0
     migrate(conn, applied_at_ms=AT, migrations=(M1,))
     assert applied_version(conn) == 1
-    migrate(conn, applied_at_ms=AT)
+    migrate(conn, applied_at_ms=AT, migrations=load_migrations()[:2])
     assert applied_version(conn) == 2
+    migrate(conn, applied_at_ms=AT)
+    assert applied_version(conn) == 3
 
     foreign = open_writer(tmp_path / "foreign.db")
     foreign.execute("CREATE TABLE other (a INTEGER)")

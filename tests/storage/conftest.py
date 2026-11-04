@@ -35,3 +35,12 @@ def schema_v2_conn(tmp_path: Path) -> Iterator[sqlite3.Connection]:
     conn.executescript(schema_sql(2))
     yield conn
     conn.close()
+
+
+@pytest.fixture
+def schema_v3_conn(tmp_path: Path) -> Iterator[sqlite3.Connection]:
+    """A writer connection on a fresh database with migrations 1 to 3 applied directly (not through the runner)."""
+    conn = open_writer(tmp_path / "market.db")
+    conn.executescript(schema_sql(3))
+    yield conn
+    conn.close()

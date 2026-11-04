@@ -81,7 +81,7 @@ def test_missing_empty_foreign_newer_and_corrupt_database_map_to_the_503_reasons
 
 
 def test_ready_returns_the_schema_version(tmp_path: Path) -> None:
-    assert read_ready(make_database(tmp_path / "market.db")) == SCHEMA_VERSION == 2
+    assert read_ready(make_database(tmp_path / "market.db")) == SCHEMA_VERSION == 3
 
 
 @pytest.mark.parametrize("reader", [read_ready, read_ingest])

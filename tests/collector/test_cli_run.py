@@ -508,7 +508,7 @@ def test_first_start_prints_the_migration_on_stderr(db: Path, capsys: pytest.Cap
     clock = FakeClock()
     assert run_cli(db, FakeSource(clock, forming_rows()), clock, stop_on_sleep(clock)) == 0
     captured = capsys.readouterr()
-    assert migration_lines(captured.err) == ["migrated to version 2 (from 0)"]
+    assert migration_lines(captured.err) == ["migrated to version 3 (from 0)"]
     assert "migrated" not in captured.out
 
 
@@ -518,7 +518,16 @@ def test_upgrade_from_v1_prints_from_one(db: Path, capsys: pytest.CaptureFixture
     conn.close()
     clock = FakeClock()
     assert run_cli(db, FakeSource(clock, forming_rows()), clock, stop_on_sleep(clock)) == 0
-    assert migration_lines(capsys.readouterr().err) == ["migrated to version 2 (from 1)"]
+    assert migration_lines(capsys.readouterr().err) == ["migrated to version 3 (from 1)"]
+
+
+def test_upgrade_from_v2_prints_from_two(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    conn = open_writer(db)
+    migrate(conn, applied_at_ms=1_792_677_000_000, migrations=load_migrations()[:2])
+    conn.close()
+    clock = FakeClock()
+    assert run_cli(db, FakeSource(clock, forming_rows()), clock, stop_on_sleep(clock)) == 0
+    assert migration_lines(capsys.readouterr().err) == ["migrated to version 3 (from 2)"]
 
 
 def test_start_on_a_current_database_prints_no_migration_line(db: Path, capsys: pytest.CaptureFixture[str]) -> None:

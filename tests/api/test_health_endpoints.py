@@ -124,7 +124,28 @@ def test_readiness_200_with_schema_version(tmp_path: Path) -> None:
     response = client_for(make_database(tmp_path / "market.db"), boom).get("/health/ready")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ready", "schema_version": 2}
+    assert response.json() == {"status": "ready", "schema_version": 3}
+
+
+def test_v2_database_answers_503_schema_mismatch(tmp_path: Path) -> None:
+    path = tmp_path / "market.db"
+    writer = open_writer(path)
+    migrate(writer, applied_at_ms=1_792_677_000_000, migrations=load_migrations()[:2])
+    writer.close()
+
+    response = client_for(path).get("/health/ready")
+
+    assert assert_error(response, 503, "not_ready")["details"] == {"reason": "schema_mismatch"}
+
+
+def test_api_built_for_version_2_answers_503_on_a_v3_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The P-15 deployment row: an API of the previous schema version against a version 3 database."""
+    path = make_database(tmp_path / "market.db")
+    monkeypatch.setattr("quasar_market_data.storage.schema.SCHEMA_VERSION", 2)
+
+    response = client_for(path).get("/health/ready")
+
+    assert assert_error(response, 503, "not_ready")["details"] == {"reason": "schema_mismatch"}
 
 
 @pytest.mark.parametrize(("reason", "make"), BROKEN)

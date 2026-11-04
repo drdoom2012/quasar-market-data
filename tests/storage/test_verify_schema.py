@@ -115,9 +115,21 @@ def test_verify_schema_never_writes(db: Path) -> None:
     assert hashlib.sha256(db.read_bytes()).hexdigest() == before
 
 
-def test_v2_code_refuses_a_v1_database(db: Path) -> None:
+def test_current_code_refuses_a_v1_database(db: Path) -> None:
     writer = open_writer(db)
     migrate(writer, applied_at_ms=AT, migrations=load_migrations()[:1])
+    reader = open_reader(db)
+    try:
+        with pytest.raises(SchemaMismatchError):
+            verify_schema(reader)
+    finally:
+        reader.close()
+        writer.close()
+
+
+def test_v3_code_refuses_a_v2_database(db: Path) -> None:
+    writer = open_writer(db)
+    migrate(writer, applied_at_ms=AT, migrations=load_migrations()[:2])
     reader = open_reader(db)
     try:
         with pytest.raises(SchemaMismatchError):
