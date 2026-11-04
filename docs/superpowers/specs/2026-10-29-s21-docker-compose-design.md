@@ -370,86 +370,54 @@ services:
 ```python
 import socket, struct, sys
 
-
 def tcp(h, p):
     try:
-        with socket.create_connection((h, p), timeout=3):
-            return "CONNECTED"
-    except OSError as e:
-        return f"FAIL {type(e).__name__}: {e}"
-
+        with socket.create_connection((h, p), timeout=3): return "CONNECTED"
+    except OSError as e: return f"FAIL {type(e).__name__}: {e}"
 
 def udp_dns(server):  # a reply proves UDP egress; silence alone proves nothing
     q = struct.pack(">HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0) + b"\x07example\x03com\x00" + struct.pack(">HH", 1, 1)
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.settimeout(3)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(3)
     try:
-        s.connect((server, 53))
-        s.send(q)
-        return f"REPLY {len(s.recv(512))} bytes"
-    except OSError as e:
-        return f"FAIL {type(e).__name__}: {e}"
-    finally:
-        s.close()
-
+        s.connect((server, 53)); s.send(q); return f"REPLY {len(s.recv(512))} bytes"
+    except OSError as e: return f"FAIL {type(e).__name__}: {e}"
+    finally: s.close()
 
 def resolve(n):
-    try:
-        return "RESOLVED " + ",".join(sorted({a[4][0] for a in socket.getaddrinfo(n, 443)}))
-    except OSError as e:
-        return f"FAIL {type(e).__name__}: {e}"
-
+    try: return "RESOLVED " + ",".join(sorted({a[4][0] for a in socket.getaddrinfo(n, 443)}))
+    except OSError as e: return f"FAIL {type(e).__name__}: {e}"
 
 def http(h, p):
     try:
         with socket.create_connection((h, p), timeout=3) as s:
-            s.sendall(b"GET / HTTP/1.0\r\nHost: x\r\n\r\n")
-            return "HTTP " + s.recv(64).split(b"\r\n")[0].decode()
-    except OSError as e:
-        return f"FAIL {type(e).__name__}: {e}"
-
+            s.sendall(b"GET / HTTP/1.0\r\nHost: x\r\n\r\n"); return "HTTP " + s.recv(64).split(b"\r\n")[0].decode()
+    except OSError as e: return f"FAIL {type(e).__name__}: {e}"
 
 def uds(path):
     try:
-        s = socket.socket(socket.AF_UNIX)
-        s.settimeout(3)
-        s.connect(path)
-        s.sendall(b"GET / HTTP/1.0\r\nHost: x\r\n\r\n")
-        return "HTTP " + s.recv(64).split(b"\r\n")[0].decode()
-    except OSError as e:
-        return f"FAIL {type(e).__name__}: {e}"
-
+        s = socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect(path)
+        s.sendall(b"GET / HTTP/1.0\r\nHost: x\r\n\r\n"); return "HTTP " + s.recv(64).split(b"\r\n")[0].decode()
+    except OSError as e: return f"FAIL {type(e).__name__}: {e}"
 
 m = sys.argv[1]
 if m == "egress":
-    print("tcp 1.1.1.1:443", tcp("1.1.1.1", 443))
-    print("tcp fapi.binance.com:443", tcp("fapi.binance.com", 443))
-    print("udp dns 1.1.1.1:53", udp_dns("1.1.1.1"))
-    print("resolve example.com", resolve("example.com"))
+    print("tcp 1.1.1.1:443", tcp("1.1.1.1", 443)); print("tcp fapi.binance.com:443", tcp("fapi.binance.com", 443))
+    print("udp dns 1.1.1.1:53", udp_dns("1.1.1.1")); print("resolve example.com", resolve("example.com"))
     routes = open("/proc/net/route").read().splitlines()[1:]
     print("default route", "PRESENT" if any(r.split()[1] == "00000000" for r in routes) else "ABSENT")
-elif m == "http":
-    print(http(sys.argv[2], int(sys.argv[3])))
-elif m == "uds":
-    print(uds(sys.argv[2]))
+elif m == "http": print(http(sys.argv[2], int(sys.argv[3])))
+elif m == "uds": print(uds(sys.argv[2]))
 ```
 
 `uds_server.py`:
 
 ```python
 import http.server, os, socketserver, sys
-
 path = sys.argv[1]
-if os.path.exists(path):
-    os.remove(path)
-
-
+if os.path.exists(path): os.remove(path)
 class S(socketserver.UnixStreamServer):
     def get_request(self):
-        c, _ = super().get_request()
-        return c, ("uds", 0)
-
-
+        c, _ = super().get_request(); return c, ("uds", 0)
 S(path, http.server.SimpleHTTPRequestHandler).serve_forever()
 ```
 
