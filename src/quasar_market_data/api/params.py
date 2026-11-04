@@ -1,4 +1,4 @@
-"""Raw query string -> request objects (contract sections 1, 5.1, 6.1.1, 6.3.1, 6.5.2 and 6.6.1), strict and free of I/O."""
+"""Raw query string -> request objects (contract sections 1, 5.1, 6.1.1, 6.3.1, 6.5.2, 6.6.1 and 6.7.2), strict and free of I/O."""
 
 import re
 from dataclasses import dataclass
@@ -7,6 +7,7 @@ from urllib.parse import parse_qsl, unquote
 
 from quasar_market_data.api.errors import RECEIVED_MAX_CHARS, ApiError, cut_received, invalid_parameter
 from quasar_market_data.domain.candle import MAX_SYMBOL_LENGTH
+from quasar_market_data.domain.funding_rate_coverage import MAX_FUNDING_WINDOW_MS
 from quasar_market_data.domain.indicators import IndicatorSpec, IndicatorSyntaxError, parse_indicators
 from quasar_market_data.domain.schedule import newest_expected_open_ms
 from quasar_market_data.domain.timeframe import Timeframe
@@ -33,6 +34,9 @@ _OPEN_INTEREST_NAMES: Final = ("venue", "symbol", "period", "start", "end", "lim
 _OPEN_INTEREST_REQUIRED: Final = ("venue", "symbol", "period", "start")
 _OPEN_INTEREST_COVERAGE_NAMES: Final = ("venue", "symbol", "period", "start", "end")
 _OPEN_INTEREST_COVERAGE_REQUIRED: Final = ("venue", "symbol", "period", "start", "end")
+_FUNDING_RATES_NAMES: Final = ("venue", "symbol", "start", "end", "limit")
+_FUNDING_RATES_REQUIRED: Final = ("venue", "symbol", "start")
+MIN_FUNDING_LIMIT: Final = 2  # a page never splits the (at most two) rows of one millisecond, contract 6.7.3
 _MALFORMED_ESCAPE: Final = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
@@ -93,6 +97,35 @@ def parse_candles_request(raw_query: bytes) -> CandlesRequest:
         _check_window(start, end)
 
     return CandlesRequest(venue, symbol, SERVED_TIMEFRAME, start, end, limit)
+
+
+@dataclass(frozen=True)
+class FundingRatesRequest:
+    venue: str
+    symbol: str
+    start: int
+    end: int | None
+    limit: int
+
+
+def parse_funding_rates_request(raw_query: bytes) -> FundingRatesRequest:
+    """Contract 6.7.2: the window is the closed interval ``[start, end]`` of unaligned instants, ``limit`` is 2 to 1000."""
+    values = _parse(raw_query, _FUNDING_RATES_NAMES, _FUNDING_RATES_REQUIRED)
+    venue, symbol = _venue_and_symbol(values)
+    start = _instant("start", values["start"])
+    end = _instant("end", values["end"]) if "end" in values else None
+    limit = _limit(values["limit"], MIN_FUNDING_LIMIT) if "limit" in values else DEFAULT_LIMIT
+    if end is not None:
+        if end < start:
+            raise invalid_parameter("end must not be before start", parameter="end", received=str(end))
+        if end - start > MAX_FUNDING_WINDOW_MS:
+            raise invalid_parameter(
+                f"the window must not exceed {MAX_FUNDING_WINDOW_MS // 86_400_000} days ({MAX_FUNDING_WINDOW_MS} ms)",
+                parameter="end",
+                received=str(end),
+                maximum=MAX_FUNDING_WINDOW_MS,
+            )
+    return FundingRatesRequest(venue, symbol, start, end, limit)
 
 
 def parse_open_interest_request(raw_query: bytes) -> OpenInterestRequest:
@@ -187,11 +220,7 @@ def _parse(raw_query: bytes, names: tuple[str, ...], required: tuple[str, ...]) 
     return values
 
 
-def _series_and_start(values: dict[str, str], label_name: str = "timeframe") -> tuple[str, str, int]:
-    """Validate venue, symbol, the timeframe (``period`` for open interest) and start, in that order.
-
-    The timeframe label is not returned (always served); ``label_name`` is the parameter's name in the request.
-    """
+def _venue_and_symbol(values: dict[str, str]) -> tuple[str, str]:
     venue = values["venue"]
     if venue != SERVED_VENUE:
         raise invalid_parameter(f"venue must be {SERVED_VENUE}", parameter="venue", received=venue)
@@ -204,6 +233,15 @@ def _series_and_start(values: dict[str, str], label_name: str = "timeframe") -> 
         raise invalid_parameter(
             "symbol must not contain whitespace or control characters", parameter="symbol", received=symbol
         )
+    return venue, symbol
+
+
+def _series_and_start(values: dict[str, str], label_name: str = "timeframe") -> tuple[str, str, int]:
+    """Validate venue, symbol, the timeframe (``period`` for open interest) and start, in that order.
+
+    The timeframe label is not returned (always served); ``label_name`` is the parameter's name in the request.
+    """
+    venue, symbol = _venue_and_symbol(values)
 
     if values[label_name] != SERVED_TIMEFRAME.label:
         raise invalid_parameter(
@@ -287,10 +325,20 @@ def _timestamp(name: str, text: str, *, maximum: int = MAX_TIMESTAMP_MS, unit: s
     return value
 
 
-def _limit(text: str) -> int:
-    value = _integer("limit", text)
-    if not 1 <= value <= MAX_LIMIT:
+def _instant(name: str, text: str) -> int:
+    """An epoch-millisecond instant of the valid range, not aligned to anything (contract 6.7.2)."""
+    value = _integer(name, text)
+    if not MIN_TIMESTAMP_MS <= value <= MAX_TIMESTAMP_MS:
         raise invalid_parameter(
-            f"limit must be between 1 and {MAX_LIMIT}", parameter="limit", received=text, maximum=MAX_LIMIT
+            f"{name} must be within [{MIN_TIMESTAMP_MS}, {MAX_TIMESTAMP_MS}]", parameter=name, received=text
+        )
+    return value
+
+
+def _limit(text: str, minimum: int = 1) -> int:
+    value = _integer("limit", text)
+    if not minimum <= value <= MAX_LIMIT:
+        raise invalid_parameter(
+            f"limit must be between {minimum} and {MAX_LIMIT}", parameter="limit", received=text, maximum=MAX_LIMIT
         )
     return value

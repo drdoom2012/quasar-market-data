@@ -20,6 +20,7 @@ from quasar_market_data.domain.funding_rate_span import (
     BEHIND_THRESHOLD_MS,
     DAY_MS,
     MAX_BACKFILL_DAYS,
+    MIN_BACKFILL_DAYS,
     Interval,
     history_pending,
     is_behind,
@@ -28,6 +29,21 @@ from quasar_market_data.domain.timestamps import MAX_TIMESTAMP_MS, ensure_timest
 
 MAX_FUNDING_WINDOW_MS: Final = MAX_BACKFILL_DAYS * DAY_MS  # contract 6.7.2 (decision FA2): 3 650 days
 QUIET_AFTER_MS: Final = 2 * DAY_MS  # contract 6.7.8: a series with no event for more than 48 h is quiet
+
+
+@dataclass(frozen=True)
+class FundingRateRule:
+    """What the API needs of the ``[funding_rate]`` table: the publication delay and the history depth."""
+
+    publication_delay_ms: int
+    backfill_days: int
+
+    def __post_init__(self) -> None:
+        behind_after_ms(self.publication_delay_ms)  # validates the type and the sign
+        if type(self.backfill_days) is not int:
+            raise TypeError(f"backfill_days must be int, got {type(self.backfill_days).__name__}")
+        if not MIN_BACKFILL_DAYS <= self.backfill_days <= MAX_BACKFILL_DAYS:
+            raise ValueError(f"backfill_days must be within [{MIN_BACKFILL_DAYS}, {MAX_BACKFILL_DAYS}]")
 
 
 class WindowState(StrEnum):
