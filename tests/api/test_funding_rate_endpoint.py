@@ -393,9 +393,16 @@ def test_the_other_v1_endpoints_are_byte_identical_with_funding_rows_present(tmp
 
 def test_a_handler_does_not_write(tmp_path: Path) -> None:
     path = seeded(tmp_path)
-    count = "SELECT COUNT(*) FROM funding_rates"
-    before = sqlite3.connect(path).execute(count).fetchone()
+
+    def count() -> tuple[object, ...]:
+        conn = sqlite3.connect(path)
+        try:
+            return conn.execute("SELECT COUNT(*) FROM funding_rates").fetchone()  # type: ignore[no-any-return]
+        finally:
+            conn.close()
+
+    before = count()
 
     client_for(path).get(f"/v1/funding-rates?{BASE}&start={ev(0)}&end={ev(4)}")
 
-    assert sqlite3.connect(path).execute(count).fetchone() == before
+    assert count() == before
