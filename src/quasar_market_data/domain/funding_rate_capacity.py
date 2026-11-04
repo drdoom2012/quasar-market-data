@@ -15,6 +15,7 @@ Integer arithmetic only.
 """
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Final
 
 MIN_BUDGET_PER_5MIN: Final = 50
@@ -26,6 +27,15 @@ LIMITER_WINDOW_MS: Final = 305_000  # 300 000 ms documented window + 5 000 ms gu
 ROUND_LAST_START_BUDGET_MS: Final = 3_555_000  # 3 600 000 - 15 000 deadline margin - 30 000 last-start margin
 _HOUR_MS: Final = 3_600_000
 MAX_FULL_GROUPS: Final = _HOUR_MS // LIMITER_WINDOW_MS
+
+
+class RequestClass(Enum):
+    """The three classes of funding requests (ADR-0004 P-9, P-10): ``R`` rounds and seeds (including the round's
+    server-time call), ``C`` catch-up, ``H`` history. ``R`` has the cap ``m``; ``C`` and ``H`` share ``b - m``."""
+
+    R = "R"
+    C = "C"
+    H = "H"
 
 
 class CapacityError(ValueError):
