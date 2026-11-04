@@ -68,10 +68,11 @@ class PageResult:
 class FundingRateExecutionError(Exception):
     """A page failed in the writer; ``late_events`` are the late events its committed part already stored."""
 
-    def __init__(self, cause: FundingRatePageError, late_events: tuple[FundingRateKey, ...]) -> None:
+    def __init__(self, cause: FundingRatePageError, late_events: tuple[FundingRateKey, ...], rows: int) -> None:
         super().__init__(str(cause))
         self.cause = cause
         self.late_events = late_events
+        self.rows = rows  # the page's rows, to tell its 100-row transactions apart in the measurements
 
 
 def _late(keys: Sequence[FundingRateKey], span: Interval | None) -> tuple[FundingRateKey, ...]:
@@ -133,7 +134,7 @@ async def execute_plan(
         report = await writer.write(rows, ingested_at_ms=now_ms, merge=merge)
     except FundingRatePageError as error:
         late = _late(error.partial.inserted_keys, span_planned) if forward else ()
-        raise FundingRateExecutionError(error, late) from error
+        raise FundingRateExecutionError(error, late, len(rows)) from error
     late_events = _late(report.inserted_keys, report.span_before) if forward else ()
     return PageResult(
         symbol=plan.symbol,

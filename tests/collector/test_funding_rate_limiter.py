@@ -502,6 +502,25 @@ def test_the_wait_is_rounded_up_to_a_whole_millisecond() -> None:
     run(scenario)
 
 
+def test_committed_is_counted_starts_plus_waiting_requests() -> None:
+    async def scenario() -> None:
+        t = ManualTime()
+        limiter = FundingRateLimiter(50, t, t.sleep)
+        grants: Grants = []
+        hold = asyncio.Event()
+        busy = [asyncio.create_task(use(limiter, t, C, grants, hold)) for _ in range(2)]
+        await t.settle()
+        assert limiter.committed(R, t.monotonic_ns()) == 0 and limiter.committed(C, t.monotonic_ns()) == 2
+        waiter = asyncio.create_task(use(limiter, t, R, grants))
+        await asyncio.sleep(0)
+        assert limiter.committed(R, t.monotonic_ns()) == 1 and limiter.committed(H, t.monotonic_ns()) == 2
+        hold.set()
+        await asyncio.gather(*busy, waiter)
+        assert limiter.committed(R, t.monotonic_ns()) == 1
+
+    run(scenario)
+
+
 def test_room_is_true_until_counted_plus_waiting_reaches_the_cap_for_each_group() -> None:
     async def scenario() -> None:
         t = ManualTime()

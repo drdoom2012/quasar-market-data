@@ -325,6 +325,7 @@ def test_the_late_events_of_a_failed_page_are_classified_with_the_planned_span()
             await go(rig, plan, span_planned=planned)
         inside = [k for k in raised.value.late_events if planned.from_ms <= k.funding_time_ms <= planned.through_ms]
         assert 1 <= len(inside) < 3 and raised.value.late_events == tuple(inside)
+        assert raised.value.rows > 3
         assert all(isinstance(key, FundingRateKey) for key in raised.value.late_events)
         assert raised.value.cause.committed_transactions == 1
 

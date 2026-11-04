@@ -34,10 +34,11 @@ packages = ["src/quasar_market_data"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers -m 'not live and not compose'"
+addopts = "--strict-markers -m 'not live and not compose and not simulation'"
 markers = [
     "live: tests that hit a live exchange (excluded by default)",
     "compose: tests that need a Docker engine (excluded by default)",
+    "simulation: long capacity simulations of the funding rate task (excluded by default; `make simulate`)",
 ]
 
 [tool.ruff]
@@ -150,6 +151,7 @@ source_modules = [
     "quasar_market_data.collector.funding_rate_reader",
     "quasar_market_data.collector.funding_rate_execution",
     "quasar_market_data.collector.funding_rate_measurements",
+    "quasar_market_data.collector.funding_rate_task",
 ]
 forbidden_modules = [
     "quasar_market_data.collector.rate_limiter",
@@ -198,6 +200,7 @@ forbidden_modules = [
     "quasar_market_data.collector.funding_rate_reader",
     "quasar_market_data.collector.funding_rate_execution",
     "quasar_market_data.collector.funding_rate_measurements",
+    "quasar_market_data.collector.funding_rate_task",
 ]
 
 [[tool.importlinter.contracts]]

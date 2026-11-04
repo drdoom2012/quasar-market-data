@@ -109,8 +109,11 @@ class FundingRateLimiter:
         Requests that are inside ``grant`` but have not recorded their start yet count as reserved, so a dispatcher
         that starts one worker per decision never over-reserves a group.
         """
-        group = self._group(request_class)
-        return self.starts_in_window(at_ns, request_class) + group.waiting < group.cap
+        return self.committed(request_class, at_ns) < self._group(request_class).cap
+
+    def committed(self, request_class: RequestClass, at_ns: int) -> int:
+        """Counted starts plus waiting requests of the class's group: what ``room`` compares with the cap."""
+        return self.starts_in_window(at_ns, request_class) + self._group(request_class).waiting
 
     def next_room_ns(self, request_class: RequestClass, at_ns: int) -> int:
         """The earliest instant at or after ``at_ns`` with room; ``at_ns`` itself when there is room now.
