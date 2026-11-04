@@ -201,6 +201,19 @@ CASES = {
     "collection_loop_importing_the_funding_reader_fails_candle_isolation": Case(
         "collector/collection_loop.py", f"import {PACKAGE}.collector.funding_rate_reader\n", CANDLE_ISOLATION_CONTRACT
     ),
+    "funding_execution_importing_shared_server_time_fails_funding_independence": Case(
+        "collector/funding_rate_execution.py",
+        f"import {PACKAGE}.collector.shared_server_time\n",
+        FUNDING_INDEPENDENCE_CONTRACT,
+    ),
+    "funding_measurements_importing_an_open_interest_module_fails_funding_independence": Case(
+        "collector/funding_rate_measurements.py",
+        f"import {PACKAGE}.collector.open_interest_measurements\n",
+        FUNDING_INDEPENDENCE_CONTRACT,
+    ),
+    "fetch_once_importing_funding_execution_fails_candle_isolation": Case(
+        "collector/fetch_once.py", f"import {PACKAGE}.collector.funding_rate_execution\n", CANDLE_ISOLATION_CONTRACT
+    ),
     "funding_writer_importing_candle_write_activity_is_allowed": Case(
         "collector/async_funding_rate_writer.py", f"import {PACKAGE}.collector.candle_write_activity\n", None
     ),

@@ -148,6 +148,8 @@ source_modules = [
     "quasar_market_data.collector.extension_pause",
     "quasar_market_data.collector.fetch_funding_rate_once",
     "quasar_market_data.collector.funding_rate_reader",
+    "quasar_market_data.collector.funding_rate_execution",
+    "quasar_market_data.collector.funding_rate_measurements",
 ]
 forbidden_modules = [
     "quasar_market_data.collector.rate_limiter",
@@ -194,6 +196,8 @@ forbidden_modules = [
     "quasar_market_data.collector.funding_rate_writer",
     "quasar_market_data.collector.async_funding_rate_writer",
     "quasar_market_data.collector.funding_rate_reader",
+    "quasar_market_data.collector.funding_rate_execution",
+    "quasar_market_data.collector.funding_rate_measurements",
 ]
 
 [[tool.importlinter.contracts]]
