@@ -54,6 +54,7 @@ class _Group:
     cap: int
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     starts: deque[int] = field(default_factory=deque)
+    waiting: int = 0  # requests inside ``grant`` whose start is not recorded yet (a reservation for the dispatcher)
 
 
 class FundingRateLimiter:
@@ -67,6 +68,7 @@ class FundingRateLimiter:
         self._clock = clock
         self._sleep = sleep
         self._slots = asyncio.Semaphore(max_in_flight)
+        self._peak = 0
 
     def _group(self, request_class: RequestClass) -> _Group:
         if type(request_class) is not RequestClass:
@@ -75,17 +77,23 @@ class FundingRateLimiter:
 
     @asynccontextmanager
     async def _granted(self, group: _Group) -> AsyncIterator[None]:
-        async with group.lock:
-            while True:
-                now = self._clock.monotonic_ns()
-                while group.starts and group.starts[0] + _WINDOW_NS <= now:
-                    group.starts.popleft()
-                if len(group.starts) < group.cap:
-                    break
-                remaining_ns = group.starts[0] + _WINDOW_NS - now
-                await self._sleep(-(-remaining_ns // _NS_PER_MS))
-            await self._slots.acquire()  # cancelled here: nothing recorded, the lock is released by ``async with``
-            group.starts.append(self._clock.monotonic_ns())
+        group.waiting += 1  # no await before this line: a started request reserves its place at once
+        try:
+            async with group.lock:
+                while True:
+                    now = self._clock.monotonic_ns()
+                    while group.starts and group.starts[0] + _WINDOW_NS <= now:
+                        group.starts.popleft()
+                    if len(group.starts) < group.cap:
+                        break
+                    remaining_ns = group.starts[0] + _WINDOW_NS - now
+                    await self._sleep(-(-remaining_ns // _NS_PER_MS))
+                await self._slots.acquire()  # cancelled here: nothing recorded, the lock is released by ``async with``
+                recorded = self._clock.monotonic_ns()
+                group.starts.append(recorded)
+                self._peak = max(self._peak, self.starts_in_window(recorded))
+        finally:
+            group.waiting -= 1  # the start is recorded or the wait ended: the reservation is replaced or gone
         try:
             yield
         finally:
@@ -94,6 +102,36 @@ class FundingRateLimiter:
     def grant(self, request_class: RequestClass) -> AbstractAsyncContextManager[None]:
         """Async context manager: room in the class's group, a slot, then the start is recorded."""
         return self._granted(self._group(request_class))
+
+    def room(self, request_class: RequestClass, at_ns: int) -> bool:
+        """Whether a new request of the class's group would find room: counted starts plus waiting requests < cap.
+
+        Requests that are inside ``grant`` but have not recorded their start yet count as reserved, so a dispatcher
+        that starts one worker per decision never over-reserves a group.
+        """
+        group = self._group(request_class)
+        return self.starts_in_window(at_ns, request_class) + group.waiting < group.cap
+
+    def next_room_ns(self, request_class: RequestClass, at_ns: int) -> int:
+        """The earliest instant at or after ``at_ns`` with room; ``at_ns`` itself when there is room now.
+
+        When the group is full the answer is the instant the oldest counted start that must leave does (``s + 305 s``).
+        When waiting requests alone fill the group no instant is known (their starts are not recorded yet): the
+        answer is then one window ahead, an upper bound; the caller also wakes when a request ends.
+        """
+        group = self._group(request_class)
+        counted = sorted(start for start in group.starts if start + _WINDOW_NS > at_ns)
+        missing = len(counted) + group.waiting - group.cap + 1  # starts that must leave before there is room
+        if missing <= 0:
+            return at_ns
+        if missing > len(counted):
+            return at_ns + _WINDOW_NS
+        return counted[missing - 1] + _WINDOW_NS
+
+    def peak_starts(self) -> int:
+        """The largest total of counted starts seen at any grant since the previous call; then reset."""
+        peak, self._peak = self._peak, 0
+        return peak
 
     def starts_in_window(self, at_ns: int, request_class: RequestClass | None = None) -> int:
         """Counted starts whose window still covers ``at_ns`` (a start at ``s`` counts while ``at_ns < s + 305 s``).
