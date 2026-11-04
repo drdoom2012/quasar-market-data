@@ -156,7 +156,7 @@ def test_collector_writes_and_the_api_process_reads(
     # (2) the Collector (this test) creates the database; the same process now serves it
     make_database(server.db, candles=[slot(0), slot(1), slot(2)])
     status, _headers, body = get(server.port, "/health/ready")
-    assert (status, body) == (200, {"status": "ready", "schema_version": 2})
+    assert (status, body) == (200, {"status": "ready", "schema_version": 3})
     status, _headers, body = get(server.port, "/health/ingest")
     assert status == 200
     assert body["scope"] == "stored_series"

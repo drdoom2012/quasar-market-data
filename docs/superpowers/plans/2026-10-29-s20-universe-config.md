@@ -132,81 +132,142 @@ def test_valid_text_parses_to_every_value() -> None:
     assert s.collector == CollectorSettings(100, 4, 100, Backfill(True, 30))
     assert s.api == ApiSettings("127.0.0.1", 8000)
 
+
 def test_instruments_are_sorted_by_triple() -> None:
     s = parse_settings(config_text(symbols=("ETH/USDT:USDT", "BTC/USDT:USDT")), base_dir=BASE)
-    assert s.instruments() == (Instrument("binance-usdm", "BTC/USDT:USDT", "5m"),
-                               Instrument("binance-usdm", "ETH/USDT:USDT", "5m"))
+    assert s.instruments() == (
+        Instrument("binance-usdm", "BTC/USDT:USDT", "5m"),
+        Instrument("binance-usdm", "ETH/USDT:USDT", "5m"),
+    )
 
-@pytest.mark.parametrize("key, line", LEAF_LINES)   # one case per leaf key: ("rule.lag_threshold_ms", "lag_threshold_ms = 60000\n"), …
+
+@pytest.mark.parametrize(
+    "key, line", LEAF_LINES
+)  # one case per leaf key: ("rule.lag_threshold_ms", "lag_threshold_ms = 60000\n"), …
 def test_every_key_is_required(key: str, line: str) -> None:
     with pytest.raises(ConfigError) as e:
         parse_settings(VALID.replace(line, "", 1), base_dir=BASE)
     assert e.value.key == key and "missing" in e.value.problem
 
+
 @pytest.mark.parametrize("table", ["database", "rule", "collector", "collector.backfill", "api"])
-def test_a_missing_table_names_it(table: str) -> None: ...   # drop the whole table → e.value.key == table
+def test_a_missing_table_names_it(table: str) -> None: ...  # drop the whole table → e.value.key == table
+
 
 @pytest.mark.parametrize("where, key", [("[rule]", "rule.extra"), ("[api]", "api.extra"), ("", "extra"), ...])
-def test_an_unknown_key_is_an_error(where: str, key: str) -> None: ...   # insert "extra = 1" → e.value.key == key
+def test_an_unknown_key_is_an_error(where: str, key: str) -> None: ...  # insert "extra = 1" → e.value.key == key
 
-@pytest.mark.parametrize("values, key", [
-    ({"limit": 0}, "collector.limit"), ({"limit": 1001}, "collector.limit"),
-    ({"backfill_days": 0}, "collector.backfill.days"), ({"backfill_days": 366}, "collector.backfill.days"),
-    ({"port": 0}, "api.port"), ({"port": 65536}, "api.port"),
-    ({"publication_delay_ms": -1}, "rule.publication_delay_ms"), ({"publication_delay_ms": 300_001}, "rule.publication_delay_ms"),
-    ({"lag_threshold_ms": -1}, "rule.lag_threshold_ms"), ({"lag_threshold_ms": 900_001}, "rule.lag_threshold_ms"),
-    ({"max_concurrency": 0}, "collector.max_concurrency"), ({"min_request_interval_ms": -1}, "collector.min_request_interval_ms"),
-    ({"host": ""}, "api.host"),
-])
+
+@pytest.mark.parametrize(
+    "values, key",
+    [
+        ({"limit": 0}, "collector.limit"),
+        ({"limit": 1001}, "collector.limit"),
+        ({"backfill_days": 0}, "collector.backfill.days"),
+        ({"backfill_days": 366}, "collector.backfill.days"),
+        ({"port": 0}, "api.port"),
+        ({"port": 65536}, "api.port"),
+        ({"publication_delay_ms": -1}, "rule.publication_delay_ms"),
+        ({"publication_delay_ms": 300_001}, "rule.publication_delay_ms"),
+        ({"lag_threshold_ms": -1}, "rule.lag_threshold_ms"),
+        ({"lag_threshold_ms": 900_001}, "rule.lag_threshold_ms"),
+        ({"max_concurrency": 0}, "collector.max_concurrency"),
+        ({"min_request_interval_ms": -1}, "collector.min_request_interval_ms"),
+        ({"host": ""}, "api.host"),
+    ],
+)
 def test_out_of_bound_values(values: dict[str, Any], key: str) -> None: ...
 
-def test_the_bounds_themselves_are_valid() -> None: ...   # limit 1000, days 1 and 365, port 1 and 65535, lag 0 and 900_000,
-                                                          # delay 0 and 300_000 each with limit = needed(delay) (below)
+
+def test_the_bounds_themselves_are_valid() -> None:
+    ...  # limit 1000, days 1 and 365, port 1 and 65535, lag 0 and 900_000,
+    # delay 0 and 300_000 each with limit = needed(delay) (below)
+
 
 def needed(delay: int) -> int:
-    return steady_state_limit_needed(delay, Timeframe("5m").milliseconds)   # never a hand-picked number
+    return steady_state_limit_needed(delay, Timeframe("5m").milliseconds)  # never a hand-picked number
 
-@pytest.mark.parametrize("delay", [0, 1, 15_000, 299_999, 300_000])   # 0 and 1 straddle a step of the formula
+
+@pytest.mark.parametrize("delay", [0, 1, 15_000, 299_999, 300_000])  # 0 and 1 straddle a step of the formula
 def test_the_smallest_limit_a_delay_needs_is_accepted_and_one_less_is_refused(delay: int) -> None:
-    parse_settings(config_text(publication_delay_ms=delay, limit=needed(delay)), base_dir=BASE)   # accepted
+    parse_settings(config_text(publication_delay_ms=delay, limit=needed(delay)), base_dir=BASE)  # accepted
     with pytest.raises(ConfigError) as e:
         parse_settings(config_text(publication_delay_ms=delay, limit=needed(delay) - 1), base_dir=BASE)
     assert e.value.key == "collector.limit" and f"needs limit >= {needed(delay)}" in e.value.problem
 
-def test_the_largest_delay_with_the_largest_limit_is_accepted() -> None: ...   # delay 300_000, limit 1000
-def test_needed_grows_with_the_delay() -> None:
-    assert needed(0) < needed(1) and needed(1) <= needed(300_000) <= 1000   # pins the shape the cases above rely on
 
-@pytest.mark.parametrize("old, new, key", [   # Review Focus 2
-    ("port = 8000", "port = true", "api.port"), ("limit = 100", "limit = 100.0", "collector.limit"),
-    ("enabled = true", 'enabled = "true"', "collector.backfill.enabled"), ("days = 30", "days = 30.5", "collector.backfill.days"),
-    ("enabled = true", "enabled = 1", "collector.backfill.enabled"), ('host = "127.0.0.1"', "host = 1", "api.host"),
-])
+def test_the_largest_delay_with_the_largest_limit_is_accepted() -> None: ...  # delay 300_000, limit 1000
+def test_needed_grows_with_the_delay() -> None:
+    assert needed(0) < needed(1) and needed(1) <= needed(300_000) <= 1000  # pins the shape the cases above rely on
+
+
+@pytest.mark.parametrize(
+    "old, new, key",
+    [  # Review Focus 2
+        ("port = 8000", "port = true", "api.port"),
+        ("limit = 100", "limit = 100.0", "collector.limit"),
+        ("enabled = true", 'enabled = "true"', "collector.backfill.enabled"),
+        ("days = 30", "days = 30.5", "collector.backfill.days"),
+        ("enabled = true", "enabled = 1", "collector.backfill.enabled"),
+        ('host = "127.0.0.1"', "host = 1", "api.host"),
+    ],
+)
 def test_wrong_types(old: str, new: str, key: str) -> None: ...
 
-def test_symbols_must_be_a_non_empty_array_without_duplicates() -> None: ...   # (), "BTC/USDT:USDT" as a string, a duplicate → key "venues[0].symbols"
+
+def test_symbols_must_be_a_non_empty_array_without_duplicates() -> (
+    None
+): ...  # (), "BTC/USDT:USDT" as a string, a duplicate → key "venues[0].symbols"
+
 
 @pytest.mark.parametrize("symbol", ["1000PEPE/USDT:USDT", "我踏马来了/USDT:USDT", "BTC/USDT:USDT"])
-def test_canonical_usdt_symbols_load(symbol: str) -> None: ...   # Review Focus 1
+def test_canonical_usdt_symbols_load(symbol: str) -> None: ...  # Review Focus 1
 
-@pytest.mark.parametrize("symbol", ["BTC/USDT", "BTC/USDC:USDC", "BTC/USDT:USDC", "BTC USDT/USDT:USDT",
-                                    "BTC/USDT:USDT ", "/USDT:USDT", "A" * 55 + "/USDT:USDT", "BTC/USDT:USDT\n"])
-def test_non_canonical_symbols_are_refused(symbol: str) -> None: ...   # key "venues[0].symbols[0]"
 
-def test_a_second_venue_is_not_supported_yet() -> None: ...   # append a second [[venues]] → "not supported yet (S22)" in problem, key "venues"
-def test_zero_venues_is_an_error() -> None: ...                 # "venues = []" in place of the table → key "venues"
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        "BTC/USDT",
+        "BTC/USDC:USDC",
+        "BTC/USDT:USDC",
+        "BTC USDT/USDT:USDT",
+        "BTC/USDT:USDT ",
+        "/USDT:USDT",
+        "A" * 55 + "/USDT:USDT",
+        "BTC/USDT:USDT\n",
+    ],
+)
+def test_non_canonical_symbols_are_refused(symbol: str) -> None: ...  # key "venues[0].symbols[0]"
+
+
+def test_a_second_venue_is_not_supported_yet() -> (
+    None
+): ...  # append a second [[venues]] → "not supported yet (S22)" in problem, key "venues"
+def test_zero_venues_is_an_error() -> None: ...  # "venues = []" in place of the table → key "venues"
 @pytest.mark.parametrize("venue", ["bybit", "Binance-USDM"])
-def test_another_venue_id_is_not_supported_yet(venue: str) -> None: ...   # key "venues[0].id", "S22" in problem
+def test_another_venue_id_is_not_supported_yet(venue: str) -> None: ...  # key "venues[0].id", "S22" in problem
 @pytest.mark.parametrize("timeframes", ['["1m"]', '["5m", "1m"]', '["5m", "5m"]', "[]"])
-def test_timeframes_other_than_5m_are_not_supported_yet(timeframes: str) -> None: ...   # key "venues[0].timeframes"
+def test_timeframes_other_than_5m_are_not_supported_yet(timeframes: str) -> None: ...  # key "venues[0].timeframes"
 
-def test_a_duplicate_key_and_a_syntax_error_are_config_errors() -> None: ...   # tomllib.TOMLDecodeError → ConfigError, key "file"
-def test_empty_text_reports_the_first_missing_table() -> None: ...             # "" → ConfigError, key "database"
 
-@pytest.mark.parametrize("path, expected", [("../data/q.db", "/data/q.db"), ("a/./b/../q.db", "/cfg/a/q.db"),
-                                            ("/abs/q.db", "/abs/q.db"), ("~/q.db", "/cfg/~/q.db")])
-def test_database_path_is_resolved_against_base_dir(path: str, expected: str) -> None: ...   # Review Focus 4
-def test_an_empty_database_path_is_an_error() -> None: ...   # key "database.path"
+def test_a_duplicate_key_and_a_syntax_error_are_config_errors() -> (
+    None
+): ...  # tomllib.TOMLDecodeError → ConfigError, key "file"
+def test_empty_text_reports_the_first_missing_table() -> None: ...  # "" → ConfigError, key "database"
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        ("../data/q.db", "/data/q.db"),
+        ("a/./b/../q.db", "/cfg/a/q.db"),
+        ("/abs/q.db", "/abs/q.db"),
+        ("~/q.db", "/cfg/~/q.db"),
+    ],
+)
+def test_database_path_is_resolved_against_base_dir(path: str, expected: str) -> None: ...  # Review Focus 4
+def test_an_empty_database_path_is_an_error() -> None: ...  # key "database.path"
+
 
 def test_bounds_equal_the_switch_bounds_they_replace() -> None:
     assert settings.MAX_LIMIT == fetch_once.MAX_LIMIT
@@ -263,33 +324,49 @@ def test_the_committed_file_loads() -> None:
     s = loaded.settings
     assert s.database_path == REPO_ROOT / "data" / "quasar.db"
     assert s.venues[0].symbols == TEN_SYMBOLS
-    assert (s.rule, s.collector, s.api) == (Rule(15_000, 60_000), CollectorSettings(100, 4, 100, Backfill(True, 30)),
-                                            ApiSettings("127.0.0.1", 8000))   # today's switch values (spec 5.3)
+    assert (s.rule, s.collector, s.api) == (
+        Rule(15_000, 60_000),
+        CollectorSettings(100, 4, 100, Backfill(True, 30)),
+        ApiSettings("127.0.0.1", 8000),
+    )  # today's switch values (spec 5.3)
 
-def test_the_hash_is_of_the_bytes_read(tmp_path: Path) -> None: ...   # == hashlib.sha256(path.read_bytes()).hexdigest()
+
+def test_the_hash_is_of_the_bytes_read(tmp_path: Path) -> None: ...  # == hashlib.sha256(path.read_bytes()).hexdigest()
+
 
 def test_the_resolved_database_path_does_not_depend_on_the_working_directory(tmp_path, monkeypatch) -> None:
-    cfg = write_config(tmp_path / "conf", database_path="../data/q.db"); (tmp_path / "data").mkdir()
+    cfg = write_config(tmp_path / "conf", database_path="../data/q.db")
+    (tmp_path / "data").mkdir()
     seen = set()
-    for cwd in (tmp_path, tmp_path / "conf", tmp_path / "elsewhere"):   # mkdir elsewhere first
-        monkeypatch.chdir(cwd); seen.add(load_settings(cfg).settings.database_path)
+    for cwd in (tmp_path, tmp_path / "conf", tmp_path / "elsewhere"):  # mkdir elsewhere first
+        monkeypatch.chdir(cwd)
+        seen.add(load_settings(cfg).settings.database_path)
     assert seen == {tmp_path / "data" / "q.db"}
 
-def test_a_relative_config_from_two_working_directories_names_the_same_database(tmp_path, monkeypatch) -> None: ...
+
+def test_a_relative_config_from_two_working_directories_names_the_same_database(tmp_path, monkeypatch) -> None:
+    ...
     # chdir(tmp_path) + Path("conf/quasar.toml"), chdir(tmp_path/"conf") + Path("quasar.toml") → equal database_path
 
-def test_a_symlinked_config_resolves_against_the_real_files_directory(tmp_path: Path) -> None: ...
+
+def test_a_symlinked_config_resolves_against_the_real_files_directory(tmp_path: Path) -> None:
+    ...
     # real file in tmp_path/real with "q.db"; symlink tmp_path/link/quasar.toml → database_path == tmp_path/"real"/"q.db"
+
 
 def test_an_absolute_database_path_stays_absolute(tmp_path: Path) -> None: ...
 
+
 def test_a_missing_database_directory_shows_the_resolved_path(tmp_path: Path) -> None:
     cfg = write_config(tmp_path, database_path="nope/q.db")
-    with pytest.raises(ConfigError) as e: load_settings(cfg)
+    with pytest.raises(ConfigError) as e:
+        load_settings(cfg)
     assert e.value.key == "database.path" and str(tmp_path / "nope") in e.value.problem
 
-@pytest.mark.parametrize("make", [missing_file, a_directory, non_utf8_bytes])   # Review Focus 3
-def test_unreadable_files_are_config_errors(tmp_path: Path, make: Callable[[Path], Path]) -> None: ...   # key "file"
+
+@pytest.mark.parametrize("make", [missing_file, a_directory, non_utf8_bytes])  # Review Focus 3
+def test_unreadable_files_are_config_errors(tmp_path: Path, make: Callable[[Path], Path]) -> None: ...  # key "file"
+
 
 def test_start_line_names_path_hash_and_database(tmp_path: Path) -> None: ...
 ```
