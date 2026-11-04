@@ -13,12 +13,12 @@ from quasar_market_data.domain.funding_rate_scheduler import (
     SeriesStatus,
     select_next,
 )
-from quasar_market_data.domain.funding_rate_span import DAY_MS, HISTORY_CHUNK_MS, Interval
+from quasar_market_data.domain.funding_rate_span import DAY_MS, MAX_BACKFILL_DAYS, Interval
 
 HOUR = 3_600_000
 B_NOW = 1_793_836_800_000
 RECHECK = 86_400_000
-DAYS = 365
+DAYS = MAX_BACKFILL_DAYS  # the deepest history the configuration allows: 30 days (ADR-0004 A-4)
 NOW = 1_000_000
 
 
@@ -175,22 +175,23 @@ def test_a_continuing_series_is_not_an_r_candidate() -> None:
     assert pick([finished("A", continuing_from_ms=B_NOW - 8 * HOUR)], ch_room=False) is None
 
 
-def test_class_h_plans_the_exact_ninety_day_chunk_and_the_last_chunk_ends_at_the_target() -> None:
+def test_class_h_plans_the_whole_missing_depth_as_one_range_that_ends_at_the_target() -> None:
     span = Interval(B_NOW - 5 * DAY_MS, B_NOW - HOUR)
     selection = pick([status("A", span=span)], round_active=False)
     assert selection is not None
     plan = selection.plan
-    assert plan.kind == "H" and plan.request_class is RequestClass.H
-    assert (plan.start_ms, plan.end_ms) == (span.from_ms - HISTORY_CHUNK_MS, span.from_ms - 1)
-    assert plan.chunk == HistoryChunk(plan.start_ms, plan.end_ms, plan.start_ms)
     target = span.through_ms - DAYS * DAY_MS
+    assert plan.kind == "H" and plan.request_class is RequestClass.H
+    assert (plan.start_ms, plan.end_ms) == (target, span.from_ms - 1)  # no split: the depth is at most 30 days
+    assert plan.chunk == HistoryChunk(plan.start_ms, plan.end_ms, plan.start_ms)
+    assert plan.end_ms - plan.start_ms + 1 <= MAX_BACKFILL_DAYS * DAY_MS
     near = Interval(target + 10 * DAY_MS, span.through_ms)
     last = pick([status("A", span=near)], round_active=False)
     assert last is not None and last.plan.start_ms == target and last.plan.end_ms == near.from_ms - 1
 
 
 def test_a_chunk_in_progress_continues_with_its_next_page() -> None:
-    chunk = HistoryChunk(B_NOW - 100 * DAY_MS, B_NOW - 10 * DAY_MS, B_NOW - 50 * DAY_MS)
+    chunk = HistoryChunk(B_NOW - 20 * DAY_MS, B_NOW - 10 * DAY_MS, B_NOW - 15 * DAY_MS)
     selection = pick([status("A", history_chunk=chunk)], round_active=False)
     assert selection is not None
     assert (selection.plan.start_ms, selection.plan.end_ms, selection.plan.chunk) == (
@@ -201,7 +202,7 @@ def test_a_chunk_in_progress_continues_with_its_next_page() -> None:
 
 
 def test_history_order_chunk_in_progress_then_never_served_then_last_served_then_symbol() -> None:
-    chunk = HistoryChunk(B_NOW - 100 * DAY_MS, B_NOW - 10 * DAY_MS, B_NOW - 50 * DAY_MS)
+    chunk = HistoryChunk(B_NOW - 20 * DAY_MS, B_NOW - 10 * DAY_MS, B_NOW - 15 * DAY_MS)
     series = [
         status("A", last_served=1),
         status("B", last_served=5, never_served=True),

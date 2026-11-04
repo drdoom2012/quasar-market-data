@@ -5,6 +5,8 @@ from collections.abc import Sequence
 from tools.symbol_overview.model import (
     BUCKET_SLOTS,
     BUCKETS,
+    DAY_MS,
+    MAX_FUNDING_WINDOW_MS,
     MAX_TS_MS,
     MIN_TS_MS,
     OI_STATE_CHARS,
@@ -13,6 +15,8 @@ from tools.symbol_overview.model import (
     STRIP_RANK,
     TF_MS,
     WINDOW_SLOTS,
+    FundingRule,
+    FundingWindow,
     Run,
     Window,
 )
@@ -92,3 +96,25 @@ def build_open_interest_strip(runs: Sequence[Run], oldest_time_ms: int, oi_windo
             if OI_STRIP_RANK.index(char) > OI_STRIP_RANK.index(buckets[k]):
                 buckets[k] = char
     return "".join(buckets)
+
+
+def funding_window(window: Window, rule: FundingRule, as_of_ms: int) -> FundingWindow:
+    """The funding window ``[start, end]`` (inclusive), design 4.1.
+
+    ``end = as_of - behind_after_ms + 1``: by the contract's rule a series is not behind iff ``as_of - T <
+    behind_after_ms``, i.e. iff ``T >= end``, so ``end <= verified_through_ms`` holds exactly for the series that are
+    not behind. ``start`` is the start of the 30-day window, but not before ``backfill_days`` back: the Collector
+    never verifies deeper, and a window that starts before that could never be ``verified``.
+    Raises ``ValueError`` when the window cannot be built.
+    """
+    if rule.behind_after_ms < 0 or rule.backfill_days < 1:
+        raise ValueError("behind_after_ms must be >= 0 and backfill_days >= 1")
+    start = max(window.start, as_of_ms - rule.backfill_days * DAY_MS)
+    end = as_of_ms - rule.behind_after_ms + 1
+    if not (MIN_TS_MS <= start <= MAX_TS_MS and MIN_TS_MS <= end <= MAX_TS_MS):
+        raise ValueError(f"the funding window [{start}, {end}] is outside the valid time range")
+    if end < start:
+        raise ValueError(f"the funding window [{start}, {end}] is empty")
+    if end - start > MAX_FUNDING_WINDOW_MS:
+        raise ValueError("the funding window is longer than 365 days")
+    return FundingWindow(start, end)

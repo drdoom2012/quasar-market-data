@@ -72,7 +72,7 @@ from quasar_market_data.domain.funding_rate_scheduler import (
     SeriesStatus,
     select_next,
 )
-from quasar_market_data.domain.funding_rate_span import HISTORY_CHUNK_MS, Interval, history_pending, is_behind
+from quasar_market_data.domain.funding_rate_span import Interval, history_pending, is_behind
 from quasar_market_data.domain.funding_rate_suspension import (
     FailureRecord,
     on_failure,
@@ -293,7 +293,7 @@ class _FundingRateTask:
     async def _start_up(self) -> None:
         config = self.config
         estimate = self.clock.wall_ms() - config.publication_delay_ms
-        totals = [0, 0, 0, 0]
+        totals = [0, 0, 0]
         for index, symbol in enumerate(config.symbols):
             if index % 16 == 0:
                 await asyncio.sleep(0)  # reading 1 000 series is I/O work: let the candle loop run in between
@@ -302,27 +302,21 @@ class _FundingRateTask:
             state.span, state.verified_at_ms = facts.span, facts.verified_at_ms
             behind = facts.span is not None and is_behind(estimate, facts.span)
             pending = facts.span is not None and history_pending(facts.span, config.backfill_days)
-            chunks = 0
-            if facts.span is not None and pending:
-                target = facts.span.through_ms - config.backfill_days * 86_400_000
-                chunks = -(-(facts.span.from_ms - target) // HISTORY_CHUNK_MS)
             totals[0] += facts.stored_rows
             totals[1] += facts.conflicted_events
             totals[2] += int(behind)
-            totals[3] += chunks
             span_text = "none" if facts.span is None else f"{facts.span.from_ms}..{facts.span.through_ms}"
             self.emit(
                 f"funding-reconcile symbol={symbol} state={'unseeded' if facts.span is None else 'active'}"
                 f" span={span_text} verified_at_ms={facts.verified_at_ms if facts.verified_at_ms is not None else 'none'}"
                 f" stored={facts.stored_rows} conflicted_events={facts.conflicted_events}"
                 f" behind_estimate={'yes' if behind else 'no'} history_pending={'yes' if pending else 'no'}"
-                f" history_chunks_planned={chunks}"
             )
             if self.stop.is_set():
                 return
         self.emit(
             f"funding-reconcile summary symbols={len(config.symbols)} stored={totals[0]} conflicted_events={totals[1]}"
-            f" behind_estimate={totals[2]} history_chunks_planned={totals[3]}"
+            f" behind_estimate={totals[2]}"
         )
         now = self.clock.wall_ms()
         plan = next_round(now, None, config.round_offset_ms)

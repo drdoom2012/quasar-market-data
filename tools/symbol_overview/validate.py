@@ -9,6 +9,9 @@ from typing import Any, Final, TypeGuard
 
 from tools.symbol_overview.model import (
     CALL_TIMEOUT_MS,
+    FUNDING_LIMIT,
+    FUNDING_STATUSES,
+    FUNDING_WINDOW_STATES,
     INVALID_CODES,
     MAX_BODY_BYTES,
     MAX_TS_MS,
@@ -19,6 +22,10 @@ from tools.symbol_overview.model import (
     TF_MS,
     WINDOW_SLOTS,
     Coverage,
+    FundingCoverage,
+    FundingHealth,
+    FundingRule,
+    FundingWindow,
     Health,
     InstrumentRow,
     Invalid,
@@ -449,4 +456,160 @@ def open_interest_coverage_result(
         stale_slots=counted["stale"],
         missing_slots=counted["missing"],
         runs=tuple(run for run, _ in runs),
+    )
+
+
+# --- funding rate (FR-6, design 4.2; contract 6.7) -----------------------------------------------------------------
+
+_FUNDING_COUNTS: Final = ("series_count", "current", "behind", "catching_up", "conflicted_series", "quiet_series")
+
+
+def _funding_rule(value: object) -> FundingRule | None:
+    if not isinstance(value, dict):
+        return None
+    fields = tuple(
+        value.get(key) for key in ("publication_delay_ms", "behind_after_ms", "quiet_after_ms", "backfill_days")
+    )
+    if not all(_non_negative(v) for v in fields):
+        return None
+    delay, behind, quiet, backfill = fields
+    assert isinstance(delay, int) and isinstance(behind, int) and isinstance(quiet, int) and isinstance(backfill, int)
+    return FundingRule(delay, behind, quiet, backfill)
+
+
+def funding_health(
+    status: int, content_type: str | None, body: bytes, *, health: Health
+) -> FundingHealth | None | Invalid:
+    """The ``funding_rate`` key of the (already validated) ``/health/ingest`` answer.
+
+    ``None``: the key is present and ``null``, funding is disabled. ``Invalid``: the key is absent or not well-formed,
+    so the funding part is unknown for every symbol (the candle and open interest parts are not affected).
+    """
+    doc = _decode(status, content_type, body)
+    if isinstance(doc, Invalid):
+        return doc
+    if "funding_rate" not in doc:
+        return _bad("schema", "funding_rate")
+    block = doc["funding_rate"]
+    if block is None:
+        return None
+    if not isinstance(block, dict):
+        return _bad("schema", "funding_rate")
+    rule = _funding_rule(block.get("rule"))
+    counts = [block.get(key) for key in _FUNDING_COUNTS]
+    as_of = block.get("as_of_ms")
+    if (
+        rule is None
+        or type(as_of) is not int
+        or as_of != health.as_of_ms
+        or block.get("scope") != "stored_series"
+        or block.get("status") not in FUNDING_STATUSES
+        or not all(_non_negative(count) for count in counts)
+    ):
+        return _bad("schema", "funding_rate")
+    series_count, current, behind, catching_up, conflicted, quiet = (int(c) for c in counts if isinstance(c, int))
+    return FundingHealth(rule, str(block["status"]), series_count, current, behind, catching_up, conflicted, quiet)
+
+
+def _all_or_none_ts(values: tuple[object, ...]) -> bool:
+    return all(v is None for v in values) or all(_ts(v) for v in values)
+
+
+def _window_state(start: int, end: int, span_from: int | None, span_through: int | None) -> str:
+    """The contract's definition (C§6.7.5), used only to refuse an answer that contradicts itself."""
+    if span_from is None or span_through is None or end < span_from or start > span_through:
+        return "unverified"
+    return "verified" if span_from <= start and end <= span_through else "partly_verified"
+
+
+def funding_result(
+    status: int,
+    content_type: str | None,
+    body: bytes,
+    *,
+    instrument: InstrumentRow,
+    funding_window: FundingWindow,
+    health: Health,
+) -> FundingCoverage | Invalid:
+    """Validate one ``/v1/funding-rates`` answer for ``funding_window`` (design 4.2).
+
+    The structure checks are the contract's own definitions and cannot reject an answer the API produces; the clock
+    checks assume consistent clocks and fail closed. A ``404 unknown_series`` comes back as
+    ``Invalid("api_error", "unknown_series")``: the caller turns it into ``no_data``. The rows are not used and not
+    trusted: only their number is bounded.
+    """
+    doc = _decode(status, content_type, body)
+    if isinstance(doc, Invalid):
+        return doc
+
+    series, block, rows = doc.get("series"), doc.get("coverage"), doc.get("rows")
+    if not (isinstance(series, dict) and isinstance(block, dict) and isinstance(rows, list)):
+        return _bad("schema")
+    strings = (doc.get("venue"), doc.get("symbol"))
+    oldest, newest = series.get("oldest_funding_time_ms"), series.get("newest_funding_time_ms")
+    span = tuple(block.get(key) for key in ("verified_from_ms", "verified_through_ms", "verified_at_ms"))
+    as_of, state = block.get("as_of_ms"), block.get("window_state")
+    events, conflicted, complete = block.get("events_in_window"), block.get("conflicted_events"), block.get("complete")
+    if (
+        not all(isinstance(s, str) for s in strings)
+        or not isinstance(doc.get("time_semantics"), str)
+        or not (_is_int(doc.get("start")) and _is_int(doc.get("end")))
+        or not _all_or_none_ts((oldest, newest))
+        or not _all_or_none_ts(span)
+        or not _ts(as_of)
+        or state not in FUNDING_WINDOW_STATES
+        or not (_non_negative(events) and _non_negative(conflicted))
+        or type(complete) is not bool
+        or len(rows) > FUNDING_LIMIT
+    ):
+        return _bad("schema")
+    assert isinstance(as_of, int) and isinstance(events, int) and isinstance(conflicted, int)
+    span_from, span_through, span_at = (v if isinstance(v, int) else None for v in span)
+    oldest_ms = oldest if isinstance(oldest, int) else None
+    newest_ms = newest if isinstance(newest, int) else None
+    if (oldest_ms is not None and newest_ms is not None and oldest_ms > newest_ms) or (
+        span_from is not None and span_through is not None and span_from > span_through
+    ):
+        return _bad("schema")
+
+    if (*strings, doc["start"], doc["end"]) != (
+        instrument.venue,
+        instrument.symbol,
+        funding_window.start,
+        funding_window.end,
+    ) or doc["time_semantics"] != "settlement":
+        return _bad("echo")
+
+    if (
+        state != _window_state(funding_window.start, funding_window.end, span_from, span_through)
+        or complete != (state == "verified" and conflicted == 0)
+        or (events > 0 and newest_ms is None)
+        or (  # a row in the window is a row of the series: the whole-series bounds cannot lie outside the window
+            events > 0
+            and oldest_ms is not None
+            and newest_ms is not None
+            and (newest_ms < funding_window.start or oldest_ms > funding_window.end)
+        )
+        or (newest_ms is None and events != 0)
+    ):
+        return _bad("counts")
+
+    if not health.as_of_ms <= as_of <= health.as_of_ms + REFRESH_DEADLINE_MS + CALL_TIMEOUT_MS:
+        return _bad("clock_inconsistent")
+    # A span or a settlement in the future of the API's own clock: the host clock lags the exchange's, and "verified
+    # means not behind" (design 4.1) could not be trusted.
+    if (span_through is not None and span_through > as_of) or (newest_ms is not None and newest_ms > as_of):
+        return _bad("clock_inconsistent")
+
+    return FundingCoverage(
+        as_of_ms=as_of,
+        oldest_funding_time_ms=oldest_ms,
+        newest_funding_time_ms=newest_ms,
+        verified_from_ms=span_from,
+        verified_through_ms=span_through,
+        verified_at_ms=span_at,
+        window_state=str(state),
+        events_in_window=events,
+        conflicted_events=conflicted,
+        complete=complete,
     )

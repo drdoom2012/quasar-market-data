@@ -1,7 +1,8 @@
 # ADR-0004: Funding rate history (Binance USDT-M)
 
 - **Status:** Accepted (approved by the user on 2026-11-03: revision 4 as written, including the proposals for the open
-  decisions O-1 to O-6). Revisions 2 to 4 answer the user's reviews (listed at the end). FR-1 to FR-5 are implemented. The API response
+  decisions O-1 to O-6); **amended by A-4 on 2026-11-04** (the backfill depth is at most 30 days, the 90-day chunks are
+  removed; see the revision history). Revisions 2 to 4 answer the user's reviews (listed at the end). FR-1 to FR-5 are implemented. The API response
   schema is contract section 6.7 of `docs/contracts/api-v1.md`, approved by the user on 2026-11-04 (decisions FA1 to FA10) and
   implemented by FR-5; where it differs from P-13 and P-15 it supersedes them: `behind` is inclusive at
   `publication_delay_ms + 2 h`, a defaulted `end` is `max(as_of, start)` capped at 365 days (like an explicit window longer than that, which is a `400`), `limit` is 2 to 1000, the cursor is
@@ -264,7 +265,7 @@ responses together listed exactly the stored settlements of the interval and no 
 the time of asking (`verified_at_ms` is the latest such time). It is not a proof that the list is complete in the
 world, and it can be contradicted later (P-8).
 
-**Unit and success.** A *unit* is one page (forward requests, seeds) or the consecutive pages of one backward chunk
+**Unit and success.** A *unit* is one page (forward requests, seeds) or the consecutive pages of the backward history range
 (below). Its covered interval `J = [a, e]` is the union of the covered intervals of its pages (P-5), which touch. A unit
 is *successful* iff all of: every response of the unit passed the parser; the eligibility selection dropped no row;
 every row transaction of the unit except the last is known to have committed; and the **final transaction** committed.
@@ -319,16 +320,16 @@ read-and-compare (a differing value is a conflict, P-8), `merge` is a union.
 - *Forward* (rounds, catch-up after an outage): a request `[a, b]` with `a ≤ through_ms + 1`. Its pages are
   consecutive and each page's `J` touches the span grown by the previous page, so the span grows page by page.
 - *Backward* (history): a request ending at `from_ms − 1`, so its covered interval touches the span from below
-  **only when the last page of the chunk has been fetched**; a truncated chunk (`n = limit`) covers `[a, last − 1]`,
-  which does not touch. Therefore a backward chunk is defined as **at most 90 days** (`HISTORY_CHUNK_MS`); the pages of
-  the chunk are fetched consecutively and the union `[a, from_ms − 1]` is merged **once, with the last page's rows, in
-  its final transaction**. The earlier pages' rows are stored but unclaimed. A crash loses only that in-memory
-  progress (at most the pages of one chunk, 3 for a 1h symbol, 1 for an 8h one); the chunk is repeated
-  idempotently. Because every chunk is merged on its own, history progress survives restarts and a crash loop cannot
-  prevent it (each chunk that completes is kept).
+  **only when the last page of the range has been fetched**; a truncated page (`n = limit`) covers `[a, last − 1]`,
+  which does not touch. Therefore the pages of the range `[target_from, from_ms − 1]` are fetched consecutively and the
+  union is merged **once, with the last page's rows, in its final transaction**. The earlier pages' rows are stored but
+  unclaimed. A crash loses only that in-memory progress (the pages of one range) and the range is repeated
+  idempotently. **The range is the whole missing depth, which is at most 30 days (amendment A-4, P-12)**, so it is
+  normally one page (a 1 h symbol has 720 regular settlements in 30 days, the page limit is 1 000) and a backward
+  range is never split: the 90-day chunks of revisions 2 to 4 (`HISTORY_CHUNK_MS`) are removed as unnecessary.
 - *Birth of a span*: a series without a span is **seeded** by a forward-style request `[b − recheck_ms, b]` whose
   first page creates the span; history then grows backward from there. A new symbol is therefore `current` after one
-  request and its history arrives chunk by chunk (P-10).
+  request and its history arrives as one backward range (P-10).
 - An **empty answer extends the span** (a quiet period is normal: an 8h symbol has no settlement in most hours;
   a young symbol has none before its listing). The guards against a wrong symbol are P-5 (market check) and the
   `quiet_series` health signal (P-13).
@@ -456,7 +457,7 @@ its next page is waiting. A series with `behind` and no `continuing` flag (after
 | **S** | seed of an `UNSEEDED` series | `[b_now − recheck_ms, b_now]`, first page | R |
 | **R** | the hourly check of an `ACTIVE` series | `[max(from_ms, through_ms − recheck_ms), b_now]`, **first page only** | R |
 | **C** | next page of a truncated forward range | `[a', b_now]` | C+H |
-| **H** | next chunk of history | `[max(target_from, from_ms − 90 d), from_ms − 1]` with `target_from` as above, consecutive pages | C+H |
+| **H** | backward history | `[target_from, from_ms − 1]` with `target_from` as above (at most 30 days), consecutive pages | C+H |
 
 **Selection.** At each grant opportunity:
 
@@ -471,7 +472,7 @@ its next page is waiting. A series with `behind` and no `continuing` flag (after
    otherwise the other class is. While both classes have work they therefore alternate, one request each. Within C: the
    series with the oldest `verified_at_ms`. Within H: **a series never served in this process run comes first** (so a
    new symbol is not behind long-served ones), then the series with the smallest `last_served` sequence number, then
-   `symbol`; a series whose chunk has further pages stays first in H until the last page of that chunk.
+   `symbol`; a series whose range has further pages stays first in H until the last page of that range.
 3. A series is *busy* while one of its requests is in flight or its page is being written; at most one request per
    series is active, so the writer's per-series order is the planning order.
 
@@ -489,7 +490,7 @@ is skipped and logged.
 |---|---|
 | S page successful | `UNSEEDED → ACTIVE` (`history_pending` set by the derived rule) |
 | R / C page successful | `through_ms` grows; if the page was truncated, `continuing` is set, else cleared |
-| H chunk successful | `from_ms` falls |
+| H range successful | `from_ms` falls |
 | a request fails (network, `SourceError`, parse error, write failure, unknown outcome) | counted per series; retried with the existing bounded backoff (ADR-0003 P-10) inside its class share |
 | 3 consecutive failed requests of one series | `SUSPENDED` until `now + 6 h` (first time), `12 h`, then `24 h` for repeats |
 | `suspended_until` reached | one probe request; success clears the count, failure suspends again with the longer time |
@@ -512,12 +513,12 @@ one series at once (busy rule). Class C of one series can run while the round as
   has an eligible series at least `floor(n / 2)` of any `n` consecutive C+H request starts are H starts, whatever the size
   of the C backlog; at saturation (`n = b − m` per window) that is `h = floor((b − m) / 2)` H starts per window
   (12 at `b = 50`, 37 at `b = 150`, 62 at `b = 250`). A C backlog only halves the history speed. H is served
-  round-robin, so with `P` series pending and one-page chunks every pending series starts a chunk at least once per
-  `ceil(P / h)` windows (659 series at `b = 150`: 18 windows, about 92 minutes); a 3-page chunk of a 1 h symbol uses three
-  starts. The same alternation gives class C at least `h` starts per window, so a large history backlog cannot starve
+  round-robin, so with `P` series pending and one-page ranges every pending series starts its range at least once per
+  `ceil(P / h)` windows (659 series at `b = 150`: 18 windows, about 92 minutes); a range of several pages uses one
+  start per page. The same alternation gives class C at least `h` starts per window, so a large history backlog cannot starve
   catch-up either. With no C work H uses the whole share, and the reverse.
 - *A new symbol* is seeded in the first round that starts after it appears (at most one round duration, bounded by
-  the sustainable capacity below) and its first H chunk comes before any chunk of a series that was already served.
+  the sustainable capacity below) and its H range comes before the next page of a series that was already served.
 - *A suspended series* does not block others (skipped by rule 1 and 2), is visible in the Collector log (the API shows
   its effect, `behind`, P-13) and is probed again by itself.
 
@@ -599,18 +600,18 @@ On start (deterministic: the same stored data, `as_of` and config give the same 
    `through_ms + 1`. `history_pending` → class H.
 3. Log a summary per series: span, stored count, conflicted events, flags, pages planned.
 
-Backfill is **only backward chunks of at most 90 days** (and the forward pages of an outage). There is no forward
-walk from `history_start`: the first page of a new series is the seed, so the series is current at once (P-7). Raising
-`backfill_days` needs no special case: `history_pending` (P-10: span width below the configured depth) becomes true and
-chunks continue below `from_ms`. Lowering it makes it false and requests nothing (the span never shrinks).
+Backfill is **only the backward history range** `[target_from, from_ms − 1]` (at most 30 days, A-4; fetched page by page
+and merged once) and the forward pages of an outage. There is no forward walk from `history_start`: the first page of a
+new series is the seed, so the series is current at once (P-7). Raising `backfill_days` (up to 30) needs no special
+case: `history_pending` (P-10: span width below the configured depth) becomes true and the range below `from_ms` is
+requested. Lowering it makes it false and requests nothing (the span never shrinks).
 
-Cost: with `backfill_days = 365` a series needs one seed (class R) and `ceil(365 / 90) = 5` chunk requests (class H),
-more for a 1h or 2h symbol (a 90-day chunk holds 2 160 or 1 080 rows, so 3 or 2 pages). For the 659 USDT perpetuals:
-the 659 seeds fit in the first round (index 659 starts at 2 440 s), and `659 × 5 = 3 295` chunk requests (plus a few
-extra pages) at `b − m = 75` per 305 s window take `3 295 / 75 × 305 s ≈ 3.7 h` when no class C work exists (the normal case; with a C backlog history gets at least half
-of the share, P-10), **about 4 hours**; for today's 10
-symbols 10 seeds and 50 chunk requests, one window. A larger chunk would cut the requests (a 365-day chunk is 1 to 9 pages) at the price of losing more progress on
-a crash; 90 days is a [P] trade-off, constants in code, not configuration.
+Cost: a series needs one seed (class R) and one history range (class H), which is one request in the normal case (a
+30-day range holds about 90 rows for an 8 h symbol and 720 for a 1 h symbol, the page limit is 1 000). For the 659 USDT
+perpetuals: the 659 seeds fit in the first round (index 659 starts at 2 440 s), and 659 history requests at `b − m = 75`
+per 305 s window take `659 / 75 × 305 s ≈ 45 min` when no class C work exists (the normal case; with a C backlog history
+gets at least half of the share, P-10, so about 1.5 h); for today's 10 symbols 10 seeds and 10 history requests, one
+window. (Before A-4, a depth of 365 days meant five 90-day chunks per series and about 4 hours.)
 
 ### P-12 Configuration
 
@@ -622,7 +623,7 @@ enabled = true
 publication_delay_ms = 30000
 round_offset_ms = 60000
 budget_per_5min = 150        # integer, validated 50 <= value <= 250
-backfill_days = 365          # integer, validated 1 <= value <= 3650
+backfill_days = 30           # integer, validated 1 <= value <= 30 (A-4)
 recheck_ms = 86400000        # validated 3600000 <= value <= 604800000
 ```
 
@@ -630,7 +631,8 @@ Absent means disabled, so existing configuration files keep working. Inside the 
 keys are an error (S20 rule). Funding is collected for every symbol of the venue; there is no second symbol list. The
 API reads the same file (as for open interest) to know `publication_delay_ms`, `recheck_ms` and `backfill_days`.
 `round_offset_ms` is validated in `[60 000, 600 000]` and must be at least `publication_delay_ms + 5 000`, otherwise the end bound `b` of the round would lie before the settlement it is meant to verify; the sustainable capacity of P-10 is checked at start (refusal above `S_sustained`, warning above 90 % of it). A failed check
-names the key and the values. The constants of P-9/P-10 (`G`, `HISTORY_CHUNK_MS`, the 2 h `behind` threshold, the
+names the key and the values. **A `backfill_days` above 30 is a configuration error (amendment A-4): the process exits
+with code 2 and starts nothing, and the same value is refused when the table is disabled.** The constants of P-9/P-10 (`G`, the 2 h `behind` threshold, the
 suspend times) are code constants.
 
 ### P-13 API
@@ -703,25 +705,25 @@ time, no sleeping.
 | Crash | **crash between data and coverage**: kill the writer after chunk `k` of a 250-row page, after the last earlier chunk, inside the final transaction (injected failure before and after the COMMIT), after the commit before the bookkeeping → in every case the span never covers a settlement whose row is not stored, a reader snapshot never shows a span without its rows, and a restart converges to the same final state with no duplicate and no conflict | FR-2/FR-4 |
 | Crash | unknown outcome of the final transaction, then restart with the growth committed, and with it not committed → both converge | FR-4 |
 | Backfill | restart **mid forward catch-up**: after page 1 of 3 the span ends at `last − 1`; the restart continues from `through + 1` | FR-4 |
-| Backfill | restart **mid backward history**: after chunk 2 of 5 `from_ms` is the lower edge of chunk 2; after a crash inside chunk 3 `from_ms` is unchanged and chunk 3 is repeated, stored pages are no-ops; a crash loop that completes one chunk per run still ends with all chunks | FR-4 |
-| Backfill | `backfill_days` raised from 365 to 730 → `history_pending` true and chunks continue below `from_ms`; lowered → false and nothing requested; a young symbol's chunks before its listing return `[]` and extend the span until the width reaches the depth | FR-4 |
-| Backfill | **`history_pending` boundary, no tolerance**: width `through_ms − from_ms` equal to `backfill_days × 86 400 000` → not pending; one millisecond less → pending; 24 h less (the tolerance of revision 2) → pending; the last chunk is shorter than 90 days and ends the backfill exactly at `target_from` | FR-1/FR-4 |
-| Backfill | **moving target**: while a series is pending `through_ms` advances by a round (+1 h) between the planning and the completion of its last chunk → the series is not pending afterwards; a series that is not pending stays not pending as `through_ms` advances through 24 rounds; a property test over random sequences of chunk completions, round advances, restarts, crashes and a raised or unchanged `backfill_days` asserts that `history_pending` never goes from false to true unless `backfill_days` was raised, and that `from_ms` never rises | FR-1/FR-4 |
+| Backfill | restart **mid backward history** (a range of two pages): after page 1 `from_ms` is unchanged and the page's rows are stored; the restart requests the range again from its start, the stored page is a no-op and the range is claimed once with its last page | FR-4 |
+| Backfill | `backfill_days` raised from 1 to 2 → `history_pending` true and the range below `from_ms` is requested; lowered → false and nothing requested; a young symbol's range before its listing returns `[]` and extends the span until the width reaches the depth; **a value above 30 is refused at start (A-4)** | FR-4 |
+| Backfill | **`history_pending` boundary, no tolerance**: width `through_ms − from_ms` equal to `backfill_days × 86 400 000` → not pending; one millisecond less → pending; 24 h less (the tolerance of revision 2) → pending; the range ends the backfill exactly at `target_from` and is never longer than 30 days | FR-1/FR-4 |
+| Backfill | **moving target**: while a series is pending `through_ms` advances by a round (+1 h) between the planning and the completion of its range → the series is not pending afterwards; a series that is not pending stays not pending as `through_ms` advances through 24 rounds; a property test over random sequences of range completions, round advances, restarts, crashes and a raised or unchanged `backfill_days` asserts that `history_pending` never goes from false to true unless `backfill_days` was raised, and that `from_ms` never rises | FR-1/FR-4 |
 | Backfill | after an outage of 40 days the next round's R request and C pages catch up; nothing is reported unrecoverable | FR-4 |
 | Scheduler | the same stored data, clock and grants give the same request order (determinism); R requests are in symbol order, S before R; C and H alternate inside the C+H share (the toggle names the class not granted last, an empty class is skipped); H serves a never-served series first | FR-4 |
 | Scheduler | **rounds and catch-up overlap**: with C and H backlogs saturating their share, every R request of the round still starts at its planned `floor(j / m) × 305 s`; with R saturated, C/H still start within their share; no class exceeds its cap in any 305 s window; one series never has two requests in flight | FR-4 |
-| Scheduler | **history cannot starve behind catch-up**: 200 series permanently in class C (each range truncated again) and 300 series pending history, for 50 windows at `b = 50, 150, 250` → of the C+H starts at least `floor(n / 2)` of every `n` consecutive ones are H while H has an eligible series (`h = floor((b − m) / 2)` per window at saturation), every pending series starts a chunk within `ceil(P / h)` windows (one-page chunks), C still receives at least `h`; with C empty H uses the whole `b − m`, with H empty C does; every R request keeps its planned start time and no class exceeds its cap; candle requests are unaffected | FR-4 |
-| Scheduler | starvation: with 100 series pending history and one new symbol appearing, the new symbol is seeded in the next round and gets its first H chunk before any already-served series' second chunk | FR-4 |
+| Scheduler | **history cannot starve behind catch-up**: 200 series permanently in class C (each range truncated again) and 300 series pending history, for 50 windows at `b = 50, 150, 250` → of the C+H starts at least `floor(n / 2)` of every `n` consecutive ones are H while H has an eligible series (`h = floor((b − m) / 2)` per window at saturation), every pending series starts its range within `ceil(P / h)` windows (one-page ranges), C still receives at least `h`; with C empty H uses the whole `b − m`, with H empty C does; every R request keeps its planned start time and no class exceeds its cap; candle requests are unaffected | FR-4 |
+| Scheduler | starvation: with 100 series pending history and one new symbol appearing, the new symbol is seeded in the next round and gets its H request before any already-served series' next page | FR-4 |
 | Scheduler | deadline: a round with more series than fit is cut at the deadline, the rest are skipped and logged, nothing marked failed, the next round covers them; two rounds never overlap | FR-4 |
 | Scheduler | suspension: three consecutive failures suspend a series for 6 h (then 12 h, 24 h), other series continue, a probe after the time clears or extends it, a restart clears it | FR-4 |
 | Capacity | `S_sustained = Q × m − 1` with `Q = min(K + 1, 11)`: accepted at `S_sustained` and refused at `S_sustained + 1`, for `b = 50, 150, 250` and for every `m` from 25 to 125; `round_offset_ms` boundaries 60 000 (`Q = 11`), 200 000 (`K = 11`, `Q = 11`), 200 001 (`K = 10`, `Q = 11`), 505 000 (`K = 10`, `Q = 11`), 505 001 (`K = 9`, `Q = 10`) and 600 000 (`Q = 10`); a warning, not a refusal, above `floor(0.9 × S_sustained)` | FR-1/FR-4 |
-| Capacity | **48 consecutive hourly rounds with the limiter state carried over** (fake clock; wake at `B + round_offset_ms` for `B` = 0, 1 h, 2 h, …; one server-time request per round counted in R): at `S_sustained` for `b = 50, 150, 250` no round skips a series, the first and the last start offsets are the same in every round (no drift) and every last start is at least 30 s before the deadline; the same for 200 rounds at `b = 150`, with 0.4 s requests, 2 in flight and a history backlog saturating the C+H share (R start times unchanged) | FR-4 |
+| Capacity | **48 consecutive hourly rounds with the limiter state carried over** (fake clock; wake at `B + round_offset_ms` for `B` = 0, 1 h, 2 h, …; one server-time request per round counted in R): at `S_sustained` for `b = 50, 150, 250` no round skips a series, the first and the last start offsets are the same in every round (no drift) and every last start is at least 30 s before the deadline; the same for 200 rounds at `b = 150`, with 0.4 s requests, 2 in flight and a history backlog saturating the C+H share in the first rounds (the backlog is one range per series, at most 30 days, A-4; R start times unchanged in all 200) | FR-4 |
 | Capacity | **the isolated-round capacity is not sustainable** (documents why it was replaced): at `S = (K + 1) × m − 1` (299, 899, 1 499) the first start of rounds 0 to 3 is delayed by 0, 60, 120 and 180 s and round 3 skips `m` series, repeating, 12 of 48 rounds | FR-4 |
 | Capacity | **retries and delays**: at `S_sustained` 5 % failures (one retry after a 1 s backoff) cause no skip and 10 % cause skips; at `0.9 × S_sustained` 10 % cause none and 20 % cause skips with no series skipped in more than 2 consecutive rounds; the same run ordered by `symbol` leaves tail series unserved in all 48 rounds (the test asserts the rotation of selection rule 1, not the symbol order); 10 % of requests taking 8 s cause no skip; all requests taking `d̄` cause no skip while `N × d̄ / 2 ≤ 3 555 000 ms − round_offset_ms` and skips above it (`b = 250`: 4 s passes, 6 s fails) | FR-4 |
 | Latency | for `S ≤ S_sustained` the last series starts at `floor(j / m) × 305 s` after the wake in each of 48 rounds (instant requests) and at most 15 s later with 0.4 s requests and 2 in flight; `S = 10, 100, 300, 659` give 0, 305, 1 220 and 2 440 s | FR-1/FR-4 |
 | Rate limiting | the limiter never allows more than `b` starts in any interval of length 305 s, with rounds, retries, time and backfill competing; **boundary**: request `k + b` of a saturated stream starts at exactly 305 s after request `k`, not at 304.999 s; R never exceeds `m`, C+H never exceed `b − m` | FR-3/FR-4 |
 | Rate limiting | **repeated 429 and budget exhaustion**: a `429` stops all starts for `max(Retry-After, 300 s)`; a second one doubles, up to 1 h; after the pause the window still counts earlier starts; a request waiting at the `429` sends nothing; with the budget exhausted a request waits and an expired round deadline drops it unsent; a `418` stops the task for the run; candle requests continue throughout | FR-3/FR-4 |
-| Rate limiting | `budget_per_5min` 49, 251, `"150"`, 150.0, a missing key and an unknown key are config errors naming the key; `backfill_days` 0 and 3651, `recheck_ms` out of range likewise | FR-4 |
+| Rate limiting | `budget_per_5min` 49, 251, `"150"`, 150.0, a missing key and an unknown key are config errors naming the key; `backfill_days` 0 and 31 (above 30 stops both processes at start, A-4), `recheck_ms` out of range likewise | FR-4 |
 | Multi-dataset | **funding and open interest enabled on one IP**: each limiter is independent (saturating funding does not delay open interest starts); the sum of both datasets' starts never exceeds `b_funding + b_oi` in a 305 s window; a `429` set on `ExtensionPause` by funding stops funding and, once A-3 is implemented, a fake open interest task; candle requests continue throughout and are never counted | FR-4 |
 | Independence | a funding source that raises on every call, hangs or returns `429`: candle rounds collect the same candles with the same `lateness_ms` bound as with funding disabled; `[funding_rate]` absent → no client, no request | FR-4 |
 | Contention | no funding transaction begins while a candle write is active; a transaction holds at most 100 rows; `SQLITE_BUSY` fails and retries without conflicts | FR-2/FR-4 |
@@ -760,7 +762,7 @@ and "an extension dataset sends nothing while `ExtensionPause` is set".
 - At the architecture's 600-symbol target the last symbol of a round is stored up to about 42 minutes after the settlement, in
   an ideal run (P-10). Today's 10 symbols are stored about `round_offset_ms` after it.
 - The sustainable capacity at the default budget is 824 symbols (not 899, which is only the capacity of one isolated round); the 659 USDT perpetuals use 80 % of it (P-10, E-14).
-- History of a 659-symbol universe takes about 4 hours to backfill at the default budget; each new symbol is current
+- History of a 659-symbol universe takes about 45 minutes to backfill at the default budget (the depth is at most 30 days, A-4); each new symbol is current
   after one request (P-10, P-11).
 - One table is updated in place (`funding_rate_verified`), growth only (P-7, O-1).
 - `mark_price` is NULL for history before 2023-10-31 (P-2, O-4).
@@ -776,7 +778,7 @@ and "an extension dataset sends nothing while `ExtensionPause` is set".
 |---|---|---|
 | O-1 | Coverage model: a **verified span** per series (one table updated in place, growth only), **append-only** merge rows, or **no completeness claim** (rows only, with `spacing_ms`)? | verified span, updated in place (P-7) |
 | O-2 | `rate_type` in the key: keep `Regular` and `Special` as two records of one hour, or key without it (a coincident pair becomes a conflict)? | in the key (P-3) |
-| O-3 | Default backfill depth: 365 days (about 3 300 chunk requests for 659 symbols, about 4 hours), or the full history back to 2019? | 365, configurable to 3 650 (P-11, P-12) |
+| O-3 | Default backfill depth: 365 days (about 3 300 chunk requests for 659 symbols, about 4 hours), or the full history back to 2019? | 365, configurable to 3 650 (P-11, P-12). **Superseded by A-4 (2026-11-04): at most 30 days; a larger value is a configuration error and the process does not start.** |
 | O-4 | `mark_price` nullable (history from 2019 kept, price NULL before 2023-10-31) or required (rows without a price are a parse error, so history effectively starts 2023-10-31)? | nullable (P-2) |
 | O-5 | Latency at scale: is up to about 42 minutes (ideal run, no guarantee) acceptable at 659 symbols and `b = 150`? The alternative is a larger budget share than 30 %. | accept (P-10) |
 | O-6 | Amendment A-3 to ADR-0003: the open interest task also honors `ExtensionPause`, so a `429`/`418` stops both extension datasets. | approve A-3 (P-9) |
@@ -889,7 +891,7 @@ were throwaway in the session scratchpad and are not in the repository.
   120 s, equal to `S_sustained` at 300 s (274 / 824 / 1 374) and at 600 s (249 / 749 / 1 249); `S_sustained` is 93.6 to
   94.5 % of it at 60 and 120 s. (5) `Q` boundaries at `m = 75`: offsets 60 000, 200 000, 200 001, 300 000, 505 000 → `Q = 11`
   (`11m − 1 = 824` ok, `12m − 1 = 899` fails); 505 001 and 600 000 → `Q = 10` (749 ok, 824 fails). (6) 200 rounds with 0.4 s
-  requests, 2 in flight and history saturating: no skip, first start 0.4 s after the wake in every round, last start
+  requests, 2 in flight and history saturating (with the cap of A-4 the backlog saturates the share only in the first rounds): no skip, first start 0.4 s after the wake in every round, last start
   3 054.8 / 3 064.8 / 3 074.8 s after the wake in every round. (7) Retries (0.4 s requests): `S_sustained` with 5 % failures
   no skip, 10 % skips in all 48 rounds, 20 % likewise; `0.9 × S_sustained` (246 / 741 / 1 236) with 10 % no skip, 20 %
   skips. Ordered by `symbol`, series at the end of the list were served 0 times in 48 rounds (10 % at `S_sustained`, 20 %
@@ -956,3 +958,18 @@ were throwaway in the session scratchpad and are not in the repository.
   stated "whatever the order of two rows with the same `fundingTime`"). The rule is now: `fundingTime` is
   non-decreasing, the key `(fundingTime, rateType)` is unique, and either order of a coincident pair is accepted.
   Nothing else changes; the implementation (FR-1, `parse_funding_rate_history`) and its tests follow this wording.
+- **Amendment A-4** (2026-11-04), by the user's explicit instruction ("backfill je maximalne 30 dni, pokud je pozadovan
+  vetsi aplikace zhavaruje, vyhod vsechen kod a popisy co uz nebude potreba"), made in the branch of FR-6 and delivered
+  with its pull request. It reverses O-3 and parts of P-7, P-10, P-11, P-12 and P-15 of the accepted ADR:
+  1. `backfill_days` is validated `1 <= value <= 30` in the `[funding_rate]` table (also when disabled). A larger value
+     is a configuration error: both the Collector and the API exit with code 2 and start nothing. The earlier maximum
+     was 3 650 and the examples used 365;
+  2. the 90-day backward chunk (`HISTORY_CHUNK_MS`, `ceil(depth / 90)` chunks per series, the `history_chunks_planned`
+     field of the `funding-reconcile` log lines) is removed: the whole missing depth, at most 30 days, is one range
+     fetched page by page and merged once, as the rule of P-7 for a backward unit already required. A range is normally
+     one page. The scheduler, the execution of a page and the writer are unchanged (a range may still have several
+     pages, for example for a 1 h symbol with many `Special` rows);
+  3. the backfill cost of P-11 is recomputed (about 45 minutes for 659 symbols instead of about 4 hours);
+  4. the contract (section 6.7.8, the example of `rule`) and the README / reference text name the new range;
+  5. nothing else changes: the verified span, the rounds, catch-up, the API's `window_state` and `complete`, the
+     365-day maximum of a **read** window (contract 6.7.2), the limiter, the capacity and the schema.

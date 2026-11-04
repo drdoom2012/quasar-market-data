@@ -103,8 +103,8 @@ def test_open_interest_path_has_exactly_the_documented_parameters() -> None:
 
 def test_the_new_path_is_allowed_and_everything_else_still_is_not() -> None:
     assert ALLOWED_PATHS == frozenset(
-        {"/health/ingest", "/v1/instruments", "/v1/coverage", "/v1/open-interest/coverage"}
-    )
+        {"/health/ingest", "/v1/instruments", "/v1/coverage", "/v1/open-interest/coverage", "/v1/funding-rates"}
+    )  # FR-6 added the fifth path
     fetch = http_fetch("http://127.0.0.1:1")
     for refused in ("/v1/candles", "/v1/open-interest", "/v1/indicators", "/v1/open-interest/coverage/"):
         with pytest.raises(ValueError):

@@ -29,7 +29,7 @@
   th, td { text-align: left; padding: 5px 10px; border-top: 1px solid var(--line); vertical-align: middle; }
   th { color: var(--muted); font-size: 12px; text-transform: uppercase; border-top: 0; }
   .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; border: 1px solid currentColor; }
-  .s-ok { color: var(--ok); } .s-behind, .s-holes { color: var(--warn); } .s-stale, .s-conflict, .s-unknown { color: var(--bad); } .s-no_data { color: var(--none); }
+  .s-ok { color: var(--ok); } .s-behind, .s-holes, .s-unverified, .s-partly_verified { color: var(--warn); } .s-stale, .s-conflict, .s-unknown, .s-quiet { color: var(--bad); } .s-no_data { color: var(--none); }
   canvas { width: 100%; min-width: 360px; height: 14px; display: block; border-radius: 2px; }
   details { margin-top: 8px; } summary { cursor: pointer; color: var(--muted); }
   #legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; font-size: 12px; color: var(--muted); }
@@ -52,6 +52,9 @@
 <div id="summary"></div>
 <div id="oi-summary"></div>
 <div id="oi-notice" class="notice" role="status"></div>
+<div id="funding-summary"></div>
+<div id="funding-health" class="note"></div>
+<div id="funding-notice" class="notice" role="status"></div>
 <div id="refresh-notice" class="notice" role="status"></div>
 <h2 id="problems-title">What is wrong</h2>
 <table id="problems"></table>
@@ -69,14 +72,15 @@ const TEXT = {
   apiNotReady: "The API is not usable: ",
   never: "nothing yet",
   age: (s) => `state from the API, fetched ${s} s ago`,
-  states: { no_data: "no data", unknown: "cannot judge", stale: "stale", conflict: "conflict", holes: "holes", behind: "behind", ok: "ok" },
+  states: { no_data: "no data", unknown: "cannot judge", stale: "stale", conflict: "conflict", holes: "holes", behind: "behind", ok: "ok",
+    quiet: "quiet", unverified: "not verified", partly_verified: "partly verified" },
   tiles: { total: "total" },
-  rows: { candles: "Candles", openInterest: "Open interest" },
+  rows: { candles: "Candles", openInterest: "Open interest", funding: "Funding rate" },
   noProblems: "Nothing is wrong.",
   okGroup: (n, label) => `${n} ${plural(n, "symbol", "symbols")} ok ${label}`,
-  columns: { candles: "Candles", openInterest: "Open interest", symbol: "Symbol", why: "Reason", since: "History since", strips: "30 days" },
+  columns: { candles: "Candles", openInterest: "Open interest", funding: "Funding rate", symbol: "Symbol", why: "Reason", since: "History since", strips: "30 days" },
   notApplicable: "–",
-  prefix: { candles: "candles: ", openInterest: "open interest: " },
+  prefix: { candles: "candles: ", openInterest: "open interest: ", funding: "funding: " },
   reasons: {
     no_data: () => "nothing downloaded (the API cannot tell whether something should have been)",
     invalid: (r) => `the API answer cannot be used (${r.detail})`,
@@ -96,16 +100,40 @@ const TEXT = {
     due: (r) => `behind by ${slots(r.slots)}`,
     unrecoverable: (r, b) => `${slots(r.slots)} inside the stored history have no row and are older than the retrieval horizon (${days(b.retrieval_horizon_ms)} days), so they can no longer be fetched`,
   },
+  fundingReasons: {
+    no_data: () => "no funding settlement and no verified span stored (the API cannot tell whether some should have been)",
+    invalid: (r) => `the API answer cannot be used (${r.detail})`,
+    conflict: (r) => `${r.slots} ${plural(r.slots, "settlement", "settlements")} in conflict in the window: the stored value may be the wrong one`,
+    quiet: (r, b, i) => (b.newest_funding_time_ms == null
+      ? "no settlement stored (normal for a listing that has not had its first settlement, or a wrong symbol)"
+      : `newest settlement ${fmt(b.newest_funding_time_ms)}, more than ${hours(i && i.rule && i.rule.quiet_after_ms)} ago; this does not say the symbol stopped`),
+    behind: (r, b, i) => `the verified span ends ${fmt(b.verified_through_ms)}, more than ${hours(i && i.rule && i.rule.behind_after_ms)} before the API clock; the cause (stopped task, pause, outage) is not visible to the API`,
+    unverified: () => "the Collector has not verified this window; this does not say settlements are missing, and not that none occurred",
+    partly_verified: (r, b, i) => `verified from ${fmt(b.verified_from_ms)}${i && i.window ? `, the window starts ${fmt(i.window.start)}` : ""}: the older part is not verified yet; this does not say settlements are missing`,
+  },
+  fundingMissing: "no funding answer for this symbol",
+  fundingDisabled: "Funding rate is not enabled in this deployment",
+  fundingAbsent: "Funding rate is not reported by the tool",
+  fundingUnknown: (detail) => `Funding rate could not be judged for any symbol (${detail}); every symbol is listed as a problem because nothing says it is fine`,
+  fundingClamped: (days) => `Funding rate is judged over the last ${days} ${plural(days, "day", "days")} only: that is as deep as the Collector is configured to verify`,
+  fundingHealth: (h) => `Funding rate, the API's own figures over all stored series (not only these symbols): status ${h.status}, ${h.behind} behind, ${h.catching_up} catching up, ${h.quiet_series} quiet, ${h.conflicted_series} with a conflict in the last 24 hours`,
+  fundingLine: {
+    cannot: "funding: cannot judge",
+    none: "funding: nothing stored",
+    state: (b, w) => `funding: verified ${b.verified_from_ms == null ? "nothing" : `${day(b.verified_from_ms)} to ${fmt(b.verified_through_ms)}`} · newest settlement ${fmt(b.newest_funding_time_ms)} · ${b.events_in_window} ${plural(b.events_in_window, "settlement", "settlements")}${w ? ` from ${day(w.start)} to ${fmt(w.end)}` : ""} · ${b.complete ? "complete as far as the Collector verified" : "not complete"}`,
+  },
   oiMissing: "no open interest answer for this symbol",
   oiDisabled: "Open interest is not enabled in this deployment",
   oiAbsent: "Open interest is not reported by the tool",
   oiUnknown: (detail) => `Open interest could not be judged for any symbol (${detail}); every symbol is listed as a problem because nothing says it is fine`,
-  groupLabel: { both: "(candles and open interest)", candles: "(candles)" },
+  groupParts: { candles: "candles", openInterest: "open interest", funding: "funding" },
   deadline: {
     candles: (n) => `Candles: the refresh hit its time limit; ${n == null ? "some symbols were" : `${n} ${plural(n, "symbol", "symbols")} ${plural(n, "was", "were")}`} not asked`,
     openInterest: (n) => `Open interest: the refresh hit its time limit; ${n == null ? "some symbols were" : `${n} ${plural(n, "symbol", "symbols")} ${plural(n, "was", "were")}`} not asked`,
+    funding: (n) => `Funding rate: the refresh hit its time limit; ${n == null ? "some symbols were" : `${n} ${plural(n, "symbol", "symbols")} ${plural(n, "was", "were")}`} not asked`,
   },
   legend: { candles: "Candles", openInterest: "Open interest" },
+  noStripFunding: "Funding has no time grid, so it has no strip: the line under the strips says what the Collector verified.",
   strip: { "_": "no history yet", ".": "ok", n: "not expected yet", d: "behind", u: "exchange has no data", m: "hole", c: "conflict", s: "stale" },
   oiStrip: { "_": "before the first stored row", ".": "ok", r: "no longer recoverable", n: "not expected yet", d: "behind", m: "hole", c: "conflict", s: "stale" },
   stripNone: "cannot judge",
@@ -115,7 +143,11 @@ const TEXT = {
 const plural = (n, one, many) => (n === 1 ? one : many);
 const slots = (n) => `${n} ${plural(n, "slot", "slots")}`;
 const days = (ms) => Math.round(ms / 86400000);
+const hours = (ms) => (ms == null ? "the API's threshold" : `${Math.round(ms / 360000) / 10} h`);
 const ORDER = ["no_data", "unknown", "stale", "conflict", "holes", "behind", "ok"];
+// The states of the funding part (design 4.3) and the one rank over all three parts: the worst state of any part decides the order of the list.
+const FUNDING_ORDER = ["no_data", "unknown", "conflict", "quiet", "behind", "unverified", "partly_verified", "ok"];
+const RANK_ORDER = ["no_data", "unknown", "stale", "conflict", "quiet", "holes", "behind", "unverified", "partly_verified", "ok"];
 const COLORS = { "_": "#c9c9cf", ".": "#2e9d62", n: "#9ec5ee", d: "#f0b429", u: "#8e5bd0", r: "#9c6b30", m: "#e0443a", c: "#c2186b", s: "#7a0f0f" };
 const POLL_MS = 60000, OLD_AFTER_S = 180;
 
@@ -131,39 +163,73 @@ function oiStateOf(s, status) {
   if (!applies(status)) return null;
   return s.open_interest ? s.open_interest.state : "unknown";
 }
-function rank(state) { return ORDER.indexOf(state); }
-function worstRank(s, status) {
-  const interest = oiStateOf(s, status);
-  return interest === null ? rank(s.state) : Math.min(rank(s.state), rank(interest));
+// The status of the funding part: "disabled", "unknown", "enabled", or "absent" (a tool that does not report it).
+// Every function below takes it as an OPTIONAL last parameter; "absent" gives exactly the output of a page without funding.
+function fundingStatus(data) { return data.funding_rate ? data.funding_rate.status : "absent"; }
+function fundingStateOf(s, fstatus = "absent") {
+  if (!applies(fstatus)) return null;
+  return s.funding_rate ? s.funding_rate.state : "unknown";
 }
-function isProblem(s, status) {
-  const interest = oiStateOf(s, status);
-  return s.state !== "ok" || (interest !== null && interest !== "ok");
+function rank(state) { return RANK_ORDER.indexOf(state); }
+function worstRank(s, status, fstatus = "absent") {
+  const states = [s.state, oiStateOf(s, status), fundingStateOf(s, fstatus)].filter((x) => x !== null);
+  return Math.min(...states.map(rank));
 }
-// Listed when the candle OR the open interest state is a problem; the worse of the two first, then the candle state.
-function problemSymbols(symbols, status) {
-  return symbols.filter((s) => isProblem(s, status))
-    .sort((a, b) => worstRank(a, status) - worstRank(b, status) || rank(a.state) - rank(b.state) || a.symbol.localeCompare(b.symbol));
+function isProblem(s, status, fstatus = "absent") {
+  return [s.state, oiStateOf(s, status), fundingStateOf(s, fstatus)].some((x) => x !== null && x !== "ok");
+}
+// Listed when the candle, the open interest OR the funding state is a problem; the worst of them first, then the candle state.
+function problemSymbols(symbols, status, fstatus = "absent") {
+  return symbols.filter((s) => isProblem(s, status, fstatus))
+    .sort((a, b) => worstRank(a, status, fstatus) - worstRank(b, status, fstatus) || rank(a.state) - rank(b.state) || a.symbol.localeCompare(b.symbol));
 }
 function reasonText(r, s) { return (TEXT.reasons[r.code] || (() => r.code))(r, s); }
 function oiReasonText(r, block) { return (TEXT.oiReasons[r.code] || (() => r.code))(r, block); }
-function reasonLines(s, status) {
+function fundingReasonText(r, block, info) { return (TEXT.fundingReasons[r.code] || (() => r.code))(r, block, info); }
+// `finfo` is the top-level funding block (the rule and the window the texts quote); optional.
+function reasonLines(s, status, fstatus = "absent", finfo = null) {
   const lines = s.reasons.map((r) => TEXT.prefix.candles + reasonText(r, s));
   if (applies(status)) {
     if (s.open_interest) lines.push(...s.open_interest.reasons.map((r) => TEXT.prefix.openInterest + oiReasonText(r, s.open_interest)));
     else lines.push(TEXT.prefix.openInterest + TEXT.oiMissing);
   }
+  if (applies(fstatus)) {
+    if (s.funding_rate) lines.push(...s.funding_rate.reasons.map((r) => TEXT.prefix.funding + fundingReasonText(r, s.funding_rate, finfo)));
+    else lines.push(TEXT.prefix.funding + TEXT.fundingMissing);
+  }
   return lines;
 }
 // Symbols where both parts are ok, each with the information line `unrecoverable` when it has one (option C).
-function okEntries(symbols, status) {
-  return symbols.filter((s) => !isProblem(s, status)).map((s) => {
+function okEntries(symbols, status, fstatus = "absent") {
+  return symbols.filter((s) => !isProblem(s, status, fstatus)).map((s) => {
     const block = s.open_interest;
     const found = block ? block.reasons.find((r) => r.code === "unrecoverable") : undefined;
     return { symbol: s.symbol, note: found ? oiReasonText(found, block) : "" };
   });
 }
-function okGroupLabel(status) { return applies(status) ? TEXT.groupLabel.both : TEXT.groupLabel.candles; }
+// "(candles)", "(candles and open interest)", "(candles, open interest and funding)": the parts the group is ok in.
+function okGroupLabel(status, fstatus = "absent") {
+  const parts = [TEXT.groupParts.candles];
+  if (applies(status)) parts.push(TEXT.groupParts.openInterest);
+  if (applies(fstatus)) parts.push(TEXT.groupParts.funding);
+  return "(" + (parts.length === 1 ? parts[0] : parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1]) + ")";
+}
+function fundingNotice(fstatus, detail, block) {
+  if (fstatus === "enabled") {
+    const w = block && block.window;
+    return w && w.clamped && block.rule ? TEXT.fundingClamped(block.rule.backfill_days) : null;
+  }
+  if (fstatus === "disabled") return TEXT.fundingDisabled;
+  if (fstatus === "unknown") return TEXT.fundingUnknown(detail);
+  return TEXT.fundingAbsent;
+}
+// The line under a symbol's strips: what the Collector verified, in words; never a color that could mean "fine".
+function fundingLine(block, info) {
+  if (!block) return TEXT.fundingLine.cannot;
+  if (block.state === "unknown") return TEXT.fundingLine.cannot;
+  if (block.state === "no_data") return TEXT.fundingLine.none;
+  return TEXT.fundingLine.state(block, info && info.window);
+}
 function oiNotice(status, detail) {
   if (status === "enabled") return null;
   if (status === "disabled") return TEXT.oiDisabled;
@@ -174,6 +240,7 @@ function refreshNotices(refresh) {
   const lines = [];
   if (refresh.deadline_hit) lines.push(TEXT.deadline.candles(refresh.candle_not_asked));
   if (refresh.oi_deadline_hit) lines.push(TEXT.deadline.openInterest(refresh.oi_not_asked));
+  if (refresh.funding_deadline_hit) lines.push(TEXT.deadline.funding(refresh.funding_not_asked));
   return lines;
 }
 
@@ -226,16 +293,16 @@ function drawStrip(canvas, strip, window_, texts) {
 }
 
 function clearStates() {
-  for (const id of ["summary", "oi-summary", "oi-notice", "refresh-notice", "problems", "heatmap"]) $(id).replaceChildren();
+  for (const id of ["summary", "oi-summary", "oi-notice", "funding-summary", "funding-health", "funding-notice", "refresh-notice", "problems", "heatmap"]) $(id).replaceChildren();
   $("ok-group").replaceChildren(); $("ok-group").style.display = "none";
 }
 
 function showError(text) { const box = $("api-error"); box.textContent = text; box.style.display = "block"; clearStates(); }
 
-function tiles(box, label, summary) {
+function tiles(box, label, summary, order = ORDER) {
   box.replaceChildren();
   const row = el("div", { class: "tilerow" }, el("span", { class: "tilerow-label" }, label));
-  for (const key of ["total", ...ORDER]) {
+  for (const key of ["total", ...order]) {
     row.append(el("div", { class: "tile" }, el("b", {}, String(summary[key])), key === "total" ? TEXT.tiles.total : TEXT.states[key]));
   }
   box.append(row);
@@ -250,25 +317,32 @@ function render(data, httpStatus) {
   const interest = data.open_interest;
   if (interest && interest.summary) tiles($("oi-summary"), TEXT.rows.openInterest, interest.summary); else $("oi-summary").replaceChildren();
   $("oi-notice").textContent = oiNotice(status, interest ? interest.detail : "") || "";
+  const fstatus = fundingStatus(data);
+  const funding = data.funding_rate;
+  if (funding && funding.summary) tiles($("funding-summary"), TEXT.rows.funding, funding.summary, FUNDING_ORDER); else $("funding-summary").replaceChildren();
+  $("funding-health").textContent = funding && funding.health ? TEXT.fundingHealth(funding.health) : "";
+  $("funding-notice").textContent = fundingNotice(fstatus, funding ? funding.detail : "", funding) || "";
   const notices = $("refresh-notice"); notices.replaceChildren();
   for (const line of refreshNotices(data.refresh || {})) notices.append(el("p", { class: "notice" }, line));
 
   const symbols = data.symbols;
-  const problems = problemSymbols(symbols, status);
+  const problems = problemSymbols(symbols, status, fstatus);
   const table = $("problems"); table.replaceChildren();
   if (problems.length === 0) {
     table.append(el("tr", {}, el("td", { class: "muted" }, TEXT.noProblems)));
   } else {
-    table.append(el("tr", {}, el("th", {}, TEXT.columns.candles), el("th", {}, TEXT.columns.openInterest),
+    table.append(el("tr", {}, el("th", {}, TEXT.columns.candles), el("th", {}, TEXT.columns.openInterest), el("th", {}, TEXT.columns.funding),
       el("th", {}, TEXT.columns.symbol), el("th", {}, TEXT.columns.why)));
     for (const s of problems) {
       const state = oiStateOf(s, status);
+      const fund = fundingStateOf(s, fstatus);
       table.append(el("tr", {}, el("td", {}, tag(s.state)), el("td", {}, state === null ? TEXT.notApplicable : tag(state)),
-        el("td", {}, s.symbol), el("td", {}, reasonLines(s, status).join("; "))));
+        el("td", {}, fund === null ? TEXT.notApplicable : tag(fund)),
+        el("td", {}, s.symbol), el("td", {}, reasonLines(s, status, fstatus, funding).join("; "))));
     }
   }
 
-  const ok = okEntries(symbols, status);
+  const ok = okEntries(symbols, status, fstatus);
   const group = $("ok-group"); group.replaceChildren();
   group.style.display = ok.length ? "block" : "none";
   if (ok.length) {
@@ -277,11 +351,11 @@ function render(data, httpStatus) {
       names.append((i ? ", " : "") + entry.symbol);
       if (entry.note) names.append(el("span", { class: "note" }, ` (${entry.note})`));
     });
-    group.append(el("summary", {}, TEXT.okGroup(ok.length, okGroupLabel(status))), names);
+    group.append(el("summary", {}, TEXT.okGroup(ok.length, okGroupLabel(status, fstatus))), names);
   }
 
   const heat = $("heatmap"); heat.replaceChildren();
-  heat.append(el("tr", {}, el("th", {}, TEXT.columns.candles), el("th", {}, TEXT.columns.openInterest), el("th", {}, TEXT.columns.symbol),
+  heat.append(el("tr", {}, el("th", {}, TEXT.columns.candles), el("th", {}, TEXT.columns.openInterest), el("th", {}, TEXT.columns.funding), el("th", {}, TEXT.columns.symbol),
     el("th", {}, TEXT.columns.since), el("th", {}, TEXT.columns.strips)));
   for (const s of symbols) {
     const state = oiStateOf(s, status);
@@ -296,8 +370,10 @@ function render(data, httpStatus) {
       cell.append(el("div", { class: "strip-label" }, TEXT.rows.openInterest), interestCanvas);
       since.append(el("div", {}, `${TEXT.since.openInterest}: ${day(block ? block.oldest_time_ms : null)}`));
     }
+    const fund = fundingStateOf(s, fstatus);
+    if (fund !== null) cell.append(el("div", { class: "strip-label", title: TEXT.noStripFunding }, fundingLine(s.funding_rate, funding)));
     heat.append(el("tr", {}, el("td", {}, tag(s.state)), el("td", {}, state === null ? TEXT.notApplicable : tag(state)),
-      el("td", {}, s.symbol), since, cell));
+      el("td", {}, fund === null ? TEXT.notApplicable : tag(fund)), el("td", {}, s.symbol), since, cell));
   }
 }
 

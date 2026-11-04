@@ -73,11 +73,14 @@ async def simulate(
     slow: Callable[[int], int] | None = None,
     history: bool = False,
     offset_ms: int = WAKE_OFFSET,
+    period_ms: int = HOUR,
 ) -> Outcome:
     symbols = symbols_of(series)
-    t = ManualTime(wall_start_ms=B0 + 3_000)
+    t = ManualTime(wall_start_ms=B0 + 3_000, idle_settle=True)
     sink = InMemorySink()
-    rig = await make_rig(tmp_path, symbols=symbols, budget_per_5min=b, sink=sink, t=t, request_ms=request_ms)
+    rig = await make_rig(
+        tmp_path, symbols=symbols, budget_per_5min=b, sink=sink, t=t, request_ms=request_ms, period_ms=period_ms
+    )
     through = B0 - 3_600_000
     rig.exchange.time_request_ms = min(request_ms, 400)  # the time-trust gate refuses a slow observation
     for symbol in symbols:  # every series already seeded and caught up: rounds only (and history if asked for)
@@ -107,7 +110,7 @@ async def simulate(
         tmp_path,
         rig=rig,
         budget_per_5min=b,
-        backfill_days=1 if not history else 3650,
+        backfill_days=1,
         offset_ms=offset_ms,
         recheck_ms=86_400_000,
     )
@@ -227,7 +230,7 @@ def test_the_series_asked_last_are_asked_first_next_time_so_none_is_left_unserve
         b = 50
         series = sustained_capacity(b, WAKE_OFFSET) + 60  # overload: some series are skipped every round
         symbols = symbols_of(series)
-        t = ManualTime(wall_start_ms=B0 + 3_000)
+        t = ManualTime(wall_start_ms=B0 + 3_000, idle_settle=True)
         sink = InMemorySink()
         rig = await make_rig(tmp_path, symbols=symbols, budget_per_5min=b, sink=sink, t=t)
         for symbol in symbols:
@@ -269,10 +272,15 @@ def test_with_400_ms_requests_each_start_is_at_most_15_s_later_than_planned() ->
 
 
 @pytest.mark.simulation
-def test_200_rounds_at_b_150_with_a_history_backlog_saturating_the_share_keep_the_round_starts() -> None:
+def test_200_rounds_at_b_150_keep_the_round_starts_while_a_history_backlog_saturates_the_share_at_first() -> None:
+    # The depth is at most 30 days (ADR-0004 A-4), so the backlog is one range per series: 500 series of 21 h of
+    # one-minute settlements are two pages each, about 1 000 H starts, which saturate the C+H share (37 starts per
+    # window) for the first rounds only; the 200 rounds then continue with plain rounds.
     async def scenario(tmp_path: Path) -> None:
         series = 500
-        result = await simulate(tmp_path, series=series, b=150, rounds=200, request_ms=400, history=True)
+        result = await simulate(
+            tmp_path, series=series, b=150, rounds=200, request_ms=400, history=True, period_ms=60_000
+        )
         assert result.skipped == [0] * 200
         for offsets in result.offsets[1:]:
             for index, offset in enumerate(offsets):
@@ -307,7 +315,7 @@ def test_funding_and_open_interest_limiters_are_independent_and_a_funding_429_st
 
     async def run_once(tmp_path: Path, with_open_interest: bool, pause_funding: bool) -> tuple[list[int], list[int]]:
         series = 100
-        t = ManualTime(wall_start_ms=B0 + 3_000)
+        t = ManualTime(wall_start_ms=B0 + 3_000, idle_settle=True)
         sink = InMemorySink()
         rig = await make_rig(tmp_path, symbols=symbols_of(series), budget_per_5min=50, sink=sink, t=t)
         for symbol in symbols_of(series):
@@ -338,7 +346,11 @@ def test_funding_and_open_interest_limiters_are_independent_and_a_funding_429_st
         if hammer_task is not None:
             hammer_task.cancel()
             await asyncio.gather(hammer_task, return_exceptions=True)
-        return sorted(ns for _, ns in rig.limiter.grants), oi_starts
+        grants = sorted(ns for _, ns in rig.limiter.grants)
+        await (
+            h.finish()
+        )  # stop the task like the other tests do: a task left pending is closed by the garbage collector
+        return grants, oi_starts
 
     def worst(starts: list[int], window_ms: int) -> int:
         ordered, low, best = sorted(starts), 0, 0

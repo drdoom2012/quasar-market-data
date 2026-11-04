@@ -343,7 +343,7 @@ def test_a_success_between_failures_clears_the_count_so_four_failures_do_not_sus
             merge=SpanMerge(VENUE, BTC, Interval(B0 - 2 * HOUR, B0 - HOUR), rig.t.wall_ms()),
         )
         rig.exchange.errors = [err, err, None, err, err, None]  # two failures, a success, two failures, a success
-        h = await start_task(tmp_path, rig=rig, backfill_days=365)
+        h = await start_task(tmp_path, rig=rig, backfill_days=1)
         await h.run_for(200 * S, step_ms=S)
         assert len(rig.exchange.served) >= 6
         assert not h.lines_starting("funding-suspended")

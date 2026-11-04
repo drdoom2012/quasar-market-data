@@ -27,6 +27,15 @@ OPEN_INTEREST_TABLE = (
     "round_offset_ms = 200000\n"
     "budget_per_5min = 400\n"
 )
+FUNDING_RATE_TABLE = (
+    "\n[funding_rate]\n"
+    "enabled = true\n"
+    "publication_delay_ms = 30000\n"
+    "round_offset_ms = 200000\n"
+    "budget_per_5min = 250\n"
+    "backfill_days = 30\n"
+    "recheck_ms = 86400000\n"
+)
 
 
 class BenchError(Exception):
@@ -44,15 +53,18 @@ def peak_rss_bytes(ru_maxrss: int) -> int:
     return ru_maxrss if sys.platform == "darwin" else ru_maxrss * 1024
 
 
-def start_api(db: Path, symbols: Sequence[str], log: Path) -> tuple["subprocess.Popen[bytes]", int]:
-    """Start ``quasar-api serve`` on a free loopback port with open interest enabled; return it and the port."""
+def start_api(
+    db: Path, symbols: Sequence[str], log: Path, *, funding: bool = False
+) -> tuple["subprocess.Popen[bytes]", int]:
+    """Start ``quasar-api serve`` on a free loopback port with open interest enabled (and funding rates when
+    ``funding``); return it and the port."""
     script = Path(sys.executable).parent / "quasar-api"
     if not script.exists():
         raise BenchError(f"the console script {script} is not installed in this environment")
     port = free_port()
     config = log.parent / "quasar.toml"
     text = config_text(database_path=str(db), symbols=list(symbols), host="127.0.0.1", port=port)
-    config.write_text(text + OPEN_INTEREST_TABLE, encoding="utf-8")
+    config.write_text(text + OPEN_INTEREST_TABLE + (FUNDING_RATE_TABLE if funding else ""), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
     with log.open("wb") as log_file:
         proc = subprocess.Popen(

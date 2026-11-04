@@ -17,7 +17,7 @@ VALID_TABLE = {
     "publication_delay_ms": "30000",
     "round_offset_ms": "60000",
     "budget_per_5min": "150",
-    "backfill_days": "365",
+    "backfill_days": "1",
     "recheck_ms": "86400000",
 }
 
@@ -55,7 +55,7 @@ def test_an_absent_table_means_disabled() -> None:
 
 
 def test_a_valid_table_is_parsed() -> None:
-    assert parse(table()) == FundingRateSettings(True, 30_000, 60_000, 150, 365, 86_400_000)
+    assert parse(table()) == FundingRateSettings(True, 30_000, 60_000, 150, 1, 86_400_000)
 
 
 def test_the_repository_configs_still_parse_with_funding_off() -> None:
@@ -91,8 +91,10 @@ def test_the_table_must_be_a_table() -> None:
         ("budget_per_5min", "150.0"),
         ("budget_per_5min", "true"),
         ("backfill_days", "0"),
-        ("backfill_days", "3651"),
-        ("backfill_days", "365.0"),
+        ("backfill_days", "31"),  # ADR-0004 A-4: at most 30 days
+        ("backfill_days", "365"),
+        ("backfill_days", "3650"),
+        ("backfill_days", "1.0"),
         ("recheck_ms", "3599999"),
         ("recheck_ms", "604800001"),
         ("round_offset_ms", "59999"),
@@ -106,6 +108,14 @@ def test_the_table_must_be_a_table() -> None:
 def test_out_of_range_and_wrongly_typed_values_name_the_key(key: str, value: str) -> None:
     error = fails(table(**{key: value}))
     assert error.key == f"funding_rate.{key}"
+
+
+def test_the_backfill_depth_is_at_most_30_days_and_a_larger_one_is_a_configuration_error() -> None:
+    assert parse(table(backfill_days="1")) is not None
+    assert parse(table(backfill_days="30")) is not None
+    error = fails(table(backfill_days="31"))
+    assert error.key == "funding_rate.backfill_days" and "30" in error.problem
+    assert fails(table(enabled="false", backfill_days="31")).key == "funding_rate.backfill_days"  # also when disabled
 
 
 def test_the_offset_must_be_at_least_the_delay_plus_five_seconds() -> None:

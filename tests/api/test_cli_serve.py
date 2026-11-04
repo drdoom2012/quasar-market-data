@@ -138,6 +138,28 @@ def test_an_invalid_file_exits_2_and_never_binds(
     assert "config" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("enabled", ["true", "false"])
+def test_a_funding_backfill_depth_above_30_days_exits_2_and_never_binds(
+    tmp_path: Path,
+    run_calls: RunCalls,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    enabled: str,
+) -> None:
+    created: list[Any] = []
+    monkeypatch.setattr(cli, "create_app", lambda *args, **kwargs: created.append(kwargs))
+    cfg = write_config(tmp_path, database_path="m.db")
+    table = FUNDING_RATE_TABLE.format(enabled=enabled).replace("backfill_days = 20", "backfill_days = 31")
+    cfg.write_text(cfg.read_text(encoding="utf-8") + table, encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["serve", str(cfg)])
+
+    assert exc.value.code == 2  # ADR-0004 A-4
+    assert created == [] and run_calls == []
+    assert "funding_rate.backfill_days" in capsys.readouterr().err
+
+
 def test_a_missing_file_exits_2_and_never_binds(tmp_path: Path, run_calls: RunCalls) -> None:
     with pytest.raises(SystemExit) as exc:
         cli.main(["serve", str(tmp_path / "absent.toml")])
@@ -208,7 +230,7 @@ def test_serve_passes_the_open_interest_rule_of_the_file_to_the_app(
 
 FUNDING_RATE_TABLE = (
     "\n[funding_rate]\nenabled = {enabled}\npublication_delay_ms = 45000\nround_offset_ms = 60000\n"
-    "budget_per_5min = 150\nbackfill_days = 200\nrecheck_ms = 86400000\n"
+    "budget_per_5min = 150\nbackfill_days = 20\nrecheck_ms = 86400000\n"
 )
 
 
@@ -217,7 +239,7 @@ FUNDING_RATE_TABLE = (
     [
         (None, None),
         (FUNDING_RATE_TABLE.format(enabled="false"), None),
-        (FUNDING_RATE_TABLE.format(enabled="true"), FundingRateRule(45_000, 200)),
+        (FUNDING_RATE_TABLE.format(enabled="true"), FundingRateRule(45_000, 20)),
     ],
 )
 def test_serve_passes_the_funding_rate_rule_of_the_file_to_the_app(

@@ -146,7 +146,7 @@ def test_the_api_package_has_no_violations() -> None:
         assert find_violations(path.read_text()) == [], path.name
 
 
-FUNDING_RULE = FundingRateRule(publication_delay_ms=30_000, backfill_days=365)
+FUNDING_RULE = FundingRateRule(publication_delay_ms=30_000, backfill_days=1)
 OI_RULE = OpenInterestRule(cadence=1, expected_after_ms=500_000, lag_threshold_ms=60_000, period=Timeframe("5m"))
 OI_Q = f"venue=binance-usdm&symbol=BTC/USDT:USDT&period=5m&start={S}"
 

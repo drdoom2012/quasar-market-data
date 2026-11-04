@@ -863,7 +863,7 @@ Pagination is by time, ascending by `(funding_time_ms, rate_type)` (`Regular` be
   "as_of_ms": 1792727045000,
   "rule": {
     "publication_delay_ms": 30000, "behind_after_ms": 7230000,
-    "quiet_after_ms": 172800000, "backfill_days": 365
+    "quiet_after_ms": 172800000, "backfill_days": 30
   },
   "scope": "stored_series",
   "status": "degraded",

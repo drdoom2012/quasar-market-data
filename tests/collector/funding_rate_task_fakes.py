@@ -374,7 +374,7 @@ def task_config(
     budget_per_5min: int = 150,
     delay_ms: int = 30_000,
     offset_ms: int = 60_000,
-    backfill_days: int = 365,
+    backfill_days: int = 1,
     recheck_ms: int = 86_400_000,
 ) -> FundingRateTaskConfig:
     return FundingRateTaskConfig(
@@ -393,7 +393,7 @@ async def start_task(
     *,
     symbols: Sequence[str] = ("BTC/USDT:USDT", "ETH/USDT:USDT"),
     budget_per_5min: int = 150,
-    backfill_days: int = 365,
+    backfill_days: int = 1,
     recheck_ms: int = 86_400_000,
     offset_ms: int = 60_000,
     rig: Rig | None = None,

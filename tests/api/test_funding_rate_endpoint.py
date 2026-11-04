@@ -27,7 +27,7 @@ from tests.api.seed import (
     set_funding_span,
 )
 
-RULE = FundingRateRule(publication_delay_ms=30_000, backfill_days=365)
+RULE = FundingRateRule(publication_delay_ms=30_000, backfill_days=1)
 H = 3_600_000
 EIGHT = 8 * H
 T0 = 1_792_656_000_017

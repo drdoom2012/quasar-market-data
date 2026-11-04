@@ -10,8 +10,13 @@ from typing import Final
 
 from tools.symbol_overview.model import (
     BUCKET_SLOTS,
+    FUNDING_STATE_ORDER,
     TF_MS,
     Coverage,
+    FundingCoverage,
+    FundingHealth,
+    FundingReport,
+    FundingWindow,
     Health,
     InstrumentRow,
     Invalid,
@@ -124,12 +129,15 @@ def build_overview(
     duration_ms: int,
     deadline_hit: bool,
     open_interest: "OiPart | None" = None,
+    funding: "FundingPart | None" = None,
 ) -> dict[str, object]:
     """The object the page draws (spec 5.8). The clock and the rule are the API's, from ``/health/ingest``.
 
     Without ``open_interest`` the object is exactly the candle-only one. With it, keys are only **added**: a top-level
     ``open_interest`` block, ``candle_not_asked``, ``oi_deadline_hit`` and ``oi_not_asked`` in ``refresh`` and an
     ``open_interest`` block per symbol (``None`` when disabled). Every existing key keeps its meaning (design 8.7).
+    With ``funding`` (FR-6 design 6) the same rule holds again: a ``funding_rate`` block, ``funding_deadline_hit`` and
+    ``funding_not_asked`` in ``refresh``, a ``funding_rate`` block per symbol; nothing existing changes.
     """
     summary: dict[str, int] = {"total": len(reports), **dict.fromkeys(STATE_ORDER, 0)}
     for report in reports:
@@ -147,6 +155,8 @@ def build_overview(
         "summary": summary,
         "symbols": symbols,
     }
+    if funding is not None:
+        _add_funding(body, funding, reports)
     if open_interest is None:
         return body
 
@@ -274,3 +284,160 @@ def _oi_body(report: OiReport) -> dict[str, object]:
         "retrieval_horizon_ms": report.retrieval_horizon_ms,
         "strip": report.strip,
     }
+
+
+# --- funding rate (FR-6, design 4.3, 6) -------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FundingPart:
+    """The funding half of one refresh. ``status``: ``disabled``, ``unknown`` (the health object or the window cannot
+    be used) or ``enabled``; ``reports`` line up by position with the candle reports (none when disabled).
+    ``window`` and ``health`` are set when ``status`` is ``enabled``; ``clamped`` is true when the window starts
+    later than the page's 30 days because ``backfill_days`` is shorter."""
+
+    status: str
+    detail: str
+    reports: tuple[FundingReport, ...]
+    deadline_hit: bool
+    funding_not_asked: int
+    window: FundingWindow | None = None
+    health: FundingHealth | None = None
+    clamped: bool = False
+
+
+def _funding_report(state: str, reasons: tuple[Reason, ...], answer: FundingCoverage | None = None) -> FundingReport:
+    return FundingReport(
+        state=state,
+        reasons=reasons,
+        oldest_funding_time_ms=answer.oldest_funding_time_ms if answer else None,
+        newest_funding_time_ms=answer.newest_funding_time_ms if answer else None,
+        verified_from_ms=answer.verified_from_ms if answer else None,
+        verified_through_ms=answer.verified_through_ms if answer else None,
+        verified_at_ms=answer.verified_at_ms if answer else None,
+        window_state=answer.window_state if answer else None,
+        events_in_window=answer.events_in_window if answer else None,
+        conflicted_events=answer.conflicted_events if answer else None,
+        complete=answer.complete if answer else None,
+        as_of_ms=answer.as_of_ms if answer else None,
+    )
+
+
+def judge_funding_failure(outcome: Invalid) -> FundingReport:
+    """A symbol whose funding answer is missing or unusable: ``no_data`` for an unknown series, else ``unknown``."""
+    if outcome == Invalid("api_error", "unknown_series"):
+        return _funding_report("no_data", (Reason("no_data", 0, 0),))
+    detail = f"{outcome.code}:{outcome.detail}" if outcome.detail else outcome.code
+    return _funding_report("unknown", (Reason("invalid", 0, 0, detail),))
+
+
+def judge_funding(
+    outcome: FundingCoverage | Invalid, funding_window: FundingWindow, health: FundingHealth, as_of_ms: int
+) -> FundingReport:
+    """The state and all reasons of one symbol's funding (design 4.3). ``outcome`` has passed validation.
+
+    ``as_of_ms`` is ``T0``, the clock of the health answer, so that ``quiet`` agrees with ``health.quiet_series``.
+    The page compares only: the verified span with the window it asked for, and the newest settlement with the API's
+    own ``quiet_after_ms``. ``ok`` needs ``complete`` and a settlement that is not quiet; nothing else is green.
+    """
+    if isinstance(outcome, Invalid):
+        return judge_funding_failure(outcome)
+
+    newest = outcome.newest_funding_time_ms
+    reasons: list[Reason] = []
+    if outcome.conflicted_events:
+        reasons.append(Reason("conflict", outcome.conflicted_events, 0))
+    if newest is None or as_of_ms - newest > health.rule.quiet_after_ms:
+        reasons.append(Reason("quiet", 0, 0))
+    if outcome.verified_through_ms is not None and outcome.verified_through_ms < funding_window.end:
+        reasons.append(Reason("behind", 0, 0))
+    if outcome.window_state == "unverified":
+        reasons.append(Reason("unverified", 0, 0))
+    if (
+        outcome.window_state == "partly_verified"
+        and outcome.verified_from_ms is not None
+        and outcome.verified_from_ms > funding_window.start
+    ):
+        reasons.append(Reason("partly_verified", 0, 0))
+    if not reasons and not outcome.complete:  # unreachable for a validated answer; never green by inference
+        return _funding_report("unknown", (Reason("invalid", 0, 0, "counts"),))
+    codes = {reason.code for reason in reasons}
+    state = next((s for s in FUNDING_STATE_ORDER if s in codes), "ok")
+    return _funding_report(state, tuple(reasons), outcome)
+
+
+def funding_summary(reports: Sequence[FundingReport]) -> dict[str, int]:
+    """Counts of symbols by funding headline, in the shape of the candle ``summary``."""
+    summary: dict[str, int] = {"total": len(reports), **dict.fromkeys(FUNDING_STATE_ORDER, 0)}
+    for report in reports:
+        summary[report.state] += 1
+    return summary
+
+
+def _funding_body(report: FundingReport) -> dict[str, object]:
+    return {
+        "state": report.state,
+        "reasons": [{"code": r.code, "slots": r.slots, "runs": r.runs, "detail": r.detail} for r in report.reasons],
+        "oldest_funding_time_ms": report.oldest_funding_time_ms,
+        "newest_funding_time_ms": report.newest_funding_time_ms,
+        "verified_from_ms": report.verified_from_ms,
+        "verified_through_ms": report.verified_through_ms,
+        "verified_at_ms": report.verified_at_ms,
+        "window_state": report.window_state,
+        "events_in_window": report.events_in_window,
+        "conflicted_events": report.conflicted_events,
+        "complete": report.complete,
+        "as_of_ms": report.as_of_ms,
+    }
+
+
+def _add_funding(body: dict[str, object], funding: FundingPart, candle_reports: Sequence[SymbolReport]) -> None:
+    """Add the funding blocks to ``body`` (additive; nothing existing is touched)."""
+    judged = funding.reports
+    if funding.status == "disabled":
+        if judged:
+            raise ValueError("a disabled funding part has no reports")
+    elif len(judged) != len(candle_reports):
+        raise ValueError(f"{len(judged)} funding reports for {len(candle_reports)} symbols")
+    refresh = body["refresh"]
+    assert isinstance(refresh, dict)
+    refresh["funding_deadline_hit"] = funding.deadline_hit
+    refresh["funding_not_asked"] = funding.funding_not_asked
+    enabled = funding.status == "enabled" and funding.window is not None and funding.health is not None
+    health = funding.health
+    body["funding_rate"] = {
+        "status": funding.status,
+        "detail": funding.detail,
+        "summary": None if funding.status == "disabled" else funding_summary(judged),
+        "window": (
+            {"start": funding.window.start, "end": funding.window.end, "clamped": funding.clamped}
+            if enabled and funding.window is not None
+            else None
+        ),
+        "rule": (
+            {
+                "behind_after_ms": health.rule.behind_after_ms,
+                "quiet_after_ms": health.rule.quiet_after_ms,
+                "backfill_days": health.rule.backfill_days,
+            }
+            if enabled and health is not None
+            else None
+        ),
+        "health": (
+            {
+                "status": health.status,
+                "series_count": health.series_count,
+                "current": health.current,
+                "behind": health.behind,
+                "catching_up": health.catching_up,
+                "quiet_series": health.quiet_series,
+                "conflicted_series": health.conflicted_series,
+            }
+            if enabled and health is not None
+            else None
+        ),
+    }
+    symbols = body["symbols"]
+    assert isinstance(symbols, list)
+    for index, symbol in enumerate(symbols):
+        symbol["funding_rate"] = None if funding.status == "disabled" else _funding_body(judged[index])

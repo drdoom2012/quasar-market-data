@@ -5,8 +5,8 @@
 
 Kinds and classes (the limiter shares are in P-9): ``S`` seed of a series without a span, ``R`` the hourly check of
 a series with a span (both class ``R``, first page only, only while a round is active); ``C`` the next page of a
-truncated forward range; ``H`` the next chunk, or the next page of the current chunk, of backward history (both
-class ``C``/``H`` share). ``behind`` is informational and never moves a series between kinds: only a series with
+truncated forward range; ``H`` the backward history range (the whole missing depth, at most 30 days)
+or its next page (both class ``C``/``H`` share). ``behind`` is informational and never moves a series between kinds: only a series with
 ``continuing_from_ms`` set is a ``C`` candidate (the start-up reconcile sets it for a series that is behind after a
 restart, P-11 step 2).
 
@@ -36,7 +36,7 @@ _FAR: Final = 2**62
 
 @dataclass(frozen=True)
 class HistoryChunk:
-    """A backward chunk ``[from_ms, through_ms]`` whose next page starts at ``next_start_ms``."""
+    """The backward history range ``[from_ms, through_ms]`` (at most 30 days) whose next page starts at ``next_start_ms``."""
 
     from_ms: int
     through_ms: int

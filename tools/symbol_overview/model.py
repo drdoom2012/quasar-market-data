@@ -48,6 +48,26 @@ OI_RUN_STATES: Final = ("conflicted", "no_longer_recoverable", "missing", "not_y
 OI_STATE_RANK: Final = {"no_longer_recoverable": 0, "missing": 1, "stale": 2, "due": 3, "not_yet_expected": 4}
 
 
+# Funding rate (FR-6, design 4; contract 6.7). The series has no grid: one call per symbol, no strip.
+FUNDING_PATH: Final = "/v1/funding-rates"
+FUNDING_LIMIT: Final = 2  # the minimum (C§6.7.2); coverage speaks for the whole window whatever the limit (C§6.7.5)
+DAY_MS: Final = 86_400_000
+MAX_FUNDING_WINDOW_MS: Final = 365 * DAY_MS  # C§6.7.2
+FUNDING_WINDOW_STATES: Final = ("verified", "partly_verified", "unverified")
+FUNDING_STATUSES: Final = ("no_series", "degraded", "behind", "catching_up", "current")
+# Headline states of one symbol's funding, worst first (design 4.3).
+FUNDING_STATE_ORDER: Final = (
+    "no_data",
+    "unknown",
+    "conflict",
+    "quiet",
+    "behind",
+    "unverified",
+    "partly_verified",
+    "ok",
+)
+
+
 # The closed set of reasons an answer is not trusted (spec 5.6, 5.9, 5.10). ``api_error`` carries the API's own
 # ``error.code`` as its detail.
 INVALID_CODES: Final = frozenset(
@@ -193,3 +213,70 @@ class OiReport:
     as_of_ms: int | None
     retrieval_horizon_ms: int | None
     strip: str | None
+
+
+@dataclass(frozen=True)
+class FundingWindow:
+    """The funding request window ``[start, end]``: both ends **inclusive** and not aligned (C§6.7.2).
+
+    Not a ``Window``: that one is aligned with an exclusive end, and sharing the type would invite misuse.
+    """
+
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
+class FundingRule:
+    publication_delay_ms: int
+    behind_after_ms: int
+    quiet_after_ms: int
+    backfill_days: int
+
+
+@dataclass(frozen=True)
+class FundingHealth:
+    """``health.funding_rate``, validated. The counts are the API's own figures over all stored series."""
+
+    rule: FundingRule
+    status: str
+    series_count: int
+    current: int
+    behind: int
+    catching_up: int
+    conflicted_series: int
+    quiet_series: int
+
+
+@dataclass(frozen=True)
+class FundingCoverage:
+    """One validated ``GET /v1/funding-rates`` answer. No row is kept: the rows are not used (design 4.1)."""
+
+    as_of_ms: int
+    oldest_funding_time_ms: int | None
+    newest_funding_time_ms: int | None
+    verified_from_ms: int | None
+    verified_through_ms: int | None
+    verified_at_ms: int | None
+    window_state: str
+    events_in_window: int
+    conflicted_events: int
+    complete: bool
+
+
+@dataclass(frozen=True)
+class FundingReport:
+    """One symbol's funding, judged: the display fields of the answer, no more."""
+
+    state: str
+    reasons: tuple[Reason, ...]
+    oldest_funding_time_ms: int | None
+    newest_funding_time_ms: int | None
+    verified_from_ms: int | None
+    verified_through_ms: int | None
+    verified_at_ms: int | None
+    window_state: str | None
+    events_in_window: int | None
+    conflicted_events: int | None
+    complete: bool | None
+    as_of_ms: int | None

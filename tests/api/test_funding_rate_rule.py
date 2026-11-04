@@ -17,7 +17,7 @@ def settings_for(table: str | None) -> Settings:
     return parse_settings(text, base_dir=BASE)
 
 
-def table(*, enabled: bool = True, delay: int = 45_000, backfill_days: int = 200) -> str:
+def table(*, enabled: bool = True, delay: int = 45_000, backfill_days: int = 20) -> str:
     return (
         "[funding_rate]\n"
         f"enabled = {'true' if enabled else 'false'}\n"
@@ -38,6 +38,6 @@ def test_a_disabled_table_gives_no_rule() -> None:
 
 
 def test_an_enabled_table_gives_the_delay_and_the_depth_of_the_file() -> None:
-    rule = rule_from_settings(settings_for(table(delay=45_000, backfill_days=200)))
+    rule = rule_from_settings(settings_for(table(delay=45_000, backfill_days=20)))
 
-    assert rule == FundingRateRule(publication_delay_ms=45_000, backfill_days=200)
+    assert rule == FundingRateRule(publication_delay_ms=45_000, backfill_days=20)
