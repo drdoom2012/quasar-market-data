@@ -11,8 +11,8 @@ import pytest
 
 from quasar_market_data.collector.async_open_interest_writer import OpenInterestPageError, OpenInterestWriteReport
 from quasar_market_data.collector.binance_usdm_open_interest import OpenInterestRequestRefused
+from quasar_market_data.collector.extension_pause import ExtensionPaused, ExtensionStopped
 from quasar_market_data.collector.kline_source import SourceError
-from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestPaused
 from quasar_market_data.collector.open_interest_task import OpenInterestWriterUnusable, _OpenInterestTask
 from quasar_market_data.collector.open_interest_writer import (
     OpenInterestWriteBusy,
@@ -334,7 +334,7 @@ def test_untrusted_time_makes_no_history_request_and_a_later_round_recovers(tmp_
 def test_a_429_stops_the_round_and_the_task_continues_with_the_next(tmp_path: Path) -> None:
     async def scenario() -> None:
         rig = await make_rig(tmp_path, symbols=symbols_of(10), recording=True)
-        rig.source.errors = [OpenInterestPaused(300_000, rig.t.monotonic_ns() + 300_000 * NS_PER_MS)]
+        rig.source.errors = [ExtensionPaused(300_000, rig.t.monotonic_ns() + 300_000 * NS_PER_MS)]
         rig.start()
         await rig.until_lines("oi-round", 1)
         line = rig.lines_with("oi-round")[0]
@@ -353,7 +353,7 @@ def test_a_429_stops_the_round_and_the_task_continues_with_the_next(tmp_path: Pa
 def test_a_429_on_the_time_request_skips_the_round(tmp_path: Path) -> None:
     async def scenario() -> None:
         rig = await make_rig(tmp_path, symbols=("BTC/USDT:USDT",), recording=True)
-        rig.source.time_error = OpenInterestPaused(300_000, 0)
+        rig.source.time_error = ExtensionPaused(300_000, 0)
         rig.start()
         await rig.until_lines("oi-round", 1)
         assert rig.source.hist_calls == [] and field(rig.lines_with("oi-round")[0], "paused") == 1
@@ -365,10 +365,10 @@ def test_a_429_on_the_time_request_skips_the_round(tmp_path: Path) -> None:
 def test_a_418_ends_the_task_by_raising_without_logging_it(tmp_path: Path) -> None:
     async def scenario() -> None:
         rig = await make_rig(tmp_path, symbols=("BTC/USDT:USDT",), recording=True)
-        rig.source.errors = [OpenInterestBanned()]
+        rig.source.errors = [ExtensionStopped()]
         rig.start()
         assert rig.task is not None
-        with pytest.raises(OpenInterestBanned):
+        with pytest.raises(ExtensionStopped):
             await asyncio.wait_for(rig.task, 5)
         assert rig.lines_with("oi-error") == []
         assert len(rig.source.hist_calls) == 1

@@ -129,7 +129,6 @@ type = "forbidden"
 source_modules = [
     "quasar_market_data.collector.binance_usdm_open_interest",
     "quasar_market_data.collector.open_interest_budget",
-    "quasar_market_data.collector.open_interest_gate",
     "quasar_market_data.collector.fetch_open_interest_once",
     "quasar_market_data.collector.open_interest_reader",
     "quasar_market_data.collector.open_interest_measurements",
@@ -138,6 +137,25 @@ source_modules = [
 forbidden_modules = [
     "quasar_market_data.collector.rate_limiter",
     "quasar_market_data.collector.shared_server_time",
+]
+
+[[tool.importlinter.contracts]]
+name = "open interest does not use funding rate modules"
+type = "forbidden"
+allow_indirect_imports = true  # the only shared object is extension_pause (amendment A-3); the rule is no direct use
+source_modules = [
+    "quasar_market_data.collector.binance_usdm_open_interest",
+    "quasar_market_data.collector.open_interest_budget",
+    "quasar_market_data.collector.fetch_open_interest_once",
+    "quasar_market_data.collector.open_interest_reader",
+    "quasar_market_data.collector.open_interest_measurements",
+    "quasar_market_data.collector.open_interest_task",
+]
+forbidden_modules = [
+    "quasar_market_data.collector.funding_rate_limiter",
+    "quasar_market_data.collector.binance_usdm_funding_rate",
+    "quasar_market_data.collector.funding_rate_task",
+    "quasar_market_data.collector.fetch_funding_rate_once",
 ]
 
 [[tool.importlinter.contracts]]
@@ -160,7 +178,6 @@ forbidden_modules = [
     "quasar_market_data.collector.binance_usdm_open_interest",
     "quasar_market_data.collector.binance_open_interest",
     "quasar_market_data.collector.open_interest_budget",
-    "quasar_market_data.collector.open_interest_gate",
     "quasar_market_data.collector.open_interest_task",
     "quasar_market_data.collector.open_interest_measurements",
     "quasar_market_data.collector.open_interest_reader",

@@ -4,6 +4,7 @@ import pytest
 
 from quasar_market_data.collector.async_open_interest_writer import OpenInterestPageError, OpenInterestWriteReport
 from quasar_market_data.collector.binance_open_interest import OpenInterestParseError
+from quasar_market_data.collector.extension_pause import ExtensionPaused, ExtensionStopped
 from quasar_market_data.collector.fetch_open_interest_once import (
     MAX_PERIODS,
     FetchOpenInterestOnceConfig,
@@ -11,7 +12,6 @@ from quasar_market_data.collector.fetch_open_interest_once import (
     fetch_open_interest_once,
 )
 from quasar_market_data.collector.kline_source import SourceError
-from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestPaused
 from quasar_market_data.collector.open_interest_writer import OpenInterestWriteOutcomeUnknown
 from tests.collector.fetch_fakes import SYMBOL, FakeClock
 from tests.collector.open_interest_fakes import STEP, FakeOiSource, RecordingSink
@@ -82,7 +82,7 @@ def test_a_row_for_another_symbol_rejects_the_whole_response_and_writes_nothing(
     assert sink.writes == []
 
 
-@pytest.mark.parametrize("error", [SourceError("boom"), OpenInterestPaused(300_000, 1)])
+@pytest.mark.parametrize("error", [SourceError("boom"), ExtensionPaused(300_000, 1)])
 def test_source_errors_propagate_and_nothing_is_written(error: SourceError) -> None:
     clock = FakeClock()
     source, sink = FakeOiSource(clock, hist_error=error), RecordingSink()
@@ -91,7 +91,7 @@ def test_source_errors_propagate_and_nothing_is_written(error: SourceError) -> N
     assert sink.writes == []
 
 
-@pytest.mark.parametrize("error", [OpenInterestPaused(300_000, 1), OpenInterestBanned()], ids=["paused", "banned"])
+@pytest.mark.parametrize("error", [ExtensionPaused(300_000, 1), ExtensionStopped()], ids=["paused", "banned"])
 def test_a_429_or_418_on_the_time_request_is_not_reported_as_untrusted_time(error: SourceError) -> None:
     clock = FakeClock()
     source, sink = FakeOiSource(clock, time_error=error), RecordingSink()

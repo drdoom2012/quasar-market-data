@@ -13,8 +13,8 @@ import pytest
 
 import quasar_market_data.collector.open_interest_task as task_module
 from quasar_market_data.collector.async_open_interest_writer import OpenInterestPageError, OpenInterestWriteReport
+from quasar_market_data.collector.extension_pause import ExtensionPaused
 from quasar_market_data.collector.kline_source import SourceError
-from quasar_market_data.collector.open_interest_gate import OpenInterestPaused
 from quasar_market_data.collector.open_interest_reader import OpenInterestReadError
 from quasar_market_data.collector.open_interest_task import OpenInterestWriterUnusable
 from quasar_market_data.collector.open_interest_writer import OpenInterestWriteError
@@ -234,7 +234,7 @@ def test_a_full_budget_now_that_frees_before_the_next_wake_still_starts_no_page_
 def test_a_429_ends_the_window_and_the_next_round_goes_on(tmp_path: Path) -> None:
     async def scenario() -> None:
         rig = await make_rig(tmp_path, symbols=(BTC,))
-        rig.source.errors = [None, OpenInterestPaused(300_000, 0)]  # the round's call, then the first page
+        rig.source.errors = [None, ExtensionPaused(300_000, 0)]  # the round's call, then the first page
         await first_window(rig)
         line = rig.lines_with("oi-catchup")[0]
         assert field(line, "end") == "paused" and field(line, "pages") == "0"

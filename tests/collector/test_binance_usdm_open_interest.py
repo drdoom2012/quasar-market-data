@@ -15,9 +15,9 @@ from quasar_market_data.collector.binance_usdm_open_interest import (
     BinanceUsdmOpenInterestSource,
     OpenInterestRequestRefused,
 )
+from quasar_market_data.collector.extension_pause import ExtensionPause, ExtensionPaused, ExtensionStopped
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.collector.open_interest_budget import WINDOW_MS, OpenInterestBudget
-from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestGate, OpenInterestPaused
 from quasar_market_data.domain.open_interest_request import RETRIEVAL_HORIZON_MS
 from quasar_market_data.domain.timeframe import Timeframe
 from tests.collector.manual_time import NS_PER_MS, ManualTime, assert_no_leftover_tasks
@@ -128,11 +128,11 @@ class Rig:
         self.t = ManualTime()
         self.exchange = FakeExchange(self.t)
         self.budget = CountingBudget(b, self.t)
-        self.gate = OpenInterestGate(self.t)
+        self.pause = ExtensionPause(self.t)
         self.source: BinanceUsdmOpenInterestSource | None = None
 
     async def open(self) -> BinanceUsdmOpenInterestSource:
-        self.source = await BinanceUsdmOpenInterestSource.open(self.budget, self.gate, self.t, self.exchange)
+        self.source = await BinanceUsdmOpenInterestSource.open(self.budget, self.pause, self.t, self.exchange)
         return self.source
 
 
@@ -244,7 +244,7 @@ def test_a_start_older_than_the_horizon_is_never_sent_and_one_at_the_horizon_is(
     run(scenario)
 
 
-def test_a_1130_answer_is_a_source_error_not_a_crash_and_the_gate_is_unchanged() -> None:
+def test_a_1130_answer_is_a_source_error_not_a_crash_and_the_pause_is_unchanged() -> None:
     async def scenario() -> None:
         rig = Rig()
         source = await rig.open()
@@ -253,8 +253,8 @@ def test_a_1130_answer_is_a_source_error_not_a_crash_and_the_gate_is_unchanged()
         ]
         with pytest.raises(SourceError, match="1130") as raised:
             await hist(source)
-        assert not isinstance(raised.value, (OpenInterestRequestRefused, OpenInterestPaused, OpenInterestBanned))
-        rig.gate.check()  # neither paused nor banned
+        assert not isinstance(raised.value, (OpenInterestRequestRefused, ExtensionPaused, ExtensionStopped))
+        rig.pause.check()  # neither paused nor banned
         assert rig.budget.acquired == 1  # the request was sent
         await hist(source)  # and the source keeps working
 
@@ -319,8 +319,8 @@ def test_open_creates_its_own_client_each_time_and_never_the_candle_sources() ->
     async def scenario() -> None:
         t = ManualTime()
         candle = await BinanceUsdmSource.open()  # patched factory: the candle source's own client
-        first = await BinanceUsdmOpenInterestSource.open(OpenInterestBudget(10, t, t.sleep), OpenInterestGate(t), t)
-        second = await BinanceUsdmOpenInterestSource.open(OpenInterestBudget(10, t, t.sleep), OpenInterestGate(t), t)
+        first = await BinanceUsdmOpenInterestSource.open(OpenInterestBudget(10, t, t.sleep), ExtensionPause(t), t)
+        second = await BinanceUsdmOpenInterestSource.open(OpenInterestBudget(10, t, t.sleep), ExtensionPause(t), t)
         assert len(created) == 3
         assert len({id(client) for client in created}) == 3
         for source in (candle, first, second):
@@ -475,14 +475,14 @@ def test_429_and_the_other_rate_signals_pause_all_open_interest_requests(error: 
         source = await rig.open()
         rig.exchange.errors = [error]
         call = hist(source) if endpoint == "hist" else source.fetch_server_time()
-        with pytest.raises(OpenInterestPaused) as raised:
+        with pytest.raises(ExtensionPaused) as raised:
             await call
         assert raised.value.remaining_ms == 300 * S
         calls_before, budget_before = len(rig.exchange.calls), rig.budget.acquired
         for _ in range(5):
-            with pytest.raises(OpenInterestPaused):
+            with pytest.raises(ExtensionPaused):
                 await hist(source)
-            with pytest.raises(OpenInterestPaused):
+            with pytest.raises(ExtensionPaused):
                 await source.fetch_server_time()
         assert (len(rig.exchange.calls), rig.budget.acquired) == (calls_before, budget_before)
         await rig.t.advance(300 * S)
@@ -498,14 +498,14 @@ def test_consecutive_429s_double_the_pause_and_a_success_resets_it() -> None:
         remaining = []
         for _ in range(3):
             rig.exchange.errors = [ddos(429)]
-            with pytest.raises(OpenInterestPaused) as raised:
+            with pytest.raises(ExtensionPaused) as raised:
                 await hist(source)
             remaining.append(raised.value.remaining_ms)
             await rig.t.advance(raised.value.remaining_ms)
         assert remaining == [300 * S, 600 * S, 1200 * S]
         await hist(source)  # success resets the doubling
         rig.exchange.errors = [ddos(429)]
-        with pytest.raises(OpenInterestPaused) as raised:
+        with pytest.raises(ExtensionPaused) as raised:
             await hist(source)
         assert raised.value.remaining_ms == 300 * S
 
@@ -531,7 +531,7 @@ def test_retry_after_is_read_case_insensitively_and_strictly(headers: dict[str, 
         source = await rig.open()
         rig.exchange.last_response_headers = headers
         rig.exchange.errors = [ddos(429)]
-        with pytest.raises(OpenInterestPaused) as raised:
+        with pytest.raises(ExtensionPaused) as raised:
             await hist(source)
         assert raised.value.remaining_ms == expected_s * S
 
@@ -552,7 +552,7 @@ def test_retry_after_is_only_read_for_an_http_429(error: ccxt.BaseError) -> None
         source = await rig.open()
         rig.exchange.last_response_headers = {"Retry-After": "900"}  # may belong to another response
         rig.exchange.errors = [error]
-        with pytest.raises(OpenInterestPaused) as raised:
+        with pytest.raises(ExtensionPaused) as raised:
             await hist(source)
         assert raised.value.remaining_ms == 300 * S
 
@@ -562,20 +562,20 @@ def test_retry_after_is_only_read_for_an_http_429(error: ccxt.BaseError) -> None
 @pytest.mark.parametrize(
     "bad_time", [{"serverTime": "x"}, {"serverTime": 1}, {}], ids=["str", "out_of_range", "missing"]
 )
-def test_a_time_answer_the_adapter_rejects_still_counts_as_a_success_for_the_gate(bad_time: object) -> None:
+def test_a_time_answer_the_adapter_rejects_still_counts_as_a_success_for_the_pause(bad_time: object) -> None:
     async def scenario() -> None:
         rig = Rig()
         source = await rig.open()
         rig.exchange.errors = [ddos(429)]
-        with pytest.raises(OpenInterestPaused):
+        with pytest.raises(ExtensionPaused):
             await hist(source)
         await rig.t.advance(300 * S)
         rig.exchange.time_response = bad_time
         with pytest.raises(SourceError) as raised:
             await source.fetch_server_time()
-        assert not isinstance(raised.value, (OpenInterestPaused, OpenInterestBanned))
+        assert not isinstance(raised.value, (ExtensionPaused, ExtensionStopped))
         rig.exchange.errors = [ddos(429)]
-        with pytest.raises(OpenInterestPaused) as again:
+        with pytest.raises(ExtensionPaused) as again:
             await hist(source)
         assert again.value.remaining_ms == 300 * S  # the answer arrived: the doubling was reset
 
@@ -588,7 +588,7 @@ def test_the_pause_signal_names_the_end_of_the_pause() -> None:
         source = await rig.open()
         started = rig.t.monotonic_ns()
         rig.exchange.errors = [ddos(429)]
-        with pytest.raises(OpenInterestPaused) as raised:
+        with pytest.raises(ExtensionPaused) as raised:
             await hist(source)
         assert raised.value.until_monotonic_ns == started + 300 * S * NS_PER_MS
 
@@ -604,13 +604,13 @@ def test_a_request_that_started_before_a_pause_cannot_reset_the_doubling() -> No
         await rig.t.settle()
         rig.exchange.hold = False
         rig.exchange.errors = [ddos(429)]
-        with pytest.raises(OpenInterestPaused):
+        with pytest.raises(ExtensionPaused):
             await hist(source)  # a second request gets the 429 meanwhile
         await rig.t.advance(300 * S)  # the pause is over
         rig.exchange.release.set()
         await slow  # the slow request succeeds only now: it started before the pause
         rig.exchange.errors = [ddos(429)]
-        with pytest.raises(OpenInterestPaused) as raised:
+        with pytest.raises(ExtensionPaused) as raised:
             await hist(source)
         assert raised.value.remaining_ms == 600 * S
 
@@ -622,13 +622,13 @@ def test_418_stops_open_interest_for_the_run_on_both_endpoints() -> None:
         rig = Rig()
         source = await rig.open()
         rig.exchange.errors = [ddos(418, '{"code":-1003,"msg":"Way too many requests; IP banned."}')]
-        with pytest.raises(OpenInterestBanned):
+        with pytest.raises(ExtensionStopped):
             await hist(source)
         calls_before = len(rig.exchange.calls)
         await rig.t.advance(2 * 3600 * S)
-        with pytest.raises(OpenInterestBanned):
+        with pytest.raises(ExtensionStopped):
             await hist(source)
-        with pytest.raises(OpenInterestBanned):
+        with pytest.raises(ExtensionStopped):
             await source.fetch_server_time()
         assert len(rig.exchange.calls) == calls_before
 
@@ -640,9 +640,9 @@ def test_418_on_the_time_request_also_bans() -> None:
         rig = Rig()
         source = await rig.open()
         rig.exchange.errors = [ddos(418)]
-        with pytest.raises(OpenInterestBanned):
+        with pytest.raises(ExtensionStopped):
             await source.fetch_server_time()
-        with pytest.raises(OpenInterestBanned):
+        with pytest.raises(ExtensionStopped):
             await hist(source)
 
     run(scenario)
@@ -661,10 +661,10 @@ def test_a_call_that_waited_in_the_budget_sends_nothing_after_another_call_got_a
         await rig.t.settle()
         rig.exchange.hold = False
         rig.exchange.release.set()
-        with pytest.raises(OpenInterestPaused):
+        with pytest.raises(ExtensionPaused):
             await first
         await rig.t.advance(WINDOW_MS)  # the budget frees its slot, the pause (900 s) is still running
-        with pytest.raises(OpenInterestPaused):
+        with pytest.raises(ExtensionPaused):
             await second
         assert rig.exchange.called("hist") == 1
 
@@ -685,8 +685,8 @@ def test_a_call_that_waited_for_an_in_flight_slot_sends_nothing_after_a_429_or_4
         rig.exchange.hold = False
         rig.exchange.release.set()
         results = await asyncio.gather(*running, waiting, return_exceptions=True)
-        assert all(isinstance(result, (OpenInterestPaused, OpenInterestBanned, list)) for result in results)
-        assert isinstance(results[2], (OpenInterestPaused, OpenInterestBanned))
+        assert all(isinstance(result, (ExtensionPaused, ExtensionStopped, list)) for result in results)
+        assert isinstance(results[2], (ExtensionPaused, ExtensionStopped))
         assert rig.exchange.called("hist") == 2
 
     run(scenario)
@@ -699,12 +699,12 @@ def test_candle_requests_continue_while_open_interest_is_paused_and_banned() -> 
         candle_exchange = FakeCandleExchange()
         candle = await BinanceUsdmSource.open(candle_exchange)
         rig.exchange.errors = [ddos(429)]
-        with pytest.raises(OpenInterestPaused):
+        with pytest.raises(ExtensionPaused):
             await hist(source)
         assert (await candle.fetch_server_time()).server_time_ms == 1792677035725
         assert len(await candle.fetch_klines(SYMBOL, P5, 100)) > 0
-        rig.gate.record_banned()
-        with pytest.raises(OpenInterestBanned):
+        rig.pause.record_banned()
+        with pytest.raises(ExtensionStopped):
             await hist(source)
         assert len(await candle.fetch_klines(SYMBOL, P5, 100)) > 0
 
@@ -729,8 +729,8 @@ def test_other_failures_are_source_errors_and_do_not_pause() -> None:
         rig.exchange.errors = [ccxt.NetworkError("connection reset")]
         with pytest.raises(SourceError, match="connection reset") as raised:
             await hist(source)
-        assert not isinstance(raised.value, (OpenInterestPaused, OpenInterestBanned))
-        rig.gate.check()
+        assert not isinstance(raised.value, (ExtensionPaused, ExtensionStopped))
+        rig.pause.check()
 
     run(scenario)
 

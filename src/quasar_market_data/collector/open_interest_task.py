@@ -1,7 +1,7 @@
 """The open interest task: rounds on the derived cadence (ADR-0003 P-9, P-10).
 
 One asyncio task per Collector process, started by ``run`` after the candle loop's first round and its post-check.
-It owns its source, writer, budget and gate (nothing is shared with candle collection) and never imports the candle
+It owns its source, writer and budget and shares only the ExtensionPause with funding (nothing is shared with candle collection) and never imports the candle
 rate limiter, the shared server time or the collection loop (import contract). Any exception that leaves
 ``run_open_interest_task`` ends this task only: the caller prints one ``oi-error`` line; the task is not restarted.
 
@@ -15,8 +15,8 @@ are parsed all-or-nothing, only eligible rows are written. A row that Binance ha
 not an error, not retried; the symbol's next overlapping request or the catch-up stores it. A request error (not a
 refusal, a pause or a ban) gets one retry after ``RETRY_DELAY_MS`` if that fits before the deadline.
 
-429 / 418. ``OpenInterestPaused`` stops the round at once (the remaining symbols are ``paused``) and the task goes on
-with the next round; ``OpenInterestBanned`` ends the task. At the round deadline unfinished symbols are cancelled and
+429 / 418. ``ExtensionPaused`` stops the round at once (the remaining symbols are ``paused``) and the task goes on
+with the next round; ``ExtensionStopped`` ends the task. At the round deadline unfinished symbols are cancelled and
 logged with their phase; rows still waiting for the candle writer are dropped unwritten (P-9 rule 2) and the next
 overlapping request stores them.
 
@@ -47,10 +47,10 @@ from quasar_market_data.collector.binance_open_interest import OpenInterestParse
 from quasar_market_data.collector.binance_usdm_open_interest import MAX_IN_FLIGHT, OpenInterestRequestRefused
 from quasar_market_data.collector.candle_write_activity import CandleWriteActivity
 from quasar_market_data.collector.clock import Clock, Sleep
+from quasar_market_data.collector.extension_pause import ExtensionPaused, ExtensionStopped
 from quasar_market_data.collector.fetch_open_interest_once import OpenInterestOnceSource, OpenInterestSink
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.collector.open_interest_budget import WINDOW_MS, OpenInterestBudget
-from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestPaused
 from quasar_market_data.collector.open_interest_measurements import OpenInterestMeasurements
 from quasar_market_data.collector.open_interest_reader import SeriesFacts, read_series
 from quasar_market_data.collector.open_interest_writer import (
@@ -370,7 +370,7 @@ class _OpenInterestTask:
             return
         try:
             observation = await self._observe()
-        except OpenInterestPaused:
+        except ExtensionPaused:
             window.end = "paused"
             return
         trust = server_lower_bound(
@@ -576,9 +576,9 @@ class _OpenInterestTask:
                 report = await self._write(selection.eligible)
                 window.stored += report.inserted
                 self._report_conflicts(report)
-        except OpenInterestPaused:
+        except ExtensionPaused:
             return "paused"
-        except OpenInterestBanned:
+        except ExtensionStopped:
             raise
         except (SourceError, OpenInterestParseError) as error:
             self._page_failed(page, window, _problem(error))
@@ -654,7 +654,7 @@ class _OpenInterestTask:
     async def _observe(self) -> ServerTimeObservation | None:
         try:
             return await self.source.fetch_server_time()
-        except (OpenInterestPaused, OpenInterestBanned):
+        except (ExtensionPaused, ExtensionStopped):
             raise
         except SourceError:
             return None  # a failed time request means no observation
@@ -665,9 +665,11 @@ class _OpenInterestTask:
             return
         try:
             observation = await self._observe()
-        except OpenInterestPaused:
+        except ExtensionPaused:
             self._mark_all(state, OpenInterestSymbolOutcome.PAUSED)
-            self.emit(f"oi-warning round-paused boundary={boundary} time request answered 429")
+            self.emit(
+                f"oi-warning round-paused boundary={boundary} time request paused (429 seen by an extension dataset)"
+            )
             return
         trust = server_lower_bound(
             observation, self.clock.monotonic_ns(), self.clock.wall_ms(), None, config.time_trust
@@ -718,12 +720,14 @@ class _OpenInterestTask:
                 state.phases[symbol] = "fetching"
                 try:
                     await self._collect(symbol, start, end, trust, state)
-                except OpenInterestPaused:
+                except ExtensionPaused:
                     state.paused = True
                     state.outcomes[symbol] = OpenInterestSymbolOutcome.PAUSED
-                    self.emit(f"oi-warning round-paused boundary={boundary} symbol={symbol} Binance answered 429")
+                    self.emit(
+                        f"oi-warning round-paused boundary={boundary} symbol={symbol} paused (429 seen by an extension dataset)"
+                    )
                     return
-                except OpenInterestBanned:
+                except ExtensionStopped:
                     raise
                 except OpenInterestRequestRefused as error:
                     state.outcomes[symbol] = OpenInterestSymbolOutcome.REFUSED

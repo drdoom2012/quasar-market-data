@@ -1,10 +1,11 @@
 """``ExtensionPause``: the stop shared by extension datasets after Binance answers 429 or 418 (ADR-0004 P-9).
 
 One in-process object, consulted before every extension-dataset request and set by whoever receives the response.
-It has the semantics of ``open_interest_gate.OpenInterestGate`` (kept separate until amendment A-3 moves open
-interest onto this class): a ``429`` pauses all requests for ``max(Retry-After, min(300 s * 2^(n-1), 1 h))`` where
+Open interest and funding share one instance per process (amendment A-3 to ADR-0003, ADR-0004 P-9), each with its
+own limiter: a ``429`` pauses all requests for ``max(Retry-After, min(300 s * 2^(n-1), 1 h))`` where
 ``n`` counts consecutive pauses (a success after the pause resets it); a ``Retry-After`` above one hour is
-honoured, because Binance's answer is the authority. A ``418`` stops the dataset for the rest of the process run.
+honoured, because Binance's answer is the authority. A ``418`` stops every extension dataset for the rest of the
+process run.
 The two facts P-9 names are readable: ``paused_until_ns`` (monotonic) and ``stopped``. Candle collection neither
 reads nor is paused by it (import contract ``candle collection does not use extension datasets``).
 
