@@ -18,9 +18,11 @@ from quasar_market_data.api.errors import (
     ApiError,
     NotReadyReason,
     not_ready,
+    unknown_funding_rate_series,
     unknown_open_interest_series,
     unknown_series,
 )
+from quasar_market_data.api.funding_rate_page import FundingRatePage, read_funding_rate_page
 from quasar_market_data.api.health_reader import (
     OpenInterestFacts,
     StoredSeries,
@@ -38,6 +40,7 @@ from quasar_market_data.api.open_interest_page import OpenInterestPage, read_ope
 from quasar_market_data.api.params import (
     CandlesRequest,
     CoverageRequest,
+    FundingRatesRequest,
     IndicatorsRequest,
     OpenInterestCoverageRequest,
     OpenInterestRequest,
@@ -132,6 +135,22 @@ def read_open_interest_coverage(
     )
 
 
+def read_funding_rates(
+    db_path: Path,
+    request: FundingRatesRequest,
+    *,
+    end: int,
+    as_of_ms: int,
+    open_connection: ConnectionFactory = open_reader,
+) -> FundingRatePage:
+    return _with_reader(
+        db_path,
+        open_connection,
+        lambda conn: read_funding_rate_page(conn, request, end=end, as_of_ms=as_of_ms),
+        request,
+    )
+
+
 def read_ready(db_path: Path, *, open_connection: ConnectionFactory = open_reader) -> int:
     """The schema version when the database can be served; the contract's ``503`` otherwise."""
     return _with_reader(db_path, open_connection, check_ready, None)
@@ -163,6 +182,7 @@ def _with_reader[T](
     | IndicatorsRequest
     | OpenInterestRequest
     | OpenInterestCoverageRequest
+    | FundingRatesRequest
     | None,
 ) -> T:
     try:
@@ -177,6 +197,8 @@ def _with_reader[T](
     except UnknownSeries:
         if request is None:
             raise  # only the series readers raise it: a bug, not a 404
+        if isinstance(request, FundingRatesRequest):
+            raise unknown_funding_rate_series(request.venue, request.symbol) from None
         if isinstance(request, OpenInterestRequest | OpenInterestCoverageRequest):
             raise unknown_open_interest_series(request.venue, request.symbol, request.period.label) from None
         raise unknown_series(request.venue, request.symbol, request.timeframe.label) from None
