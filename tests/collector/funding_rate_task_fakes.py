@@ -336,6 +336,26 @@ class Harness:
             self.task.cancel()
         await asyncio.gather(self.task, return_exceptions=True)
 
+    async def run_exact(self, ms: int) -> None:
+        """Advance exactly ``ms`` by jumping from one registered timer to the next, draining the loop at each stop.
+
+        ``ManualTime.settle`` gives a woken task 100 loop hops; a dispatcher that starts a group of 25 requests needs
+        more, so a coarse step would let the clock run on while the group is still being started and the recorded
+        starts would drift. Stopping at every timer deadline and settling several times keeps the starts exact.
+        """
+        target = self.t.monotonic_ns() + ms * NS_PER_MS
+        while True:
+            for _ in range(6):
+                await self.t.settle()
+            now = self.t.monotonic_ns()
+            waiting = self.t.waiting
+            if not waiting or waiting[0] > target:
+                await self.t.advance_ns(target - now)
+                for _ in range(6):
+                    await self.t.settle()
+                return
+            await self.t.advance_ns(max(0, waiting[0] - now))
+
     async def run_for(self, ms: int, step_ms: int = 1_000) -> None:
         """Advance the manual clock in steps so that the task's timers fire in order."""
         remaining = ms
