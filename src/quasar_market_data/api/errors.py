@@ -11,6 +11,7 @@ type ErrorCode = Literal[
     "internal_error",
     "not_ready",
     "open_interest_disabled",
+    "funding_rate_disabled",
 ]
 type NotReadyReason = Literal["database_missing", "schema_mismatch", "database_unreadable"]
 
@@ -76,6 +77,21 @@ def unknown_open_interest_series(venue: str, symbol: str, period: str) -> ApiErr
 def open_interest_disabled() -> ApiError:
     """Contract 6.5.5 (decision OA1): the configuration does not collect open interest."""
     return ApiError(404, "open_interest_disabled", "open interest is not enabled in the configuration")
+
+
+def unknown_funding_rate_series(venue: str, symbol: str) -> ApiError:
+    """Contract 6.7.6 (decision FA4): a funding series has no timeframe or period; it exists with a span or a row."""
+    return ApiError(
+        404,
+        "unknown_series",
+        "no funding rate span or row of this series has been stored",
+        {"venue": venue, "symbol": symbol},
+    )
+
+
+def funding_rate_disabled() -> ApiError:
+    """Contract 6.7.6: the configuration does not collect funding rates."""
+    return ApiError(404, "funding_rate_disabled", "funding rates are not enabled in the configuration")
 
 
 def not_found() -> ApiError:

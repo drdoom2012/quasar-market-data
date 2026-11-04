@@ -11,10 +11,10 @@ from quasar_market_data.collector.async_open_interest_writer import (
 )
 from quasar_market_data.collector.cli import main
 from quasar_market_data.collector.clock import Clock
+from quasar_market_data.collector.extension_pause import ExtensionPause, ExtensionPaused, ExtensionStopped
 from quasar_market_data.collector.fetch_open_interest_once import OpenInterestOnceSource
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
-from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestGate, OpenInterestPaused
 from quasar_market_data.collector.open_interest_writer import (
     OpenInterestWriteBusy,
     OpenInterestWriteError,
@@ -51,11 +51,9 @@ def writer_close(monkeypatch: pytest.MonkeyPatch) -> WriterCloseSpy:
 
 
 def opener(
-    source: FakeOiSource, seen: list[tuple[OpenInterestBudget, OpenInterestGate, Clock]] | None = None
-) -> Callable[[OpenInterestBudget, OpenInterestGate, Clock], Awaitable[OpenInterestOnceSource]]:
-    async def open_oi_source(
-        budget: OpenInterestBudget, gate: OpenInterestGate, clock: Clock
-    ) -> OpenInterestOnceSource:
+    source: FakeOiSource, seen: list[tuple[OpenInterestBudget, ExtensionPause, Clock]] | None = None
+) -> Callable[[OpenInterestBudget, ExtensionPause, Clock], Awaitable[OpenInterestOnceSource]]:
+    async def open_oi_source(budget: OpenInterestBudget, gate: ExtensionPause, clock: Clock) -> OpenInterestOnceSource:
         if seen is not None:
             seen.append((budget, gate, clock))
         return source
@@ -175,7 +173,7 @@ def test_the_database_is_migrated_before_the_first_request(db: Path) -> None:
     clock = FakeClock()
     seen: list[int] = []
 
-    async def open_oi_source(_: OpenInterestBudget, __: OpenInterestGate, ___: Clock) -> OpenInterestOnceSource:
+    async def open_oi_source(_: OpenInterestBudget, __: ExtensionPause, ___: Clock) -> OpenInterestOnceSource:
         conn = sqlite3.connect(db)
         try:
             seen.append(int(conn.execute("SELECT count(*) FROM open_interest").fetchone()[0]))
@@ -195,7 +193,7 @@ def test_the_database_is_migrated_before_the_first_request(db: Path) -> None:
 
 def test_the_factory_gets_a_budget_a_gate_and_the_injected_clock(db: Path) -> None:
     clock = FakeClock()
-    seen: list[tuple[OpenInterestBudget, OpenInterestGate, Clock]] = []
+    seen: list[tuple[OpenInterestBudget, ExtensionPause, Clock]] = []
 
     async def sleep(ms: int) -> None:
         return None
@@ -203,13 +201,13 @@ def test_the_factory_gets_a_budget_a_gate_and_the_injected_clock(db: Path) -> No
     argv = ["fetch-oi-once", "--db", str(db), "--symbol", SYMBOL]
     assert main(argv, open_oi_source=opener(FakeOiSource(clock), seen), clock=clock, sleep=sleep) == 0
     ((budget, gate, received),) = seen
-    assert isinstance(budget, OpenInterestBudget) and isinstance(gate, OpenInterestGate) and received is clock
+    assert isinstance(budget, OpenInterestBudget) and isinstance(gate, ExtensionPause) and received is clock
     assert budget.committed_at(0) == 0 and budget.committed_at(10**18) == 0  # nothing consumed yet, built on this clock
 
 
 @pytest.mark.parametrize(
     "error",
-    [SourceError("boom"), OpenInterestPaused(300_000, 1), OpenInterestBanned()],
+    [SourceError("boom"), ExtensionPaused(300_000, 1), ExtensionStopped()],
     ids=["source", "paused", "banned"],
 )
 def test_a_source_failure_exits_one_with_nothing_written(
@@ -221,7 +219,7 @@ def test_a_source_failure_exits_one_with_nothing_written(
     assert stored(db) == []
 
 
-@pytest.mark.parametrize("error", [OpenInterestPaused(300_000, 1), OpenInterestBanned()], ids=["paused", "banned"])
+@pytest.mark.parametrize("error", [ExtensionPaused(300_000, 1), ExtensionStopped()], ids=["paused", "banned"])
 def test_a_429_or_418_on_the_time_request_is_reported_as_such_not_as_untrusted_time(
     db: Path, capsys: pytest.CaptureFixture[str], error: SourceError
 ) -> None:

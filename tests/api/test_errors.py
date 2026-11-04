@@ -5,12 +5,14 @@ from quasar_market_data.api.errors import (
     ApiError,
     ErrorCode,
     cut_received,
+    funding_rate_disabled,
     internal_error,
     invalid_parameter,
     method_not_allowed,
     not_found,
     not_ready,
     open_interest_disabled,
+    unknown_funding_rate_series,
     unknown_open_interest_series,
     unknown_series,
 )
@@ -94,4 +96,19 @@ def test_the_closed_list_of_error_codes() -> None:
         "internal_error",
         "not_ready",
         "open_interest_disabled",
+        "funding_rate_disabled",
     }
+
+
+def test_funding_rate_disabled_is_a_404_with_no_details() -> None:
+    error = funding_rate_disabled()
+
+    assert (error.status, error.code, error.details, error.headers) == (404, "funding_rate_disabled", {}, {})
+
+
+def test_unknown_funding_rate_series_names_neither_a_timeframe_nor_a_period() -> None:
+    error = unknown_funding_rate_series("binance-usdm", "BTC/USDT:USDT")
+
+    assert (error.status, error.code) == (404, "unknown_series")
+    assert error.message == "no funding rate span or row of this series has been stored"
+    assert error.details == {"venue": "binance-usdm", "symbol": "BTC/USDT:USDT"}

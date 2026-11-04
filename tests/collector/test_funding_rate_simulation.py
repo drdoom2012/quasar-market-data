@@ -301,7 +301,8 @@ def test_one_request_in_ten_taking_8_seconds_is_absorbed_at_b_50() -> None:
     run(scenario, timeout=3_000)
 
 
-def test_funding_and_open_interest_limiters_are_independent_and_a_funding_429_does_not_stop_open_interest() -> None:
+def test_funding_and_open_interest_limiters_are_independent_and_a_funding_429_stops_open_interest_too() -> None:
+    from quasar_market_data.collector.extension_pause import ExtensionPaused
     from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
 
     async def run_once(tmp_path: Path, with_open_interest: bool, pause_funding: bool) -> tuple[list[int], list[int]]:
@@ -317,8 +318,15 @@ def test_funding_and_open_interest_limiters_are_independent_and_a_funding_429_do
             budget = OpenInterestBudget(100, t, t.sleep)
 
             async def hammer() -> None:
+                # what BinanceUsdmOpenInterestSource does: check the shared pause, take the budget, check again (A-3)
                 while True:
-                    await budget.acquire()
+                    try:
+                        rig.pause.check()
+                        await budget.acquire()
+                        rig.pause.check()
+                    except ExtensionPaused as paused:
+                        await t.sleep(paused.remaining_ms)
+                        continue
                     oi_starts.append(t.monotonic_ns())
 
             hammer_task = asyncio.ensure_future(hammer())
@@ -355,7 +363,9 @@ def test_funding_and_open_interest_limiters_are_independent_and_a_funding_429_do
             return max(later - earlier for earlier, later in itertools.pairwise(inside)) // NS_PER_MS
 
         assert widest_gap(paused) >= 1_800_000 > widest_gap(alone)
-        silent = [ns for ns in oi_during_pause if paused[0] < ns < paused[0] + 1_800_000 * NS_PER_MS]
-        assert len(silent) > 100  # funding was silent for the whole 429 pause; open interest kept starting requests
+        pause_end = paused[0] + 1_800_000 * NS_PER_MS
+        silent = [ns for ns in oi_during_pause if paused[0] < ns < pause_end]
+        assert silent == []  # the shared pause stopped open interest too (amendment A-3) ...
+        assert len([ns for ns in oi_during_pause if ns >= pause_end]) > 100  # ... and it resumed when the pause ended
 
     run(scenario, timeout=3_000)

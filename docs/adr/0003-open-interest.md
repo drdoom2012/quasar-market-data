@@ -5,7 +5,7 @@
   schema (P-11) is contract section 6.5 of `docs/contracts/api-v1.md`, approved by the user on 2026-11-03 and implemented by OI-5. Amendment A-1 (2026-11-02, approved by
   the user): the 100-row transaction criterion of P-9 is checked from production measurements after OI-4, not by
   a benchmark in OI-2 (see the revision history). Amendment A-2 (2026-11-03, approved by the user with contract section 6.6): a per-run gap listing for open interest and the split
-  of the OI-6 slice (see the revision history). OI-6a (the endpoint, contract section 6.6) and OI-6b (the overview page) are implemented on one branch at the user's request (one pull request, not two); the OI-6b gate of P-16 (the benchmark numbers read and approved by the user) is recorded in the OI-6 design, section 14: the numbers are measured, the user's reading of them is pending.
+  of the OI-6 slice (see the revision history). Amendment A-3 (2026-11-03 approved, 2026-11-04 applied, ADR-0004 O-6): the open interest task shares the Collector's `ExtensionPause` with funding, so a `429` or `418` seen by either dataset stops both. OI-6a (the endpoint, contract section 6.6) and OI-6b (the overview page) are implemented on one branch at the user's request (one pull request, not two); the OI-6b gate of P-16 (the benchmark numbers read and approved by the user) is recorded in the OI-6 design, section 14: the numbers are measured, the user's reading of them is pending.
 - **Date:** 2026-11-02
 - **Scope:** collecting, storing and serving Binance USDT-M open interest history at a 5m period for the
   configured symbols. It is the first extension dataset (`docs/architecture.md` §7); funding, liquidations and
@@ -678,3 +678,15 @@ were throwaway in the session scratchpad and are not in the repository.
   and a benchmark harness) and OI-6b (the page); OI-6b is gated by a refresh benchmark at 300 and 600 symbols. Rules
   P-1 to P-15 are unchanged; no schema change, no migration, no configuration key. Design:
   `docs/superpowers/specs/2026-11-03-oi-6-open-interest-overview-design.md`.
+- **Amendment A-3** (approved by the user on 2026-11-03 as ADR-0004 O-6, applied on 2026-11-04 by the FR-5 and A-3
+  branch, issue #21): P-10 point 2 said a `429` pauses "all open interest requests" and a `418` stops open interest,
+  with a gate private to this dataset. Funding shares the IP, so a `429` seen by funding must also stop open interest
+  and the reverse. The gate is replaced by `ExtensionPause` (`collector/extension_pause.py`): one instance per
+  `quasar-collector run` process, passed to both datasets' sources, consulted before every extension request and set
+  by whoever receives the answer; the doubling counter is shared. What does not change: the pause rule (at least
+  300 s and the `Retry-After`, doubling to 1 h, a `418` for the process run), each dataset's own request budget and
+  limiter (no shared token bucket), the schedule, the tables, the contract; candle collection neither reads nor is
+  paused by it. Observable differences: a `429` or `418` log line of the open interest task names the shared pause
+  (`oi-warning round-paused ... paused (429 seen by an extension dataset)` also appears when funding set the pause and
+  open interest sent nothing), the task's fatal line names `ExtensionStopped`, and an open interest `429` right after
+  a funding `429` with no success in between pauses 600 s. `fetch-oi-once` creates its own pause. INV-082 and INV-132.

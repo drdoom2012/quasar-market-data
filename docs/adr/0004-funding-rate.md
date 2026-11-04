@@ -1,9 +1,13 @@
 # ADR-0004: Funding rate history (Binance USDT-M)
 
 - **Status:** Accepted (approved by the user on 2026-11-03: revision 4 as written, including the proposals for the open
-  decisions O-1 to O-6). Revisions 2 to 4 answer the user's reviews (listed at the end). Nothing is implemented yet; the
-  API response schema is a new contract section 6.7 that must be approved before FR-5. Amendment A-3 to ADR-0003 (O-6) is
-  approved as a proposal here; the text of ADR-0003 has not been edited. The user asked for the spec on 2026-11-03 and
+  decisions O-1 to O-6). Revisions 2 to 4 answer the user's reviews (listed at the end). FR-1 to FR-5 are implemented. The API response
+  schema is contract section 6.7 of `docs/contracts/api-v1.md`, approved by the user on 2026-11-04 (decisions FA1 to FA10) and
+  implemented by FR-5; where it differs from P-13 and P-15 it supersedes them: `behind` is inclusive at
+  `publication_delay_ms + 2 h`, a defaulted `end` is `max(as_of, start)` capped at 365 days (like an explicit window longer than that, which is a `400`), `limit` is 2 to 1000, the cursor is
+  an integer (`next` is passed as `start`, and a page never splits the rows of one millisecond), `series.*` are rows only, and the
+  coverage of a continuation page describes `[next, end]` (the P-15 row "identical across the three pages" holds for page 1
+  and for a changed `limit`). Amendment A-3 to ADR-0003 (O-6) is applied (2026-11-04, issue #21). The user asked for the spec on 2026-11-03 and
   opted out of a requirements interview, so the choices were proposals until this approval.
 - **Date:** 2026-11-03
 - **Scope:** collecting, storing and serving the **funding rate history** that Binance publishes for USDT-M perpetuals:

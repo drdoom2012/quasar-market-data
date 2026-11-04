@@ -7,6 +7,7 @@ import uvicorn
 from quasar_market_data.api import cli
 from quasar_market_data.api.rule import MAX_LAG_THRESHOLD_MS, MAX_PUBLICATION_DELAY_MS
 from quasar_market_data.config.settings import Instrument
+from quasar_market_data.domain.funding_rate_coverage import FundingRateRule
 from quasar_market_data.domain.open_interest_coverage import OpenInterestRule
 from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.domain.timeframe import Timeframe
@@ -196,6 +197,39 @@ def test_serve_passes_the_open_interest_rule_of_the_file_to_the_app(
 
     def recorder(db_path: Path, **kwargs: Any) -> str:
         seen.append(kwargs["open_interest"])
+        return "app"
+
+    monkeypatch.setattr(cli, "create_app", recorder)
+
+    assert cli.main(["serve", str(cfg)]) == 0
+
+    assert seen == [expected]
+
+
+FUNDING_RATE_TABLE = (
+    "\n[funding_rate]\nenabled = {enabled}\npublication_delay_ms = 45000\nround_offset_ms = 60000\n"
+    "budget_per_5min = 150\nbackfill_days = 200\nrecheck_ms = 86400000\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [
+        (None, None),
+        (FUNDING_RATE_TABLE.format(enabled="false"), None),
+        (FUNDING_RATE_TABLE.format(enabled="true"), FundingRateRule(45_000, 200)),
+    ],
+)
+def test_serve_passes_the_funding_rate_rule_of_the_file_to_the_app(
+    tmp_path: Path, run_calls: RunCalls, monkeypatch: pytest.MonkeyPatch, table: str | None, expected: object
+) -> None:
+    cfg = write_config(tmp_path, database_path="m.db")
+    if table is not None:
+        cfg.write_text(cfg.read_text(encoding="utf-8") + table, encoding="utf-8")
+    seen: list[Any] = []
+
+    def recorder(db_path: Path, **kwargs: Any) -> str:
+        seen.append(kwargs["funding_rate"])
         return "app"
 
     monkeypatch.setattr(cli, "create_app", recorder)

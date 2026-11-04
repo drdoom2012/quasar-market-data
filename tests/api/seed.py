@@ -133,6 +133,69 @@ def insert_open_interest_conflict(
     )
 
 
+_DEFAULT: object = object()
+
+
+def funding_values(funding_time_ms: int) -> tuple[str, str]:
+    """Deterministic canonical text: a signed ``funding_rate`` (fraction per settlement) and a ``mark_price``."""
+    n = funding_time_ms // 1000
+    sign = "-" if n % 3 == 0 else ""
+    return f"{sign}0.0000{n % 9 + 1}{n % 7 + 1}", f"{80_000 + n % 500}.5"
+
+
+def insert_funding_rate(
+    conn: sqlite3.Connection,
+    funding_time_ms: int,
+    rate_type: str = "Regular",
+    *,
+    symbol: str = SYMBOL,
+    venue: str = VENUE,
+    funding_rate: str | None = None,
+    mark_price: object = _DEFAULT,
+) -> None:
+    """A stored funding settlement; ``mark_price=None`` stores NULL (Binance sends none before 2023-10-31)."""
+    default_rate, default_price = funding_values(funding_time_ms)
+    price = default_price if mark_price is _DEFAULT else mark_price
+    conn.execute(
+        "INSERT INTO funding_rates (venue, symbol, funding_time_ms, rate_type, funding_rate, mark_price, ingested_at_ms)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (venue, symbol, funding_time_ms, rate_type, funding_rate or default_rate, price, AT),
+    )
+
+
+def insert_funding_conflict(
+    conn: sqlite3.Connection,
+    funding_time_ms: int,
+    variant: int,
+    rate_type: str = "Regular",
+    *,
+    symbol: str = SYMBOL,
+    venue: str = VENUE,
+) -> None:
+    """Record a conflicting observation; a different ``variant`` is a different observation."""
+    conn.execute(
+        "INSERT INTO funding_rate_conflicts (venue, symbol, funding_time_ms, rate_type, funding_rate, mark_price,"
+        " first_seen_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (venue, symbol, funding_time_ms, rate_type, f"0.{variant + 1:03d}1", f"81000.{variant + 1}1", AT),
+    )
+
+
+def set_funding_span(
+    conn: sqlite3.Connection,
+    from_ms: int,
+    through_ms: int,
+    *,
+    verified_at_ms: int = AT,
+    symbol: str = SYMBOL,
+    venue: str = VENUE,
+) -> None:
+    """Write the verified span with plain SQL (the Collector's ``merge`` is not used by the API tests)."""
+    conn.execute(
+        "INSERT INTO funding_rate_verified (venue, symbol, from_ms, through_ms, verified_at_ms) VALUES (?, ?, ?, ?, ?)",
+        (venue, symbol, from_ms, through_ms, verified_at_ms),
+    )
+
+
 def make_database(
     path: Path,
     *,
@@ -142,6 +205,10 @@ def make_database(
     symbol: str = SYMBOL,
     open_interest: Iterable[int] = (),
     open_interest_conflicts: Iterable[int] = (),
+    funding: Iterable[int | tuple[int, str]] = (),
+    funding_conflicts: Iterable[int | tuple[int, str]] = (),
+    funding_span: tuple[int, int] | None = None,
+    funding_span_verified_at_ms: int = AT,
 ) -> Path:
     conn = open_writer(path)
     try:
@@ -156,6 +223,14 @@ def make_database(
             insert_open_interest(conn, time_ms, symbol=symbol)
         for time_ms in open_interest_conflicts:
             insert_open_interest_conflict(conn, time_ms, 0, symbol=symbol)
+        for item in funding:
+            time_ms, rate_type = item if isinstance(item, tuple) else (item, "Regular")
+            insert_funding_rate(conn, time_ms, rate_type, symbol=symbol)
+        for item in funding_conflicts:
+            time_ms, rate_type = item if isinstance(item, tuple) else (item, "Regular")
+            insert_funding_conflict(conn, time_ms, 0, rate_type, symbol=symbol)
+        if funding_span is not None:
+            set_funding_span(conn, *funding_span, verified_at_ms=funding_span_verified_at_ms, symbol=symbol)
     finally:
         conn.close()
     return path

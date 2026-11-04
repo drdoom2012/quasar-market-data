@@ -18,7 +18,7 @@ when a page failed after at least one of its transactions committed, ``1`` when 
 request is made, nothing is written), ``3`` when a re-delivered row differed from the stored one.
 
 ``run`` also collects open interest when the configuration has an enabled ``[open_interest]`` table (ADR-0003, OI-4):
-one extra asyncio task, started after round one and its post-check, with its own client, writer, budget and gate. It
+one extra asyncio task, started after round one and its post-check, with its own client, writer and budget, and the process-wide ExtensionPause. It
 never changes the exit status: whatever happens to it is printed as ``oi-warning`` / ``oi-error`` lines (stderr) and
 ``oi-round`` / ``oi-reconcile`` / ``oi-catchup`` / ``oi-measurement`` lines (stdout), and ends only that task. Without
 the table (or with ``enabled = false``) no open interest client, writer, task or candle hook is created and the output is unchanged.
@@ -122,7 +122,6 @@ from quasar_market_data.collector.funding_rate_task import FundingRateTaskConfig
 from quasar_market_data.collector.funding_rate_writer import FundingRateWriteOutcomeUnknown
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
 from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
-from quasar_market_data.collector.open_interest_gate import OpenInterestGate
 from quasar_market_data.collector.open_interest_measurements import OpenInterestMeasurements
 from quasar_market_data.collector.open_interest_task import OpenInterestTaskConfig, run_open_interest_task
 from quasar_market_data.collector.open_interest_writer import OpenInterestWriteOutcomeUnknown
@@ -159,8 +158,8 @@ POST_CHECK_GRACE_MS = 2_000  # how long shutdown waits for a running post-check 
 
 type OpenSource = Callable[[], Awaitable[KlineSource]]
 type OpenInterestOpenSource = Callable[
-    [OpenInterestBudget, OpenInterestGate, Clock], Awaitable[OpenInterestOnceSource]
-]  # BinanceUsdmOpenInterestSource.open in production: its own client, the caller's budget and gate
+    [OpenInterestBudget, ExtensionPause, Clock], Awaitable[OpenInterestOnceSource]
+]  # BinanceUsdmOpenInterestSource.open in production: its own client, the caller's budget and pause
 
 type FundingRateOpenSource = Callable[
     [FundingRateLimiter, ExtensionPause, Clock], Awaitable[FundingRateOnceSource]
@@ -343,7 +342,7 @@ async def _run_open_interest(
 ) -> int:
     async with AsyncExitStack() as stack:
         budget = OpenInterestBudget(DEFAULT_BUDGET_PER_5MIN, clock, sleep)
-        source = await open_source(budget, OpenInterestGate(clock), clock)
+        source = await open_source(budget, ExtensionPause(clock), clock)
         stack.push_async_callback(_close_quietly, "the exchange client", source.close)
         writer = await AsyncOpenInterestWriter.open(db, activity=CandleWriteActivity())
         stack.push_async_callback(_close_quietly, "the open interest writer", writer.close)
@@ -630,6 +629,7 @@ async def _wait_for_event_or_stop(event: asyncio.Event, stop: asyncio.Event) -> 
 
 async def _open_interest_main(
     oi_run: OpenInterestRun,
+    pause: ExtensionPause,
     db: Path,
     clock: Clock,
     sleep: Sleep,
@@ -644,9 +644,8 @@ async def _open_interest_main(
             return
         config = oi_run.config
         budget = OpenInterestBudget(config.budget_per_5min, clock, sleep)
-        gate = OpenInterestGate(clock)
         async with AsyncExitStack() as stack:
-            source = await oi_run.open_source(budget, gate, clock)
+            source = await oi_run.open_source(budget, pause, clock)
             stack.push_async_callback(_close_quietly, "the open interest client", source.close)
             writer = await AsyncOpenInterestWriter.open(db, activity=activity)
             stack.push_async_callback(_close_quietly, "the open interest writer", writer.close)
@@ -659,6 +658,7 @@ async def _open_interest_main(
 
 async def _funding_rate_main(
     funding_run: FundingRateRun,
+    pause: ExtensionPause,
     db: Path,
     clock: Clock,
     sleep: Sleep,
@@ -673,7 +673,6 @@ async def _funding_rate_main(
             return
         config = funding_run.config
         limiter = FundingRateLimiter(config.budget_per_5min, clock, sleep)
-        pause = ExtensionPause(clock)
         async with AsyncExitStack() as stack:
             source = await funding_run.open_source(limiter, pause, clock)
             stack.push_async_callback(_close_quietly, "the funding rate client", source.close)
@@ -791,17 +790,24 @@ async def _reconcile_and_collect(
         )
         hooks = None
         durations: list[Callable[[int], None]] = []
+        # one pause for every extension dataset of this process (ADR-0004 P-9, amendment A-3 to ADR-0003): a 429 or
+        # 418 seen by either stops both; each keeps its own limiter. Candle collection never receives it.
+        extension_pause = ExtensionPause(clock)
         if oi_run is not None:
             durations.append(measurements.record_candle_write)
             oi_task = asyncio.create_task(
-                _open_interest_main(oi_run, db, clock, sleep, stop, candle_ready, activity, measurements),
+                _open_interest_main(
+                    oi_run, extension_pause, db, clock, sleep, stop, candle_ready, activity, measurements
+                ),
                 name="open-interest",
             )
             stack.push_async_callback(_finish_open_interest, oi_task, stop, oi_run.stop_grace_ms)
         if funding_run is not None:
             durations.append(funding_measurements.record_candle_write)
             funding_task = asyncio.create_task(
-                _funding_rate_main(funding_run, db, clock, sleep, stop, candle_ready, activity, funding_measurements),
+                _funding_rate_main(
+                    funding_run, extension_pause, db, clock, sleep, stop, candle_ready, activity, funding_measurements
+                ),
                 name="funding-rate",
             )
             stack.push_async_callback(_finish_open_interest, funding_task, stop, funding_run.stop_grace_ms)

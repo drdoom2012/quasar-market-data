@@ -173,6 +173,7 @@ GET /v1/indicators
 GET /v1/coverage
 GET /v1/open-interest
 GET /v1/open-interest/coverage
+GET /v1/funding-rates
 GET /health
 ```
 

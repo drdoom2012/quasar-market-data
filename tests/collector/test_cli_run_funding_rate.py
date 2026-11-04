@@ -294,6 +294,49 @@ def test_both_extension_datasets_share_the_activity_and_both_measurement_collect
     assert "funding-budget funding=150 open_interest=250" in out.splitlines()
 
 
+def test_both_extension_datasets_receive_the_same_pause_and_each_its_own_limiter(
+    db: Path, rec: Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Amendment A-3 to ADR-0003: one ``ExtensionPause`` per process, no shared token bucket (ADR-0004 P-9)."""
+    from tests.collector.open_interest_fakes import FakeOiSource
+
+    pauses: dict[str, Any] = {}
+    limits: dict[str, Any] = {}
+
+    async def oi_stub(source: Any, writer: Any, db: Path, config: Any, budget: Any, activity: Any, *rest: Any) -> None:
+        await rest[3].wait()
+
+    monkeypatch.setattr(cli, "run_open_interest_task", oi_stub)
+    stub_task(monkeypatch, rec)
+    clock = FakeClock()
+    source = FakeSource(clock, forming_rows(), on_klines=lambda: rec.events.append("klines"))
+
+    async def open_source() -> FakeSource:
+        return source
+
+    async def open_oi(budget: Any, pause: Any, received: Clock) -> Any:
+        rec.events.append("open")
+        pauses["oi"], limits["oi"] = pause, budget
+        return FakeOiSource(clock)
+
+    async def open_funding(limiter: Any, pause: Any, received: Clock) -> Any:
+        rec.events.append("open")
+        pauses["funding"], limits["funding"] = pause, limiter
+        return FakeFundingSource(clock)
+
+    code = main(
+        ["run", config_path(db, TABLE + OI_TABLE)],
+        open_source=open_source,
+        open_oi_source=open_oi,
+        open_funding_source=open_funding,
+        clock=clock,
+        sleep=stop_when_started(clock, rec, wait=True),
+    )
+    assert code == 0
+    assert isinstance(pauses["oi"], ExtensionPause) and pauses["oi"] is pauses["funding"]
+    assert limits["oi"] is not limits["funding"]  # each dataset keeps its own bounded budget
+
+
 def test_the_capacity_warning_is_printed_at_start_only_for_an_enabled_table(
     db: Path, rec: Recorder, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

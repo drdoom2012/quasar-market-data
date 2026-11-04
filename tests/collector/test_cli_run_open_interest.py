@@ -19,9 +19,9 @@ from quasar_market_data.collector.candle_write_activity import CandleWriteActivi
 from quasar_market_data.collector.candle_writer import CandleWriteError
 from quasar_market_data.collector.cli import main
 from quasar_market_data.collector.clock import Clock
+from quasar_market_data.collector.extension_pause import ExtensionPause, ExtensionStopped
 from quasar_market_data.collector.fetch_open_interest_once import OpenInterestOnceSource
 from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
-from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestGate
 from tests.collector.fetch_fakes import SYMBOL, AdvancingSleep, FakeClock, FakeSource, forming_rows
 from tests.collector.open_interest_fakes import FakeOiSource
 from tests.collector.test_cli_run import candle_count
@@ -90,9 +90,9 @@ def stub_task(
 def oi_opener(
     rec: Recorder, clock: FakeClock, error: BaseException | None = None
 ) -> Callable[..., Awaitable[OpenInterestOnceSource]]:
-    async def open_oi(budget: OpenInterestBudget, gate: OpenInterestGate, received: Clock) -> OpenInterestOnceSource:
+    async def open_oi(budget: OpenInterestBudget, pause: ExtensionPause, received: Clock) -> OpenInterestOnceSource:
         rec.events.append("open")
-        assert isinstance(budget, OpenInterestBudget) and isinstance(gate, OpenInterestGate) and received is clock
+        assert isinstance(budget, OpenInterestBudget) and isinstance(pause, ExtensionPause) and received is clock
         if error is not None:
             raise error
         source = FakeOiSource(clock)
@@ -187,13 +187,13 @@ def test_a_failing_open_interest_task_ends_only_itself(
     db: Path, rec: Recorder, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failure: str
 ) -> None:
     async def boom(*, stop: asyncio.Event, emit: Callable[[str], None]) -> None:
-        raise OpenInterestBanned if failure == "banned" else RuntimeError("boom")
+        raise ExtensionStopped if failure == "banned" else RuntimeError("boom")
 
     stub_task(monkeypatch, rec, boom if failure in ("task", "banned") else None)
     error = RuntimeError("no client") if failure == "factory" else None
     assert run_cli(db, rec, TABLE, error=error) == 0  # the exit status is the candle loop's
     err = capsys.readouterr().err
-    expected = {"task": "RuntimeError: boom", "factory": "RuntimeError: no client", "banned": "OpenInterestBanned"}[
+    expected = {"task": "RuntimeError: boom", "factory": "RuntimeError: no client", "banned": "ExtensionStopped"}[
         failure
     ]
     assert f"oi-error task stopped: {expected}" in err and "Traceback" not in err

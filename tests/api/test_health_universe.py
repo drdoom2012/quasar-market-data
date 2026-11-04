@@ -189,7 +189,7 @@ def test_configured_flag_on_behind_entries(tmp_path: Path) -> None:
 def test_the_universe_block_follows_truncated_with_the_keys_of_the_contract(tmp_path: Path) -> None:
     body = ingest(seed(tmp_path / "m.db", {("A", "5m"): 999}), AS_OF, (inst("A"),))
 
-    assert list(body)[-3:] == ["truncated", "universe", "open_interest"]  # open_interest is the last key (6.2.3)
+    assert list(body)[-4:] == ["truncated", "universe", "open_interest", "funding_rate"]  # funding_rate is last (6.2.3)
     assert list(body["universe"]) == [
         "configured_count",
         "configured_stored",

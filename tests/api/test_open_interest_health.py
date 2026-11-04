@@ -124,7 +124,8 @@ def test_open_interest_is_the_last_key_and_null_when_not_enabled(tmp_path: Path)
 
     body = ingest(path, (), GOLDEN_AS_OF, open_interest=None)
 
-    assert list(body)[-3:] == ["truncated", "universe", "open_interest"]
+    assert list(body)[-4:] == ["truncated", "universe", "open_interest", "funding_rate"]
+    assert body["funding_rate"] is None
     assert body["open_interest"] is None
 
 

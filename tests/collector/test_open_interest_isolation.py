@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 
 from quasar_market_data.collector.collection_loop import CandleWriteHooks
+from quasar_market_data.collector.extension_pause import ExtensionPaused, ExtensionStopped
 from quasar_market_data.collector.kline_source import SourceError
-from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestPaused
 from tests.collector.fetch_fakes import ControlledSink
 from tests.collector.open_interest_task_fakes import ManualOiSource, make_rig, stored_times
 from tests.collector.test_collection_loop import Harness
@@ -35,11 +35,11 @@ def no_time(source: ManualOiSource) -> None:
 
 
 def rate_limited(source: ManualOiSource) -> None:
-    source.errors = [OpenInterestPaused(300_000, 0)] * 50
+    source.errors = [ExtensionPaused(300_000, 0)] * 50
 
 
 def banned(source: ManualOiSource) -> None:
-    source.errors = [OpenInterestBanned()]
+    source.errors = [ExtensionStopped()]
 
 
 BEHAVIOURS: dict[str, Callable[[ManualOiSource], None] | None] = {

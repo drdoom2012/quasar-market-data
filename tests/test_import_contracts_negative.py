@@ -24,6 +24,8 @@ NO_NETWORK_CONTRACT = "api reaches no network client"
 ENGINE_ONLY_CONTRACT = "talib and numpy are imported only by the indicator engine"
 CONFIG_CONTRACT = "config depends only on domain and the standard library"
 OI_INDEPENDENCE_CONTRACT = "open interest is independent of candle limiter and time"
+OI_NO_FUNDING_CONTRACT = "open interest does not use funding rate modules"
+PAUSE_LEAF_CONTRACT = "extension pause does not use funding rate modules"
 FUNDING_INDEPENDENCE_CONTRACT = "funding rate is independent of candle limiter, time and open interest"
 CANDLE_ISOLATION_CONTRACT = "candle collection does not use extension datasets"
 CONTRACT_NAMES = (
@@ -36,6 +38,8 @@ CONTRACT_NAMES = (
     ENGINE_ONLY_CONTRACT,
     CONFIG_CONTRACT,
     OI_INDEPENDENCE_CONTRACT,
+    OI_NO_FUNDING_CONTRACT,
+    PAUSE_LEAF_CONTRACT,
     FUNDING_INDEPENDENCE_CONTRACT,
     CANDLE_ISOLATION_CONTRACT,
 )
@@ -114,8 +118,29 @@ CASES = {
     "api_importing_config_is_allowed": Case("api/_probe.py", f"import {PACKAGE}.config\n", None),
     "collector_importing_config_is_allowed": Case("collector/_probe.py", f"import {PACKAGE}.config\n", None),
     "storage_importing_sqlite3_is_allowed": Case("storage/_probe.py", "import sqlite3\n", None),
-    "open_interest_gate_importing_the_candle_rate_limiter_fails_oi_independence": Case(
-        "collector/open_interest_gate.py", f"import {PACKAGE}.collector.rate_limiter\n", OI_INDEPENDENCE_CONTRACT
+    "open_interest_task_importing_the_funding_limiter_fails_oi_no_funding": Case(
+        "collector/open_interest_task.py",
+        f"import {PACKAGE}.collector.funding_rate_limiter\n",
+        OI_NO_FUNDING_CONTRACT,
+    ),
+    "open_interest_source_importing_the_funding_source_fails_oi_no_funding": Case(
+        "collector/binance_usdm_open_interest.py",
+        f"import ccxt\nimport {PACKAGE}.collector.binance_usdm_funding_rate\n",  # keeps the ignored ccxt import matched
+        OI_NO_FUNDING_CONTRACT,
+    ),
+    "open_interest_task_importing_the_funding_writer_fails_oi_no_funding": Case(
+        "collector/open_interest_task.py", f"import {PACKAGE}.collector.funding_rate_writer\n", OI_NO_FUNDING_CONTRACT
+    ),
+    "open_interest_writer_importing_the_funding_reader_fails_oi_no_funding": Case(
+        "collector/open_interest_writer.py", f"import {PACKAGE}.collector.funding_rate_reader\n", OI_NO_FUNDING_CONTRACT
+    ),
+    "extension_pause_importing_the_funding_task_fails_pause_leaf": Case(
+        "collector/extension_pause.py", f"import {PACKAGE}.collector.funding_rate_task\n", PAUSE_LEAF_CONTRACT
+    ),
+    "open_interest_source_importing_extension_pause_is_allowed": Case(
+        "collector/binance_usdm_open_interest.py",
+        f"import ccxt\nimport {PACKAGE}.collector.extension_pause\n",
+        None,
     ),
     "open_interest_budget_importing_shared_server_time_fails_oi_independence": Case(
         "collector/open_interest_budget.py",
@@ -157,9 +182,9 @@ CASES = {
         f"import {PACKAGE}.collector.shared_server_time\n",
         FUNDING_INDEPENDENCE_CONTRACT,
     ),
-    "extension_pause_importing_the_open_interest_gate_fails_funding_independence": Case(
+    "extension_pause_importing_the_open_interest_task_fails_funding_independence": Case(
         "collector/extension_pause.py",
-        f"import {PACKAGE}.collector.open_interest_gate\n",
+        f"import {PACKAGE}.collector.open_interest_task\n",
         FUNDING_INDEPENDENCE_CONTRACT,
     ),
     "funding_source_importing_the_candle_rate_limiter_fails_funding_independence": Case(

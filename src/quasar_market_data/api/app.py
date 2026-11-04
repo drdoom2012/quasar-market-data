@@ -26,9 +26,11 @@ from quasar_market_data.api.database import (
     ConnectionFactory,
     read_candles,
     read_coverage,
+    read_funding_rates,
     read_indicators,
     read_ingest,
     read_ingest_open_interest,
+    read_ingest_with_funding,
     read_instruments,
     read_open_interest,
     read_open_interest_coverage,
@@ -36,13 +38,20 @@ from quasar_market_data.api.database import (
 )
 from quasar_market_data.api.errors import (
     ApiError,
+    funding_rate_disabled,
     internal_error,
     method_not_allowed,
     not_found,
     open_interest_disabled,
 )
 from quasar_market_data.api.float_text import float_text
-from quasar_market_data.api.health_reader import OpenInterestFacts, StoredOpenInterestSeries, StoredSeries
+from quasar_market_data.api.funding_rate_page import FundingRatePage
+from quasar_market_data.api.health_reader import (
+    FundingRateFacts,
+    OpenInterestFacts,
+    StoredOpenInterestSeries,
+    StoredSeries,
+)
 from quasar_market_data.api.indicator_reader import IndicatorInputs
 from quasar_market_data.api.indicator_results import indicator_results
 from quasar_market_data.api.instrument_reader import InstrumentNewest
@@ -52,6 +61,7 @@ from quasar_market_data.api.params import (
     indicators_window_end,
     parse_candles_request,
     parse_coverage_request,
+    parse_funding_rates_request,
     parse_indicators_request,
     parse_open_interest_coverage_request,
     parse_open_interest_request,
@@ -60,6 +70,14 @@ from quasar_market_data.api.params import (
 from quasar_market_data.api.rule import checked_rule
 from quasar_market_data.config.settings import Instrument
 from quasar_market_data.domain.freshness import Freshness, series_freshness
+from quasar_market_data.domain.funding_rate_coverage import (
+    QUIET_AFTER_MS,
+    FundingRateRule,
+    behind_after_ms,
+    defaulted_window_end,
+    funding_series_health,
+)
+from quasar_market_data.domain.funding_rate_span import Interval
 from quasar_market_data.domain.indicator_series import IndicatorPoint, IndicatorSeries, read_start_ms
 from quasar_market_data.domain.indicators import IndicatorSpec
 from quasar_market_data.domain.open_interest_coverage import OpenInterestRule, open_interest_freshness
@@ -88,6 +106,7 @@ def create_app(
     rule: ExpectationRule,
     universe: Sequence[Instrument],
     open_interest: OpenInterestRule | None = None,
+    funding_rate: FundingRateRule | None = None,
     open_connection: ConnectionFactory = open_reader,
     now_ms: Callable[[], int] = system_now_ms,
 ) -> FastAPI:
@@ -153,6 +172,17 @@ def create_app(
         )
         return _json(200, _open_interest_coverage_body(report, as_of_ms, open_interest))
 
+    @app.get("/v1/funding-rates")
+    async def funding_rates_endpoint(request: Request) -> Response:
+        # contract 6.7.6: parameters -> enabled in the configuration -> host clock -> database -> series
+        parsed = parse_funding_rates_request(request.scope["query_string"])
+        if funding_rate is None:
+            raise funding_rate_disabled()
+        as_of_ms = ensure_timestamp_ms(now_ms(), "as_of_ms")  # a wrong host clock is a 500, not a 503
+        end = parsed.end if parsed.end is not None else defaulted_window_end(parsed.start, as_of_ms)
+        page = await run_in_threadpool(read_funding_rates, db_path, parsed, end=end, open_connection=open_connection)
+        return _json(200, _funding_rates_body(page, as_of_ms))
+
     @app.get("/v1/instruments")
     async def instruments(request: Request) -> Response:
         require_no_query(request.scope["query_string"])
@@ -174,6 +204,27 @@ def create_app(
     async def ingest(request: Request) -> Response:
         require_no_query(request.scope["query_string"])
         as_of_ms = ensure_timestamp_ms(now_ms(), "as_of_ms")  # a wrong host clock is a 500, not a 503
+        if funding_rate is not None:
+            snapshot = await run_in_threadpool(
+                read_ingest_with_funding,
+                db_path,
+                oi_conflicts_after_ms=None if open_interest is None else as_of_ms - CONFLICT_WINDOW_MS,
+                funding_conflicts_after_ms=as_of_ms - CONFLICT_WINDOW_MS,
+                open_connection=open_connection,
+            )
+            return _json(
+                200,
+                _ingest_body(
+                    snapshot.candles,
+                    as_of_ms,
+                    rule,
+                    universe,
+                    open_interest,
+                    snapshot.open_interest,
+                    funding_rate,
+                    snapshot.funding_rate,
+                ),
+            )
         if open_interest is None:
             stored = await run_in_threadpool(read_ingest, db_path, open_connection=open_connection)
             return _json(200, _ingest_body(stored, as_of_ms, rule, universe))
@@ -305,6 +356,40 @@ def _open_interest_body(page: OpenInterestPage, as_of_ms: int, rule: OpenInteres
             "stale_slots": c.stale,
             "missing_slots": c.missing,
             "gap_free": c.gap_free,
+        },
+    }
+
+
+def _funding_rates_body(page: FundingRatePage, as_of_ms: int) -> dict[str, object]:
+    """Keys in the order of contract 6.7.4."""
+    span = page.span
+    return {
+        "venue": page.venue,
+        "symbol": page.symbol,
+        "time_semantics": "settlement",
+        "start": page.start,
+        "end": page.end,
+        "series": {"oldest_funding_time_ms": page.oldest_ms, "newest_funding_time_ms": page.newest_ms},
+        "rows": [
+            {
+                "funding_time_ms": row.funding_time_ms,
+                "rate_type": row.rate_type,
+                "funding_rate": row.funding_rate,
+                "mark_price": row.mark_price,
+                "conflicted": row.conflicted,
+            }
+            for row in page.rows
+        ],
+        "next": page.next,
+        "coverage": {
+            "as_of_ms": as_of_ms,
+            "verified_from_ms": None if span is None else span.from_ms,
+            "verified_through_ms": None if span is None else span.through_ms,
+            "verified_at_ms": page.verified_at_ms,
+            "window_state": page.window_state.value,
+            "events_in_window": page.events_in_window,
+            "conflicted_events": page.conflicted_events,
+            "complete": page.complete,
         },
     }
 
@@ -460,10 +545,13 @@ def _ingest_body(
     universe: Sequence[Instrument],
     open_interest: OpenInterestRule | None = None,
     facts: OpenInterestFacts | None = None,
+    funding_rate: FundingRateRule | None = None,
+    funding_facts: FundingRateFacts | None = None,
 ) -> dict[str, object]:
-    """The S17 fields over every stored series, then ``universe``, then ``open_interest`` (last key, contract 6.2.3).
+    """The S17 fields over every stored series, then ``universe``, ``open_interest`` and ``funding_rate`` (last key).
 
-    All come from the one snapshot. ``open_interest`` is ``None`` (JSON ``null``) when open interest is not enabled.
+    All come from the one snapshot. ``open_interest`` and ``funding_rate`` are ``None`` (JSON ``null``) when the
+    dataset is not enabled (contract 6.2.3).
     """
     configured = {(item.venue, item.symbol, item.timeframe) for item in universe}
     stored_triples = {(series.venue, series.symbol, series.timeframe) for series in stored}
@@ -529,6 +617,53 @@ def _ingest_body(
         "open_interest": None
         if open_interest is None or facts is None
         else _open_interest_health(facts, as_of_ms, open_interest, universe),
+        "funding_rate": None
+        if funding_rate is None or funding_facts is None
+        else _funding_rate_health(funding_facts, as_of_ms, funding_rate),
+    }
+
+
+def _funding_rate_health(facts: FundingRateFacts, as_of_ms: int, rule: FundingRateRule) -> dict[str, object]:
+    """The ``funding_rate`` object of contract 6.7.8; the flags are computed by the Collector's own functions."""
+    behind = catching_up = quiet = 0
+    for series in facts.series:
+        flags = funding_series_health(
+            Interval(series.from_ms, series.through_ms),
+            series.newest_row_ms,
+            as_of_ms,
+            rule.publication_delay_ms,
+            rule.backfill_days,
+        )
+        behind += flags.behind
+        catching_up += flags.catching_up
+        quiet += flags.quiet
+    conflicted_series = len(facts.conflicted)
+    if not facts.series:
+        status = "no_series"
+    elif conflicted_series or quiet:
+        status = "degraded"
+    elif behind:
+        status = "behind"
+    elif catching_up:
+        status = "catching_up"
+    else:
+        status = "current"
+    return {
+        "as_of_ms": as_of_ms,
+        "rule": {
+            "publication_delay_ms": rule.publication_delay_ms,
+            "behind_after_ms": behind_after_ms(rule.publication_delay_ms),
+            "quiet_after_ms": QUIET_AFTER_MS,
+            "backfill_days": rule.backfill_days,
+        },
+        "scope": "stored_series",
+        "status": status,
+        "series_count": len(facts.series),
+        "current": len(facts.series) - behind,
+        "behind": behind,
+        "catching_up": catching_up,
+        "conflicted_series": conflicted_series,
+        "quiet_series": quiet,
     }
 
 

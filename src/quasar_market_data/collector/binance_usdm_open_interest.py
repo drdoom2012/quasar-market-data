@@ -10,16 +10,16 @@ Isolation from candle collection (P-9). ``open`` creates a new ``binanceusdm`` c
 ``SharedServerTime`` (an import contract enforces it). Its own server-time observations (``fetch_server_time``,
 ``fapiPublicGetTime`` through the same client) are counted in the same budget.
 
-Every request, history or time, passes the same steps: ``gate.check()`` (a 429 pause or a 418 stop), one of at
-most ``MAX_IN_FLIGHT`` slots, ``budget.acquire()`` (sliding window of starts), ``gate.check()`` again (a call that
+Every request, history or time, passes the same steps: ``pause.check()`` (a 429 pause or a 418 stop), one of at
+most ``MAX_IN_FLIGHT`` slots, ``budget.acquire()`` (sliding window of starts), ``pause.check()`` again (a call that
 waited while another got a 429/418 sends nothing), the CCXT call. The slot is taken before the budget so a call
 waiting for a slot does not use up budget it cannot yet spend. CCXT's own throttle (``enableRateLimit``,
 ``rateLimit`` 50 ms) may still delay the network send after the grant; that only spaces requests further apart.
 
-Share one source (one gate, one budget, one in-flight limit of ``MAX_IN_FLIGHT``) between everything that asks
+Share one source (one pause, one budget, one in-flight limit of ``MAX_IN_FLIGHT``) between everything that asks
 for open interest in a process: the limit belongs to the instance, so two sources would allow four requests in
-flight. The budget is a plain FIFO; "rounds pre-empt backfill" (P-15, OI-4) is OI-4 work on top of it. ``OpenInterestPaused``
-carries ``remaining_ms`` and ``until_monotonic_ns`` (the gate's monotonic clock) so a caller can schedule around it.
+flight. The budget is a plain FIFO; "rounds pre-empt backfill" (P-15, OI-4) is OI-4 work on top of it. ``ExtensionPaused``
+carries ``remaining_ms`` and ``until_monotonic_ns`` (the pause's monotonic clock) so a caller can schedule around it.
 
 Request rules (P-5) are checked by ``validate_open_interest_request`` before any budget use or request: both
 bounds aligned, at most 500 period ends including both bounds, no start older than the 29-day horizon before
@@ -48,9 +48,9 @@ import ccxt.async_support as ccxt_async
 
 from quasar_market_data.collector.binance_usdm import BinanceUsdmSource, usdm_market_id
 from quasar_market_data.collector.clock import Clock
+from quasar_market_data.collector.extension_pause import ExtensionPause, ExtensionPaused, ExtensionStopped
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
-from quasar_market_data.collector.open_interest_gate import OpenInterestBanned, OpenInterestGate, OpenInterestPaused
 from quasar_market_data.domain.open_interest_request import OpenInterestRequestError, validate_open_interest_request
 from quasar_market_data.domain.server_time import ServerTimeObservation
 from quasar_market_data.domain.timeframe import Timeframe
@@ -65,8 +65,8 @@ __all__ = [
     "DEFAULT_BUDGET_PER_5MIN",
     "MAX_IN_FLIGHT",
     "BinanceUsdmOpenInterestSource",
-    "OpenInterestBanned",
-    "OpenInterestPaused",
+    "ExtensionPaused",
+    "ExtensionStopped",
     "OpenInterestRequestRefused",
 ]
 
@@ -114,19 +114,19 @@ def _retry_after_ms(headers: object) -> int:
 
 class BinanceUsdmOpenInterestSource:
     def __init__(
-        self, client: Any, inner: BinanceUsdmSource, budget: OpenInterestBudget, gate: OpenInterestGate
+        self, client: Any, inner: BinanceUsdmSource, budget: OpenInterestBudget, pause: ExtensionPause
     ) -> None:
         self._client = client
         self._inner = inner
         self._budget = budget
-        self._gate = gate
+        self._pause = pause
         self._in_flight = asyncio.Semaphore(MAX_IN_FLIGHT)
 
     @classmethod
     async def open(
         cls,
         budget: OpenInterestBudget,
-        gate: OpenInterestGate,
+        pause: ExtensionPause,
         clock: Clock | None = None,
         exchange: Any | None = None,
     ) -> "BinanceUsdmOpenInterestSource":
@@ -137,29 +137,29 @@ class BinanceUsdmOpenInterestSource:
             await client.close()
             raise
         inner = await BinanceUsdmSource.open(client, clock)  # checks fapiPublic, loads markets, closes on failure
-        return cls(client, inner, budget, gate)
+        return cls(client, inner, budget, pause)
 
     def _stop_for(self, error: BaseException, what: str) -> SourceError | None:
-        """The pause or ban a 429/418 answer means (recorded in the gate), else ``None``."""
+        """The pause or ban a 429/418 answer means (recorded in the pause), else ``None``."""
         if not isinstance(error, (ccxt.DDoSProtection, ccxt.RateLimitExceeded)):
             return None
         exchange_id = str(getattr(self._client, "id", ""))
         text = str(error)
         if text.startswith(f"{exchange_id} 418 "):
-            self._gate.record_banned()
-            return OpenInterestBanned()
+            self._pause.record_banned()
+            return ExtensionStopped()
         retry_after = _retry_after_ms(getattr(self._client, "last_response_headers", None))
         if not text.startswith(f"{exchange_id} 429 "):
             retry_after = 0
-        self._gate.record_rate_limited(retry_after)
-        return self._gate.paused()
+        self._pause.record_rate_limited(retry_after)
+        return self._pause.paused()
 
     async def _request[T](self, what: str, call: Callable[[], Awaitable[T]]) -> T:
-        self._gate.check()
+        self._pause.check()
         async with self._in_flight:
             await self._budget.acquire()
-            self._gate.check()  # the start is counted, but a call that waited sends nothing into a pause
-            generation = self._gate.generation
+            self._pause.check()  # the start is counted, but a call that waited sends nothing into a pause
+            generation = self._pause.generation
             try:
                 result = await call()
             except (ccxt.BaseError, SourceError) as error:
@@ -169,10 +169,10 @@ class BinanceUsdmOpenInterestSource:
                     raise stop from error
                 if isinstance(error, SourceError):
                     if not isinstance(original, ccxt.BaseError):
-                        self._gate.record_success(generation)  # the answer arrived; the adapter rejected its content
+                        self._pause.record_success(generation)  # the answer arrived; the adapter rejected its content
                     raise
                 raise SourceError(f"{what} failed: {error}") from error
-            self._gate.record_success(generation)
+            self._pause.record_success(generation)
             return result
 
     def market_id(self, symbol: str) -> str:

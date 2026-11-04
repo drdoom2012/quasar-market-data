@@ -15,6 +15,7 @@ from pathlib import Path
 import uvicorn
 
 from quasar_market_data.api.app import create_app
+from quasar_market_data.api.funding_rate_rule import rule_from_settings as funding_rate_from_settings
 from quasar_market_data.api.open_interest_rule import rule_from_settings
 from quasar_market_data.api.rule import checked_rule
 from quasar_market_data.config.settings import DEFAULT_CONFIG_PATH, ConfigError, load_settings
@@ -62,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
             rule=checked_rule(settings.rule.publication_delay_ms, settings.rule.lag_threshold_ms),
             universe=settings.instruments(),
             open_interest=rule_from_settings(settings),
+            funding_rate=funding_rate_from_settings(settings),
         ),
         host=settings.api.host,
         port=settings.api.port,
