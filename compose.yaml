@@ -35,7 +35,7 @@ x-logging: &logging
 
 services:
   collector:
-    image: ghcr.io/drdoom2012/quasar-market-data-collector:v0.1.0
+    image: ghcr.io/drdoom2012/quasar-market-data-collector:v0.2.0
     restart: unless-stopped
     networks:
       internal: {}
@@ -67,7 +67,7 @@ services:
       retries: 3
 
   api:
-    image: ghcr.io/drdoom2012/quasar-market-data-api:v0.1.0
+    image: ghcr.io/drdoom2012/quasar-market-data-api:v0.2.0
     restart: unless-stopped
     networks:
       internal:
@@ -82,7 +82,7 @@ services:
     logging: *logging
 
   overview:
-    image: ghcr.io/drdoom2012/quasar-market-data-overview:v0.1.0
+    image: ghcr.io/drdoom2012/quasar-market-data-overview:v0.2.0
     restart: unless-stopped
     networks:
       internal:
