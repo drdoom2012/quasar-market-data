@@ -311,6 +311,115 @@ function headline(total, problems, worst, notices) {
   if (notices > 0) return { level: "warn", text: TEXT.banner.notices };
   return { level: "ok", text: TEXT.banner.ok(total) };
 }
+// --- the dashboard model: every number and list the page draws, decided here and nowhere else ---
+const PARTS = ["candles", "openInterest", "funding"];
+const stateText = (state) => TEXT.states[state] || state || "unrecognised";
+// How many rows are ok / warn / bad, by the loudness of each row's worst state over all parts that apply.
+function healthCounts(symbols, status, fstatus = "absent") {
+  const counts = { total: symbols.length, ok: 0, warn: 0, bad: 0 };
+  for (const s of symbols) counts[levelOf(worstState(s, status, fstatus))] += 1;
+  return counts;
+}
+// A share as text. A problem is never rounded away: "100.0 %" only when n === total, "0.0 %" only when n === 0.
+function percentText(n, total) {
+  if (total === 0) return "–";
+  if (n === 0) return "0.0 %";
+  if (n === total) return "100.0 %";
+  return Math.min(99.9, Math.max(0.1, Math.round(n / total * 1000) / 10)).toFixed(1) + " %";
+}
+// Per part: how many rows are ok in it. A part that does not apply says why (`note`) and has no share.
+function partCoverage(symbols, status, fstatus = "absent") {
+  const notes = {
+    openInterest: { disabled: TEXT.oiDisabled, absent: TEXT.oiAbsent },
+    funding: { disabled: TEXT.fundingDisabled, absent: TEXT.fundingAbsent },
+  };
+  return PARTS.map((part) => {
+    const partStatus = part === "openInterest" ? status : part === "funding" ? fstatus : "enabled";
+    if (!applies(partStatus)) return { part, active: false, ok: 0, total: 0, note: notes[part][partStatus] || null };
+    const ok = symbols.filter((s) => partState(s, part, status, fstatus) === "ok").length;
+    return { part, active: true, ok, total: symbols.length, note: null };
+  });
+}
+// One row per part and non-ok state actually seen (a state the page does not know is "unrecognised" and counts as the
+// worst), worst state first. A row can be in several rows: the counts are per cause and are not summed.
+function causeRows(symbols, status, fstatus = "absent") {
+  const rows = [];
+  PARTS.forEach((part, order) => {
+    const partStatus = part === "openInterest" ? status : part === "funding" ? fstatus : "enabled";
+    if (!applies(partStatus)) return;
+    const counts = new Map();
+    for (const s of symbols) {
+      const state = partState(s, part, status, fstatus);
+      if (state === "ok" || state === null) continue;
+      const key = typeof state === "string" && state ? state : "unrecognised";
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    for (const [state, count] of counts) rows.push({ part, state, count, level: levelOf(state), order });
+  });
+  rows.sort((a, b) => rank(a.state) - rank(b.state) || b.count - a.count || a.order - b.order);
+  return rows.map(({ order, ...row }) => row);
+}
+// The link to a series' detail (not built yet): a hash, so nothing is requested. A name that cannot be encoded gives "#".
+function symbolHref(symbol, venue = "", timeframe = "") {
+  try {
+    return "#/symbol/" + encodeURIComponent(symbol) + "?venue=" + encodeURIComponent(venue) + "&timeframe=" + encodeURIComponent(timeframe);
+  } catch (error) {
+    return "#";
+  }
+}
+// The ring: ok, warn, bad. A warn or bad share is never narrower than 0.5 %, so a problem is never a pure green ring.
+function donutBackground(counts) {
+  if (counts.total === 0) return "conic-gradient(var(--track) 0 100%)";
+  const warn = Math.max(counts.warn / counts.total * 100, counts.warn > 0 ? 0.5 : 0);
+  const bad = Math.max(counts.bad / counts.total * 100, counts.bad > 0 ? 0.5 : 0);
+  const r = (x) => Math.round(x * 100) / 100;
+  const okEnd = r(100 - warn - bad), warnEnd = r(100 - bad);
+  return `conic-gradient(var(--ok) 0 ${okEnd}%, var(--warn) ${okEnd}% ${warnEnd}%, var(--bad) ${warnEnd}% 100%)`;
+}
+// Everything the page draws, from a successful overview object and the user's filter. The filter chooses only what the
+// two lists show; counts, ring, coverage and causes are always those of all rows. A row is a series: when the same
+// symbol name occurs in more than one row, every such row is labelled with its venue and timeframe.
+function dashboardModel(data, f) {
+  const symbols = data.symbols, status = oiStatus(data), fstatus = fundingStatus(data), finfo = data.funding_rate || null;
+  const counts = healthCounts(symbols, status, fstatus);
+  const seen = new Map();
+  for (const s of symbols) seen.set(s.symbol, (seen.get(s.symbol) || 0) + 1);
+  const labelOf = (s) => (seen.get(s.symbol) > 1 ? `${s.symbol} (${s.venue || ""}, ${s.timeframe || ""})` : s.symbol);
+  const hrefOf = (s) => symbolHref(s.symbol, s.venue, s.timeframe);
+  const filtered = (f.query || "").trim() !== "" || !!f.part;
+  const visible = symbols.filter((s) => matchesFilter(s, f, status, fstatus));
+  const attentionAll = problemSymbols(symbols, status, fstatus);
+  const attention = problemSymbols(visible, status, fstatus).map((s) => {
+    const worst = worstState(s, status, fstatus);
+    return { label: labelOf(s), href: hrefOf(s), level: levelOf(worst), title: reasonLines(s, status, fstatus, finfo).join("\n"),
+      aria: `${labelOf(s)}: ${stateText(worst)}` };
+  });
+  const healthyRows = visible.filter((s) => !isProblem(s, status, fstatus));
+  const notesOf = okEntries(healthyRows, status, fstatus);
+  const healthy = healthyRows.map((s, i) => ({ label: labelOf(s), href: hrefOf(s), title: notesOf[i].note,
+    aria: `${labelOf(s)}: ${stateText("ok")}` })).sort((a, b) => a.label.localeCompare(b.label));
+  const healthyTotal = counts.ok;
+  const notes = [];
+  const note = (slot, text) => { if (text) notes.push({ slot, text }); };
+  note("oi-notice", oiNotice(status, data.open_interest ? data.open_interest.detail : ""));
+  note("funding-health", finfo && finfo.health ? TEXT.fundingHealth(finfo.health) : "");
+  note("funding-notice", fundingNotice(fstatus, finfo ? finfo.detail : "", finfo));
+  for (const line of refreshNotices(data.refresh || {})) note("refresh-notice", line);
+  return {
+    empty: symbols.length === 0,
+    counts,
+    shares: { ok: percentText(counts.ok, counts.total), warn: percentText(counts.warn, counts.total), bad: percentText(counts.bad, counts.total) },
+    donut: donutBackground(counts),
+    coverage: partCoverage(symbols, status, fstatus),
+    causes: causeRows(symbols, status, fstatus),
+    attention, healthy,
+    attentionTotal: attentionAll.length, healthyTotal,
+    attentionLabel: filtered ? TEXT.search.count(attention.length, attentionAll.length) : String(attentionAll.length),
+    healthyLabel: filtered ? TEXT.search.count(healthy.length, healthyTotal) : String(healthyTotal),
+    groupLabel: okGroupLabel(status, fstatus),
+    notes,
+  };
+}
 // The user's filter: `query` (symbol names separated by spaces or commas, any may match, case ignored) and an optional
 // `part` + `state` (a clicked tile). Pure display filter: it decides no state.
 function matchesFilter(s, f, status, fstatus = "absent") {
