@@ -10,6 +10,7 @@ def test_defaults() -> None:
 
 def test_host_is_passed_to_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded: list[tuple[str, int]] = []
+    details: list[object] = []
 
     class FakeServer:
         server_address = ("0.0.0.0", 0)
@@ -20,13 +21,15 @@ def test_host_is_passed_to_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
         def server_close(self) -> None:
             pass
 
-    def fake_make_server(source: object, host: str, port: int) -> FakeServer:
+    def fake_make_server(source: object, host: str, port: int, detail: object = None) -> FakeServer:
         recorded.append((host, port))
+        details.append(detail)
         return FakeServer()
 
     monkeypatch.setattr("tools.symbol_overview.cli.make_server", fake_make_server)
     assert main(["--host", "0.0.0.0", "--port", "0"]) == 0
     assert recorded == [("0.0.0.0", 0)]
+    assert hasattr(details[0], "get")  # the symbol detail is wired in
 
 
 def test_unbindable_host_is_a_usage_error(capsys: pytest.CaptureFixture[str]) -> None:

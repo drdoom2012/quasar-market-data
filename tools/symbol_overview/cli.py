@@ -4,6 +4,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 
+from tools.symbol_overview.detail_refresh import Detailer
 from tools.symbol_overview.fetch import http_fetch
 from tools.symbol_overview.refresh import Overviewer
 from tools.symbol_overview.server import make_server
@@ -38,7 +39,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as error:
         parser.error(str(error))
     try:
-        server = make_server(Overviewer(fetch), args.host, args.port)
+        server = make_server(Overviewer(fetch), args.host, args.port, Detailer(fetch))
     except OSError as error:
         parser.error(f"cannot listen on {args.host}:{args.port}: {error}")
     print(
