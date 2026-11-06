@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
+<noscript><style>.skel, .val { animation: none !important; }</style></noscript>
 <title>Market Data Overview</title>
 <style>
   :root {
@@ -68,7 +69,8 @@
   .tile .n { font-size: 26px; font-weight: 700; line-height: 1.15; }
   .tile .pct { margin-left: auto; color: var(--muted); font-size: 12px; align-self: flex-end; }
   .cards { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 12px; margin-bottom: 12px; }
-  .cards .card { min-height: 200px; }
+  .cards .card { height: 300px; }  /* fixed: loading and loaded are the same height, so the lists below never move */
+  #causes { max-height: 240px; overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
   .donutwrap { display: flex; align-items: center; gap: 18px; }
   .donut { width: 118px; height: 118px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; }
   .donut .hole { width: 84px; height: 84px; border-radius: 50%; background: var(--card); display: flex; flex-direction: column; align-items: center; justify-content: center; }
@@ -85,7 +87,7 @@
   .bar .v, .cause .v { width: 56px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
   .cause .lbl { flex: 1 1 auto; width: auto; min-width: 0; white-space: normal; }
   .cause .track { flex: 0 0 90px; }
-  .cause { background: none; border: 1px solid transparent; border-radius: 8px; padding: 3px 6px; margin: 4px -6px; width: calc(100% + 12px); cursor: pointer; }
+  .cause { background: none; border: 1px solid transparent; border-radius: 8px; padding: 3px 6px; margin: 2px 0; width: 100%; cursor: pointer; }
   .cause:hover { background: var(--hover); }
   .cause.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
   .note { color: var(--muted); font-size: 12px; }
@@ -109,13 +111,15 @@
   @media (max-width: 900px) {
     .tiles { grid-template-columns: repeat(2, 1fr); }
     .cards { grid-template-columns: 1fr; }
-    .cards .card { min-height: 0; }
+    .cards .card { height: auto; }
+    .cards .card.causes-card { height: 300px; }
     #banner .sub { display: none; }
   }
   @media (max-width: 520px) {
     main { padding: 12px 12px 40px; }
     .tiles { grid-template-columns: 1fr; }
     .bar .lbl, .cause .lbl { width: 110px; }
+    #banner { min-height: 68px; }
   }
 </style>
 </head>
@@ -128,7 +132,7 @@
     <div class="subtitle" data-text="subtitle"></div>
   </div>
   <div class="right">
-    <span id="status-line" role="status"></span>
+    <span id="status-line"></span>
     <button id="refresh" type="button">Refresh</button>
   </div>
 </header>
@@ -154,7 +158,7 @@
     <h3 data-text="cards.parts"></h3>
     <div id="parts"><span class="skel row"></span><span class="skel row"></span><span class="skel row"></span></div>
   </section>
-  <section class="card">
+  <section class="card causes-card">
     <h3 data-text="cards.causes"></h3>
     <div id="causes"><span class="skel row"></span><span class="skel row"></span><span class="skel row"></span></div>
   </section>
@@ -201,7 +205,7 @@ const TEXT = {
   never: "nothing yet",
   age: (s) => `state from the API, fetched ${s} s ago`,
   states: { no_data: "no data", unknown: "cannot judge", stale: "stale", conflict: "conflict", holes: "holes", behind: "behind", ok: "ok",
-    quiet: "quiet", unverified: "not verified", partly_verified: "partly verified" },
+    quiet: "quiet", unverified: "not verified", partly_verified: "partly verified", unrecognised: "unrecognised" },
   title: "Market Data Overview",
   subtitle: "State and quality of collection for all tracked symbols.",
   tiles: { symbols: "Symbols", healthy: "Healthy", warning: "Warning", critical: "Critical" },
@@ -265,7 +269,7 @@ const TEXT = {
     incomplete: "refresh incomplete",
     worst: (state) => `worst: ${TEXT.states[state]}`,
   },
-  search: { none: "No symbol matches the filter.", count: (shown, all) => `${shown} of ${all}`, clear: "clear filter" },
+  search: { none: "No symbol matches the filter.", noneInState: "No symbol of this list is in the selected state.", count: (shown, all) => `${shown} of ${all}`, clear: "clear filter" },
   filterHint: "Show only these symbols",
 };
 // English plural: 1 -> one, otherwise many.
@@ -281,6 +285,11 @@ const POLL_MS = 60000, OLD_AFTER_S = 180;
 
 function fmt(ms) { return ms == null ? "–" : new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC"; }
 
+// A state the page does not know (a new one, a missing one, even "constructor") is "unrecognised": the worst there is,
+// never echoed from the answer and never a key into an object.
+function known(state) { return RANK_ORDER.includes(state) ? state : "unrecognised"; }
+function candleState(s) { return known(s.state); }
+
 // The status of the open interest part: "disabled", "unknown", "enabled", or "absent" (a tool that does not report it).
 function oiStatus(data) { return data.open_interest ? data.open_interest.status : "absent"; }
 function applies(status) { return status !== "disabled" && status !== "absent"; }
@@ -288,42 +297,42 @@ function applies(status) { return status !== "disabled" && status !== "absent"; 
 // applies and a symbol has no block, nothing says it is fine.
 function oiStateOf(s, status) {
   if (!applies(status)) return null;
-  return s.open_interest ? s.open_interest.state : "unknown";
+  return s.open_interest ? known(s.open_interest.state) : "unknown";
 }
 // The status of the funding part: "disabled", "unknown", "enabled", or "absent" (a tool that does not report it).
 // Every function below takes it as an OPTIONAL last parameter; "absent" gives exactly the output of a page without funding.
 function fundingStatus(data) { return data.funding_rate ? data.funding_rate.status : "absent"; }
 function fundingStateOf(s, fstatus = "absent") {
   if (!applies(fstatus)) return null;
-  return s.funding_rate ? s.funding_rate.state : "unknown";
+  return s.funding_rate ? known(s.funding_rate.state) : "unknown";
 }
 function rank(state) { return RANK_ORDER.indexOf(state); }
 function worstRank(s, status, fstatus = "absent") {
-  const states = [s.state, oiStateOf(s, status), fundingStateOf(s, fstatus)].filter((x) => x !== null);
+  const states = [candleState(s), oiStateOf(s, status), fundingStateOf(s, fstatus)].filter((x) => x !== null);
   return Math.min(...states.map(rank));
 }
 function isProblem(s, status, fstatus = "absent") {
-  return [s.state, oiStateOf(s, status), fundingStateOf(s, fstatus)].some((x) => x !== null && x !== "ok");
+  return [candleState(s), oiStateOf(s, status), fundingStateOf(s, fstatus)].some((x) => x !== null && x !== "ok");
 }
 // Listed when the candle, the open interest OR the funding state is a problem; the worst of them first, then the candle state.
 function problemSymbols(symbols, status, fstatus = "absent") {
   return symbols.filter((s) => isProblem(s, status, fstatus))
-    .sort((a, b) => worstRank(a, status, fstatus) - worstRank(b, status, fstatus) || rank(a.state) - rank(b.state) || a.symbol.localeCompare(b.symbol));
+    .sort((a, b) => worstRank(a, status, fstatus) - worstRank(b, status, fstatus) || rank(candleState(a)) - rank(candleState(b)) || a.symbol.localeCompare(b.symbol));
 }
 // The state of one part of a symbol ("candles", "openInterest", "funding"), or null when the part does not apply.
 function partState(s, part, status, fstatus = "absent") {
-  if (part === "candles") return s.state;
+  if (part === "candles") return candleState(s);
   if (part === "openInterest") return oiStateOf(s, status);
   if (part === "funding") return fundingStateOf(s, fstatus);
   return null;
 }
 // The worst state of a symbol over all parts that apply.
 function worstState(s, status, fstatus = "absent") {
-  return RANK_ORDER[worstRank(s, status, fstatus)];
+  return RANK_ORDER[worstRank(s, status, fstatus)] || "unrecognised";
 }
 // How loud a state is: "ok", "warn", "bad". `no_data` is "bad" here: a symbol with nothing downloaded is not a quiet one.
 const LEVELS = { ok: "ok", behind: "warn", holes: "warn", unverified: "warn", partly_verified: "warn" };
-function levelOf(state) { return LEVELS[state] || "bad"; }
+function levelOf(state) { return Object.hasOwn(LEVELS, state) ? LEVELS[state] : "bad"; }
 // The headline over the whole page. Green only when there are symbols, none is a problem and the refresh finished;
 // anything else is never green (nothing says it is fine).
 function headline(total, problems, worst, notices) {
@@ -334,7 +343,7 @@ function headline(total, problems, worst, notices) {
 }
 // --- the dashboard model: every number and list the page draws, decided here and nowhere else ---
 const PARTS = ["candles", "openInterest", "funding"];
-const stateText = (state) => TEXT.states[state] || state || "unrecognised";
+const stateText = (state) => (Object.hasOwn(TEXT.states, state) ? TEXT.states[state] : "unrecognised");
 // How many rows are ok / warn / bad, by the loudness of each row's worst state over all parts that apply.
 function healthCounts(symbols, status, fstatus = "absent") {
   const counts = { total: symbols.length, ok: 0, warn: 0, bad: 0 };
@@ -361,8 +370,7 @@ function partCoverage(symbols, status, fstatus = "absent") {
     return { part, active: true, ok, total: symbols.length, note: null };
   });
 }
-// One row per part and non-ok state actually seen (a state the page does not know is "unrecognised" and counts as the
-// worst), worst state first. A row can be in several rows: the counts are per cause and are not summed.
+// One row per part and non-ok state actually seen ("unrecognised" counts as the worst), worst state first. A row can be in several rows: the counts are per cause and are not summed.
 function causeRows(symbols, status, fstatus = "absent") {
   const rows = [];
   PARTS.forEach((part, order) => {
@@ -372,8 +380,7 @@ function causeRows(symbols, status, fstatus = "absent") {
     for (const s of symbols) {
       const state = partState(s, part, status, fstatus);
       if (state === "ok" || state === null) continue;
-      const key = typeof state === "string" && state ? state : "unrecognised";
-      counts.set(key, (counts.get(key) || 0) + 1);
+      counts.set(state, (counts.get(state) || 0) + 1);
     }
     for (const [state, count] of counts) rows.push({ part, state, count, level: levelOf(state), order });
   });
@@ -394,7 +401,7 @@ function donutBackground(counts) {
   const warn = Math.max(counts.warn / counts.total * 100, counts.warn > 0 ? 0.5 : 0);
   const bad = Math.max(counts.bad / counts.total * 100, counts.bad > 0 ? 0.5 : 0);
   const r = (x) => Math.round(x * 100) / 100;
-  const okEnd = r(100 - warn - bad), warnEnd = r(100 - bad);
+  const okEnd = Math.max(0, r(100 - warn - bad)), warnEnd = r(100 - bad);
   return `conic-gradient(var(--ok) 0 ${okEnd}%, var(--warn) ${okEnd}% ${warnEnd}%, var(--bad) ${warnEnd}% 100%)`;
 }
 // Everything the page draws, from a successful overview object and the user's filter. The filter chooses only what the
@@ -627,8 +634,9 @@ function render(data, httpStatus) {
   setValue("problems-count", model.attentionLabel);
   setValue("ok-count", model.healthyLabel);
   setValue("ok-label", model.groupLabel);
-  linkList($("problems"), model.attention, model.attentionTotal > 0 ? TEXT.search.none : TEXT.noProblems);
-  linkList($("ok-group"), model.healthy, model.healthyTotal > 0 ? TEXT.search.none : TEXT.noHealthy);
+  // With no symbols at all nothing is claimed ("Nothing is wrong" would be a statement about no data).
+  linkList($("problems"), model.attention, model.empty ? "–" : model.attentionTotal > 0 ? TEXT.search.none : TEXT.noProblems);
+  linkList($("ok-group"), model.healthy, model.empty ? "–" : model.healthyTotal > 0 ? (filter.part ? TEXT.search.noneInState : TEXT.search.none) : TEXT.noHealthy);
 
   for (const id of ["oi-notice", "funding-notice", "funding-health", "refresh-notice"]) $(id).replaceChildren();
   for (const note of model.notes) $(note.slot).append(el("p", {}, note.text));

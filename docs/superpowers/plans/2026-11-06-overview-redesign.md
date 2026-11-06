@@ -156,3 +156,11 @@ The markup, CSS and script change together (the script writes into the new ids),
 - Request coverage: counts, healthy, what is wrong and what, two comma lists with links, English, no-jump loading, screenshot look, API unchanged, strip out.
 - Names consistent: `healthCounts`, `percentText`, `partCoverage` (field `active`), `causeRows`, `symbolHref`, `donutBackground`, `dashboardModel`, `setPhase`.
 - Proportion: decisions, signatures, ids, rules and exact test values; bodies are left to the implementer.
+
+## Implementation notes (deviations from the text above, decided while building and after the independent reviews)
+
+- `dashboardModel().notes` is a list of `{slot, text}` (the four note ids of the Notes card), not a list of strings; the model also returns `worst`, `incomplete` and `groupLabel` for the banner and the Healthy heading.
+- Unknown states: one normaliser, `known(state)`, maps every state that is not in `RANK_ORDER` (new, missing, `null`, even `"constructor"`) to `"unrecognised"`, the worst state; `candleState`, `oiStateOf`, `fundingStateOf`, `worstState`, `levelOf` and `stateText` use it, so tiles, lists, causes, the banner and the cause-row filter agree. `causeRows` no longer iterates `ORDER`/`FUNDING_ORDER`; those constants stay because tests pin them to the tool's state lists.
+- Layout: the three cards have a fixed height of 300 px (the causes list scrolls inside its card) so that the lists do not move when data arrives (found by the second review; at 900 px and below only the causes card is fixed).
+- Zero symbols: both lists show `–`, not "Nothing is wrong." A cause-row filter that leaves the Healthy list empty says why.
+- Reviewed independently twice (plan: 12 findings, implementation: 11); all were applied except the screen-reader announcement of `#banner` and the notice blocks (`role="status"` kept there; removed only from the per-second age line) and the unverified two-line wrap of the long banner text on a phone (min-height raised to 68 px at 520 px and below).

@@ -117,17 +117,30 @@ def test_a_part_that_does_not_apply_has_no_cause_rows() -> None:
 
 
 @needs_node
-def test_an_unrecognised_state_is_counted_and_gets_a_row() -> None:
+def test_a_state_the_page_does_not_know_is_unrecognised_everywhere() -> None:
     odd = sym("A", "brand_new", "ok", fund("ok"))
-    no_state = sym("B", "ok", "ok", fund("ok"))
-    del no_state["state"]
+    no_state = {**sym("B", "ok", "ok", fund("ok")), "state": None}
+    prototype = sym("C", "constructor", "ok", fund("ok"))
+    data = js(
+        {
+            "symbols": [odd, no_state, prototype],
+            "open_interest": {"status": "enabled"},
+            "funding_rate": {"status": "enabled"},
+        }
+    )
+    none = js({"query": "", "part": None, "state": None})
+    row = js({"query": "", "part": "candles", "state": "unrecognised"})
 
-    counts = call(f"healthCounts({js([odd])}, {BOTH})")
-    found = call(f"causeRows({js([odd, no_state])}, {BOTH})")
+    model = call(f"dashboardModel({data}, {none})")
+    clicked = call(f"dashboardModel({data}, {row})")
 
-    assert counts["bad"] == 1
-    assert found[0] == {"part": "candles", "state": "brand_new", "count": 1, "level": "bad"}
-    assert found[1] == {"part": "candles", "state": "unrecognised", "count": 1, "level": "bad"}
+    assert model["counts"] == {"total": 3, "ok": 0, "warn": 0, "bad": 3}
+    assert model["causes"] == [{"part": "candles", "state": "unrecognised", "count": 3, "level": "bad"}]
+    assert len(model["attention"]) == 3 and model["healthy"] == []  # tiles, lists and causes agree
+    assert model["worst"] == "unrecognised"
+    assert call("headline(3, 3, 'unrecognised', 0)")["sub"] == "worst: unrecognised"
+    assert len(clicked["attention"]) == 3  # clicking the cause row lists exactly those symbols
+    assert call("levelOf('constructor')") == "bad"  # a prototype key is not a state
 
 
 @needs_node
@@ -170,6 +183,8 @@ def test_donut_background_is_neutral_without_symbols_and_never_green_for_a_probl
     one = "conic-gradient(var(--ok) 0 99.5%, var(--warn) 99.5% 99.5%, var(--bad) 99.5% 100%)"
     assert call("donutBackground({total: 3000, ok: 2999, warn: 0, bad: 1})") == one
     assert call("donutBackground({total: 20000, ok: 19999, warn: 0, bad: 1})") == one
+    mostly_warn = call("donutBackground({total: 1000, ok: 1, warn: 998, bad: 1})")
+    assert re.search(r" -\d", mostly_warn) is None  # no negative stop
 
 
 # --- the model ----------------------------------------------------------------------------------------------------------
@@ -288,6 +303,12 @@ def slot(element: str) -> str:
     return HTML.split(f'id="{element}"')[1].split('id="')[0]
 
 
+def main_style() -> str:
+    """The page's stylesheet (the longest ``<style>``: the one in ``<noscript>`` is a single rule)."""
+    sheets: list[str] = re.findall(r"<style>(.*?)</style>", HTML, re.DOTALL)
+    return max(sheets, key=len)
+
+
 def body_of(function: str) -> str:
     return SCRIPT.split(f"function {function}(")[1].split("\n}\n")[0]
 
@@ -301,7 +322,7 @@ def test_the_page_starts_in_the_loading_phase_with_every_slot_present() -> None:
 
 
 def test_the_banner_and_the_status_line_reserve_their_space() -> None:
-    style = HTML.split("<style>")[1].split("</style>")[0]
+    style = main_style()
 
     for selector in ("#banner", "#status-line"):
         assert re.search(rf"{re.escape(selector)}[^{{}}]*\{{[^}}]*min-height", style)
@@ -349,7 +370,8 @@ def test_render_marks_ready_only_after_a_good_answer() -> None:
 
 
 def test_names_are_inserted_as_text_never_as_markup() -> None:
-    assert "innerHTML" not in SCRIPT
+    for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
+        assert forbidden not in SCRIPT
     assert 'setAttribute("href"' in SCRIPT
 
 
@@ -364,18 +386,31 @@ def test_the_removed_strip_machinery_is_gone() -> None:
         assert gone not in HTML
 
 
-def test_the_new_texts_exist() -> None:
-    for key in (
-        "symbols:",
-        "healthy:",
-        "warning:",
-        "critical:",
-        "health:",
-        "parts:",
-        "causes:",
-        "attention:",
-        "notes:",
-        "criticalHint:",
-        "incomplete:",
-    ):
-        assert key in SCRIPT
+@needs_node
+def test_every_static_text_path_of_the_markup_exists_in_text() -> None:
+    paths = sorted(set(re.findall(r'data-(?:text|title)="([^"]+)"', HTML)))
+
+    found = call(f"{js(paths)}.map((path) => typeof path.split('.').reduce((node, key) => node[key], TEXT))")
+
+    assert paths and found == ["string"] * len(paths)  # a typo would freeze the page in its placeholders
+
+
+def test_the_abort_ends_in_the_error_phase_with_its_own_text() -> None:
+    body = SCRIPT.split("async function refresh(")[1].split("\n}\n")[0]
+
+    assert "AbortError" in body and "TEXT.timeout" in body and "showError(" in body.split("catch")[1]
+
+
+def test_the_cards_have_a_fixed_height_so_the_lists_do_not_move_when_the_data_arrives() -> None:
+    style = main_style()
+
+    assert re.search(r"\.cards \.card \{ height: 300px", style)
+    assert re.search(r"#causes \{[^}]*max-height[^}]*overflow-y: auto", style)  # many causes scroll instead of growing
+
+
+def test_without_javascript_the_placeholders_do_not_shimmer_for_ever() -> None:
+    assert re.search(r"<noscript><style>[^<]*animation: none", HTML)
+
+
+def test_the_age_line_is_not_a_live_region_that_speaks_every_second() -> None:
+    assert 'id="status-line" role=' not in HTML
