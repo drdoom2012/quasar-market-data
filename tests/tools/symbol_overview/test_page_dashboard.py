@@ -5,10 +5,11 @@ object into everything the page draws, so what the page shows is tested here wit
 look of the loading placeholders are checked by nothing automatic; the README describes the manual check.
 """
 
+import re
 from typing import Any
 
 from tests.tools.symbol_overview.test_funding_page import fund, js, sym
-from tests.tools.symbol_overview.test_oi_page import call, needs_node, reason
+from tests.tools.symbol_overview.test_oi_page import HTML, SCRIPT, call, needs_node, reason
 
 BOTH = "'enabled', 'enabled'"
 
@@ -196,6 +197,7 @@ def test_the_model_for_a_name_in_two_series_labels_both_and_keeps_the_counts_con
     assert model["attention"][0]["aria"] == "X/USDT (bybit, 1h): cannot judge"
     assert "the API answer cannot be used" in model["attention"][0]["title"]
     assert model["counts"] == {"total": 3, "ok": 2, "warn": 0, "bad": 1}
+    assert model["worst"] == "unknown" and model["incomplete"] == 0  # what the banner needs, decided here
     only_y = call(f"dashboardModel({js(data)}, {js({'query': 'y', 'part': None, 'state': None})})")
     assert [e["label"] for e in only_y["healthy"]] == ["Y/USDT"]
     only_x = call(f"dashboardModel({js(data)}, {js({'query': 'x/', 'part': None, 'state': None})})")
@@ -249,3 +251,131 @@ def test_the_model_notes_name_what_is_not_enabled_and_what_the_refresh_missed() 
     assert texts["oi-notice"] == "Open interest is not enabled in this deployment"
     assert texts["funding-notice"] == "Funding rate is not reported by the tool"
     assert "2 symbols" in texts["refresh-notice"]
+    assert call(f"dashboardModel({js(data)}, {none})")["incomplete"] == 1
+
+
+# --- the markup ---------------------------------------------------------------------------------------------------------
+
+IDS = [
+    "n-total",
+    "n-ok",
+    "n-warn",
+    "n-bad",
+    "p-ok",
+    "p-warn",
+    "p-bad",
+    "donut",
+    "donut-total",
+    "donut-legend",
+    "parts",
+    "causes",
+    "problems",
+    "ok-group",
+    "problems-count",
+    "ok-count",
+    "ok-label",
+    "notes",
+    "banner",
+    "oi-notice",
+    "funding-notice",
+    "funding-health",
+    "refresh-notice",
+]
+
+
+def slot(element: str) -> str:
+    """The markup from ``id="<element>"`` up to the next id: the placeholders inside that slot."""
+    return HTML.split(f'id="{element}"')[1].split('id="')[0]
+
+
+def body_of(function: str) -> str:
+    return SCRIPT.split(f"function {function}(")[1].split("\n}\n")[0]
+
+
+def test_the_page_starts_in_the_loading_phase_with_every_slot_present() -> None:
+    assert 'data-phase="loading"' in HTML
+    for element in IDS:
+        assert f'id="{element}"' in HTML
+    for element in ("banner", "parts", "causes", "problems", "ok-group"):
+        assert re.search(r'class="skel[ "]', slot(element))  # a placeholder of the final size, so loading moves nothing
+
+
+def test_the_banner_and_the_status_line_reserve_their_space() -> None:
+    style = HTML.split("<style>")[1].split("</style>")[0]
+
+    for selector in ("#banner", "#status-line"):
+        assert re.search(rf"{re.escape(selector)}[^{{}}]*\{{[^}}]*min-height", style)
+    assert "<noscript>" in HTML
+
+
+def test_clear_states_empties_every_data_slot_forgets_the_data_and_sets_the_error_phase() -> None:
+    body = body_of("clearStates")
+
+    for element in [
+        "n-total",
+        "n-ok",
+        "n-warn",
+        "n-bad",
+        "p-ok",
+        "p-warn",
+        "p-bad",
+        "donut-total",
+        "donut-legend",
+        "parts",
+        "causes",
+        "problems",
+        "ok-group",
+        "banner",
+        "filter-chip",
+        "problems-count",
+        "ok-count",
+        "oi-notice",
+        "funding-notice",
+        "funding-health",
+        "refresh-notice",
+    ]:
+        assert f'"{element}"' in body
+    assert "lastData = null" in body  # typing, Esc or a click cannot bring old data back after an error
+    assert 'setPhase("error")' in body_of("showError")
+
+
+def test_render_marks_ready_only_after_a_good_answer() -> None:
+    body = body_of("render")
+
+    assert body.count('setPhase("ready")') == 1
+    assert body.index("data.api_error") < body.index('setPhase("ready")')
+    refresh = body_of("refresh") if "function refresh(" in SCRIPT else SCRIPT.split("async function refresh(")[1]
+    assert "lastFetchedAt = null" in refresh and "AbortController" in refresh and "90000" in refresh
+
+
+def test_names_are_inserted_as_text_never_as_markup() -> None:
+    assert "innerHTML" not in SCRIPT
+    assert 'setAttribute("href"' in SCRIPT
+
+
+def test_the_page_loads_nothing_external() -> None:
+    assert re.search(r'(src|href)="https?:', HTML) is None
+    assert "@import" not in HTML
+    assert "url(" not in HTML
+
+
+def test_the_removed_strip_machinery_is_gone() -> None:
+    for gone in ("drawStrip", "<canvas", "heatmap", "fundingLine", "legend()"):
+        assert gone not in HTML
+
+
+def test_the_new_texts_exist() -> None:
+    for key in (
+        "symbols:",
+        "healthy:",
+        "warning:",
+        "critical:",
+        "health:",
+        "parts:",
+        "causes:",
+        "attention:",
+        "notes:",
+        "criticalHint:",
+        "incomplete:",
+    ):
+        assert key in SCRIPT

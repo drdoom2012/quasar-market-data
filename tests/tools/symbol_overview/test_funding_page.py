@@ -51,22 +51,14 @@ def js(value: Any) -> str:
 
 
 def test_the_page_has_the_funding_elements_and_keeps_the_old_ones() -> None:
-    for element in (
-        "funding-summary",
-        "funding-health",
-        "funding-notice",
-        "summary",
-        "oi-summary",
-        "problems",
-        "heatmap",
-    ):
+    for element in ("funding-health", "funding-notice", "n-ok", "problems"):
         assert f'id="{element}"' in HTML
 
 
 def test_clear_states_clears_the_funding_elements() -> None:
     body = SCRIPT.split("function clearStates()")[1].split("\n}\n")[0]
 
-    for element in ("funding-summary", "funding-health", "funding-notice"):
+    for element in ("funding-health", "funding-notice"):
         assert f'"{element}"' in body  # a later page-level error leaves no old funding tile
 
 
@@ -262,21 +254,6 @@ def test_the_refresh_notices_name_funding_and_the_count() -> None:
     )
     assert [line.split(":")[0] for line in both] == ["Candles", "Open interest", "Funding rate"]
     assert call("refreshNotices({deadline_hit: false, funding_deadline_hit: false, funding_not_asked: 0})") == []
-
-
-@needs_node
-def test_the_line_under_the_strips_says_what_was_verified_and_never_calls_anything_fine() -> None:
-    line = call(f"fundingLine({js(fund('ok'))}, {js(FUNDING_INFO)})")
-
-    assert line.startswith("funding: verified ") and "newest settlement" in line
-    assert "90 settlements from " in line and "complete as far as the Collector verified" in line
-    unverified = call(
-        f"fundingLine({js(fund('unverified', verified_from_ms=None, verified_through_ms=None, complete=False))}, null)"
-    )
-    assert "verified nothing" in unverified and "not complete" in unverified
-    assert call("fundingLine(null, null)") == "funding: cannot judge"
-    assert call(f"fundingLine({js(fund('unknown'))}, null)") == "funding: cannot judge"
-    assert call(f"fundingLine({js(fund('no_data'))}, null)") == "funding: nothing stored"
 
 
 @needs_node
