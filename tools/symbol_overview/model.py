@@ -210,6 +210,7 @@ class SymbolReport:
     newest_open_time_ms: int | None
     as_of_ms: int | None
     strip: str | None
+    present_slots: int | None = None  # the present slots of the 30-day window, for the detail's history coverage
 
 
 @dataclass(frozen=True)
@@ -253,6 +254,7 @@ class OiReport:
     as_of_ms: int | None
     retrieval_horizon_ms: int | None
     strip: str | None
+    present_slots: int | None = None  # the present slots of the open interest window, for the detail's coverage
 
 
 @dataclass(frozen=True)

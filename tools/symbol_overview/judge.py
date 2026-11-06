@@ -58,6 +58,7 @@ def _report(
         newest_open_time_ms=coverage.newest_open_time_ms if coverage else None,
         as_of_ms=coverage.as_of_ms if coverage else None,
         strip=strip,
+        present_slots=coverage.present_slots if coverage else None,
     )
 
 
@@ -118,6 +119,7 @@ def _symbol_body(report: SymbolReport) -> dict[str, object]:
         "newest_open_time_ms": report.newest_open_time_ms,
         "as_of_ms": report.as_of_ms,
         "strip": report.strip,
+        "present_slots": report.present_slots,
     }
 
 
@@ -215,6 +217,7 @@ def _oi_report(
         as_of_ms=coverage.as_of_ms if coverage else None,
         retrieval_horizon_ms=coverage.retrieval_horizon_ms if coverage else None,
         strip=strip,
+        present_slots=coverage.present_slots if coverage else None,
     )
 
 
@@ -283,6 +286,7 @@ def _oi_body(report: OiReport) -> dict[str, object]:
         "as_of_ms": report.as_of_ms,
         "retrieval_horizon_ms": report.retrieval_horizon_ms,
         "strip": report.strip,
+        "present_slots": report.present_slots,
     }
 
 

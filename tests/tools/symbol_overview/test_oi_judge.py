@@ -275,6 +275,7 @@ def test_build_overview_without_open_interest_is_todays_object() -> None:
         "newest_open_time_ms",
         "as_of_ms",
         "strip",
+        "present_slots",  # added for the symbol detail (history coverage); nothing else changed
     }
 
 
@@ -323,6 +324,7 @@ def test_build_overview_with_open_interest_adds_only_new_keys() -> None:
         "as_of_ms": T0 + 1000,
         "retrieval_horizon_ms": HORIZON_MS,
         "strip": stored.strip,
+        "present_slots": stored.present_slots,
     }
 
 
@@ -357,3 +359,19 @@ def test_reports_must_line_up_with_the_candle_reports() -> None:
         overview(enabled_part(report_with("ok"), report_with("ok")))  # two reports for one symbol
     with pytest.raises(ValueError):
         overview(OiPart("disabled", "", (report_with("ok"),), False, 0, 0))  # disabled has none
+
+
+def test_the_open_interest_report_carries_the_present_slots_of_the_answer() -> None:
+    coverage = open_interest_coverage_result(
+        200,
+        "application/json",
+        json.dumps(api_doc(rows=[slot(10), slot(11)])).encode(),
+        instrument=instrument(),
+        oi_window=OI_WINDOW,
+        health=HEALTH,
+        oi_health=OI_HEALTH,
+    )
+    assert isinstance(coverage, OiCoverage)
+    report = judge_open_interest(instrument(), coverage, OI_WINDOW)
+    assert report.present_slots == coverage.present_slots == 2
+    assert judge_open_interest(instrument(), Invalid("transport", "timeout"), OI_WINDOW).present_slots is None

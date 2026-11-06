@@ -4,7 +4,7 @@ from collections.abc import Mapping
 import pytest
 
 from tests.tools.symbol_overview.helpers import RULE, T0, coverage_doc, instrument
-from tools.symbol_overview.judge import STATE_ORDER, build_overview, judge_symbol, page_error
+from tools.symbol_overview.judge import STATE_ORDER, _symbol_body, build_overview, judge_symbol, page_error
 from tools.symbol_overview.model import TF_MS, Coverage, Health, Invalid, Reason, SymbolReport
 from tools.symbol_overview.validate import coverage_result
 from tools.symbol_overview.window import window_for
@@ -247,3 +247,12 @@ def test_overview_size_for_600_symbols() -> None:
     one = judge(cover(states={S + 10 * TF_MS: "missing", T0 - TF_MS: "due"}))
     overview = build_overview(HEALTH, W, [one] * 600, duration_ms=0, deadline_hit=False)
     assert len(json.dumps(overview)) < 1_000_000
+
+
+def test_the_report_and_its_body_carry_the_present_slots_of_the_window() -> None:
+    coverage = cover(states={S + 5 * TF_MS: "missing"})
+    report = judge(coverage)
+    assert report.present_slots == coverage.present_slots
+    assert _symbol_body(report)["present_slots"] == coverage.present_slots
+    assert judge_symbol(instrument(newest=None), None, W).present_slots is None
+    assert judge_symbol(instrument(), Invalid("transport", "timeout"), W).present_slots is None
