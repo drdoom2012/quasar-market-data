@@ -85,14 +85,18 @@ def candle_change(rows: Sequence[CandleRow]) -> dict[str, str] | None:
 
 
 def open_interest_change(rows: Sequence[OiRow]) -> dict[str, object] | None:
-    """The latest ``value`` against the row exactly one hour earlier; ``None`` when that row is absent."""
+    """The latest ``open_interest`` (the quantity) against the row exactly one hour earlier; ``None`` when that row is absent.
+
+    The quantity, not ``open_interest_value``: the value is the quantity times the price, so it moves with the price and
+    would show the price's change, not the change in open positions.
+    """
     if not rows:
         return None
     reference_t = rows[-1].t - OI_REFERENCE_SLOTS * TF_MS
     reference = next((row for row in reversed(rows) if row.t == reference_t), None)
     if reference is None:
         return None
-    percent = percent_change(rows[-1].value, reference.value)
+    percent = percent_change(rows[-1].oi, reference.oi)
     return None if percent is None else {"percent": percent, "reference_ms": reference.t}
 
 

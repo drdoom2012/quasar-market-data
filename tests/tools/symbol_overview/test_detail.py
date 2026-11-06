@@ -21,8 +21,8 @@ def candle(t: int, close: str = "100") -> CandleRow:
     return CandleRow(t, close, close, close, close, "1", None, False)
 
 
-def oi_row(t: int, value: str = "100") -> OiRow:
-    return OiRow(t, "1", value, False)
+def oi_row(t: int, quantity: str = "100", value: str = "1") -> OiRow:
+    return OiRow(t, quantity, value, False)
 
 
 def test_windows_of_every_range() -> None:
@@ -82,6 +82,13 @@ def test_open_interest_change_uses_the_row_one_hour_earlier() -> None:
     assert open_interest_change(rows) == {"percent": "+10.00", "reference_ms": reference}
     assert open_interest_change(rows[1:]) is None
     assert open_interest_change([]) is None
+
+
+def test_the_open_interest_change_is_that_of_the_quantity_not_of_the_value() -> None:
+    # the value is the quantity times the price: a price move must not show up as a change of open interest
+    reference = T0
+    flat_quantity = [oi_row(reference, "200", value="1000"), oi_row(reference + 12 * TF_MS, "200", value="1100")]
+    assert open_interest_change(flat_quantity) == {"percent": "0.00", "reference_ms": reference}
 
 
 def test_part_helpers_have_the_fixed_shapes() -> None:

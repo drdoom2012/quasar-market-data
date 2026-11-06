@@ -379,8 +379,12 @@ def test_the_cards_print_exact_strings() -> None:
         cards["candle"]["lines"][1] == f"closed {call(f'fmt({T0})')} · 0 s before the API clock"
     )  # the candle closes at as_of
     assert cards["candle"]["lines"][2] == "change +0.84 % vs the previous candle"
-    assert cards["openInterest"]["head"] == f"29{nbsp}870{nbsp}000{nbsp}000.5"  # no unit in the head: it is inferred
-    assert cards["openInterest"]["lines"][0] == "value in USDT (unit inferred, not documented by Binance)"
+    assert cards["openInterest"]["head"] == f"95{nbsp}677.779"  # the quantity, not the value (quantity x price)
+    assert cards["openInterest"]["lines"][0] == "quantity in the base asset (unit inferred, not documented by Binance)"
+    assert (
+        cards["openInterest"]["lines"][1]
+        == f"value 29{nbsp}870{nbsp}000{nbsp}000.5 USDT (quantity times price, so it follows the price)"
+    )
     assert cards["openInterest"]["lines"][3] == "change n/a"
     assert cards["funding"]["head"] == "0.01 %"
     assert cards["funding"]["lines"][1] == "rate 0.0001 (a fraction per settlement; unit inferred)"
@@ -436,7 +440,7 @@ def test_tooltips_use_the_exact_stored_strings() -> None:
     lines = call(f"tooltipLines('candles', {js(candle_row(T0, conflicted=True))})")
     assert lines[1].endswith("close 76 432.5") and lines[-1].startswith("conflicted")
     oi_lines = call(f"tooltipLines('openInterest', {js({'t': T0, 'oi': '1.5', 'value': '2.5', 'conflicted': False})})")
-    assert oi_lines[0].startswith("period ended") and oi_lines[1] == "value 2.5"
+    assert oi_lines[0].startswith("period ended") and oi_lines[1] == "open interest 1.5" and oi_lines[2] == "value 2.5"
     funding_lines = call(
         f"tooltipLines('funding', {js({'t': T0, 'rate_type': 'Special', 'rate': '-0.5', 'mark_price': None, 'conflicted': False})})"
     )
@@ -477,7 +481,7 @@ def test_a_conflicted_candle_is_marked() -> None:
 def test_open_interest_is_plotted_at_the_candle_it_belongs_to() -> None:
     start = T0 - 2 * TF
     window = {"start": start, "end": start + 2 * TF}
-    rows = [{"t": start + TF, "oi": "1", "value": "10.5", "conflicted": False}]  # the END of the first slot's period
+    rows = [{"t": start + TF, "oi": "10.5", "value": "9999", "conflicted": False}]  # the END of the first slot's period
     points = call(f"oiPoints({js(rows)}, {js(window)})")
     assert points == [{"time": start / 1000, "value": 10.5}, {"time": (start + TF) / 1000}]
     assert call(f"oiPlotMs({T0})") == T0 - TF

@@ -191,7 +191,7 @@ def test_a_part_that_is_not_ok_has_no_pane_and_says_why() -> None:
           oi: $("kpi-oi").textContent }};"""
     )
     assert result["series"] == ["candlestick", "histogram"]  # candles and volume only: no open interest pane
-    assert "Open interest: cannot be loaded (schema: pages)" in result["note"]
+    assert "Open interest (quantity): cannot be loaded (schema: pages)" in result["note"]
     assert "cannot be loaded (schema: pages)" in result["oi"]
 
 

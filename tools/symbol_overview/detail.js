@@ -25,7 +25,7 @@ const DETAIL_TEXT = {
   status: { state: "State", lastUpdate: "Last candle closed", source: "Data source", timeframe: "Timeframe", history: "History from" },
   quality: { continuity: "Candle continuity", openInterest: "Open interest", funding: "Funding rate", delay: "Data delay" },
   ranges: { "1h": "1h", "6h": "6h", "24h": "24h", "7d": "7d", "30d": "30d" },
-  panes: { candles: "Price (5m candles)", openInterest: "Open interest", funding: "Funding rate" },
+  panes: { candles: "Price (5m candles)", openInterest: "Open interest (quantity)", funding: "Funding rate" },
   coverageOf: "of stored history",
   coverageFunding: "Funding has no time grid, so it has no percentage: its state is the one above.",
   noData: "no data in this range",
@@ -211,9 +211,10 @@ function kpiModel(detail) {
   const row = interest.status === "ok" && interest.rows.length ? interest.rows[interest.rows.length - 1] : null;
   const interestMessage = partMessage(interest, row !== null, interest.newest_ms);
   out.openInterest = row === null ? { status: interest.status, head: null, lines: [interestMessage] } : {
-    status: "ok", head: groupDecimal(row.value),
-    lines: [quote ? `value in ${quote} (unit inferred, not documented by Binance)` : "value (unit not documented by Binance)",
-      `open interest ${groupDecimal(row.oi)}`, `period ended ${fmt(row.t)}`, changeText(interest.change, "over 1 h")].concat(row.conflicted ? [DETAIL_TEXT.conflicted] : []),
+    status: "ok", head: groupDecimal(row.oi),
+    lines: [`quantity in the base asset (unit inferred, not documented by Binance)`,
+      quote ? `value ${groupDecimal(row.value)} ${quote} (quantity times price, so it follows the price)` : `value ${groupDecimal(row.value)}`,
+      `period ended ${fmt(row.t)}`, changeText(interest.change, "of the quantity over 1 h")].concat(row.conflicted ? [DETAIL_TEXT.conflicted] : []),
   };
   const latest = funding.status === "ok" ? funding.latest : null;
   const fundingMessage = funding.status === "ok" ? DETAIL_TEXT.noSettlement : partMessage(funding, false, null);
@@ -233,7 +234,7 @@ function paneModel(part) {
 function tooltipLines(kind, row) {
   const lines = [];
   if (kind === "candles") lines.push(fmt(row.t), `open ${groupDecimal(row.o)} · high ${groupDecimal(row.h)} · low ${groupDecimal(row.l)} · close ${groupDecimal(row.c)}`, `volume ${groupDecimal(row.v)}`);
-  else if (kind === "openInterest") lines.push(`period ended ${fmt(row.t)}`, `value ${groupDecimal(row.value)}`, `open interest ${groupDecimal(row.oi)}`);
+  else if (kind === "openInterest") lines.push(`period ended ${fmt(row.t)}`, `open interest ${groupDecimal(row.oi)}`, `value ${groupDecimal(row.value)}`);
   else lines.push(fmt(row.t), `${row.rate_type} rate ${row.rate}`, row.mark_price == null ? "mark price: none stored" : `mark price ${groupDecimal(row.mark_price)}`);
   if (row.conflicted) lines.push(DETAIL_TEXT.conflicted);
   return lines;
@@ -268,7 +269,7 @@ function volumeBars(rows, window_, colors) {
 function oiPlotMs(t) { return t - DETAIL_TF; }
 function oiPoints(rows, window_) {
   return denseSeries(rows, window_.start, window_.end, DETAIL_TF, (r) => {
-    const point = { time: oiPlotMs(r.t) / 1000, value: Number(r.value) };
+    const point = { time: oiPlotMs(r.t) / 1000, value: Number(r.oi) };  // the quantity: the value (quantity x price) would just redraw the price
     if (r.conflicted) point.color = CONFLICT_COLOR;
     return point;
   }, oiPlotMs);
@@ -511,7 +512,7 @@ function detailChartData(doc, models, colors) {
   if (models[1].draw) {
     const rows = doc.open_interest.rows;
     out.area = oiPoints(rows, window_);
-    out.places[1] = Math.min(2, decimalPlaces(rows.map((r) => r.value)));
+    out.places[1] = Math.min(3, decimalPlaces(rows.map((r) => r.oi)));
     for (const r of rows) out.lookups.openInterest.set(oiPlotMs(r.t) / 1000, r);
   }
   if (models[2].draw) {
