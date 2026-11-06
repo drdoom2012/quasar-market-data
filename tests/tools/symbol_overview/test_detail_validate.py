@@ -95,6 +95,8 @@ def test_the_decimal_rule_of_the_contract_accepts() -> None:
 
 def test_inconsistent_ohlc_is_refused() -> None:
     assert code(candles(candles_doc([candle_item(S, high="99", low="100")], start=S, end=E))) == "schema"
+    refused = candles(candles_doc([candle_item(S, high="99", close="100")], start=S, end=E))
+    assert refused == Invalid("schema", "ohlc")  # the reason is named
     assert code(candles(candles_doc([candle_item(S, high="99", close="100")], start=S, end=E))) == "schema"
     assert code(candles(candles_doc([candle_item(S, low="101", close="100")], start=S, end=E))) == "schema"
 

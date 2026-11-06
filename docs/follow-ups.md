@@ -214,8 +214,8 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 
 ## From the overview dashboard redesign (2026-11-06)
 
-### F-24. The symbol detail page does not exist; the overview links to it
+### F-24. The symbol detail page does not exist; the overview links to it — **closed** by the symbol detail (2026-11-06, `docs/superpowers/specs/2026-11-06-symbol-detail-design.md`)
 
 - **Where:** `tools/symbol_overview/page.html` (every name in "Needs attention" and "Healthy" links to `#/symbol/<symbol>?venue=...&timeframe=...`).
 - **What:** the links lead nowhere (the hash changes, nothing is drawn). The 30-day strips, the strip legend, the per-symbol history start and the per-symbol funding line were removed from the overview by the redesign (they live in git history, in the commit before `feat(overview): redesign the page as a dashboard`); `/overview.json` still carries `strip`, `oldest_*`, `newest_*` and the funding fields. A tool that hangs or a tunnel that stalls now shows the error state after 90 s instead of waiting for ever.
-- **Fix:** build the detail view from the fields already in `/overview.json` (one series per link; the hash carries venue and timeframe because a symbol name can occur in more than one series). Do not change the API for it.
+- **Fix (done):** the detail view takes state, reasons, history start and coverage from `/overview.json` (plus two additive fields, `present_slots`) and its rows from a new read-only route of the tool, `/detail.json`, which pages the API's existing `/v1/candles`, `/v1/open-interest` and `/v1/funding-rates`; the hash carries venue and timeframe because a symbol name can occur in more than one series. The API did not change.

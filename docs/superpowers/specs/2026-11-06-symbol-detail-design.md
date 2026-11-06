@@ -1,7 +1,7 @@
 # Symbol detail page — design
 
 - **Date:** 2026-11-06.
-- **Status:** APPROVED by the user on 2026-11-06 ("schvaluji"), including the chart library of section 5.4. Everything marked **my call** is a default the user can overturn.
+- **Status:** IMPLEMENTED on branch `feat/symbol-detail` (plan `docs/superpowers/plans/2026-11-06-symbol-detail.md`); APPROVED by the user on 2026-11-06 ("schvaluji"), including the chart library of section 5.4. Everything marked **my call** is a default the user can overturn.
 - **Base:** the dashboard of pull request #30 (branch `feat/overview-redesign`, not yet merged), which already links every symbol to its detail and lists this page as follow-up F-24. The work is a branch `feat/symbol-detail` started from that branch and a pull request against it; it closes F-24. (Found after the first draft of this document, which was written from `main`.)
 - **Size:** a small project in one pull request: a new read-only route and validation in `tools/symbol_overview/`, a detail view in its page, one vendored JavaScript library. No change to the Collector, the API, the database, any schema or any contract.
 - **How to read this document:** section 4 holds facts read in the code and the contract. Section 5 holds design decisions. A statement is never in both.

@@ -124,7 +124,7 @@ def candle_page_result(
             return _bad("schema")
         o, h, low, c, v = (str(x) for x in values)
         if Decimal(low) > min(Decimal(o), Decimal(c)) or Decimal(h) < max(Decimal(o), Decimal(c)):
-            return _bad("schema")  # an inconsistent candle is not drawn
+            return _bad("schema", "ohlc")  # an inconsistent candle is not drawn; the whole part says so
         rows.append(CandleRow(t, o, h, low, c, v, turnover, conflicted))
         previous = t
     if rows and not oldest <= rows[0].t <= rows[-1].t <= newest:

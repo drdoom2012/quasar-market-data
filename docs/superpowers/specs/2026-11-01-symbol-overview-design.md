@@ -2,6 +2,7 @@
 
 - **Date:** 2026-11-01. Revised the same day after the review of the first draft.
 - **Status:** APPROVED by the user on 2026-11-01 (the word "schvaluji", given after the list of open questions in section 9). My reading, which the user can correct: it approves the whole document, confirms B1, and accepts my defaults for Q1 and Q2. Q3 stays a manual measurement before large universes.
+- **Later extension:** the symbol detail (`2026-11-06-symbol-detail-design.md`) adds the paths `/v1/candles` and `/v1/open-interest` to this tool's allowlist and a route `/detail.json`; the statement below that the tool calls only three endpoints describes the overview refresh.
 - **Size:** a small project: one local page and a small program that serves it. No change to the Collector, the API, the database or any contract.
 - **How to read this document:** section 4 holds **verified facts** about the API, each with its source. Section 5 holds **design decisions** (mine unless marked as the user's). Section 9 lists the open questions and blockers. A statement is never in both.
 
