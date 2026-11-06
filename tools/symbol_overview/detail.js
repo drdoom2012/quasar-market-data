@@ -286,3 +286,205 @@ function fundingPoints(rows, colors) {
 }
 
 // --- DOM below ---
+
+// The state of the view. `detailOverview` is called by the inline script after every overview render (with the data)
+// and after every overview failure (with null), so the detail never shows more than the overview says.
+let detailRoute = { view: "overview" }, detailRange = "24h", detailOverviewFailed = false;
+let detailDoc = null, detailDocKey = null, detailError = null, detailFetchedAt = null, detailTimer = null, detailController = null;
+const detailLoader = createDetailLoader(detailFetchJson, detailApply);
+
+function detailKey() { return JSON.stringify([detailRoute.symbol, detailRoute.venue, detailRoute.timeframe, detailRange]); }
+
+async function detailFetchJson(key) {
+  const [symbol, venue, timeframe, range] = JSON.parse(key);
+  if (detailController) detailController.abort();
+  const controller = new AbortController();
+  detailController = controller;
+  const giveUp = setTimeout(() => controller.abort(), 90000);  // a hung tool or tunnel ends in an error line, never in endless placeholders
+  try {
+    const query = new URLSearchParams({ symbol, venue, timeframe, range });
+    const response = await fetch("/detail.json?" + query.toString(), { cache: "no-store", signal: controller.signal });
+    return { status: response.status, body: await response.json() };
+  } finally {
+    clearTimeout(giveUp);
+  }
+}
+
+function detailErrorText(body) {
+  const error = body && body.api_error;
+  if (!error) return "The tool answered with something that is not a detail.";
+  if (error.code === "unsupported_series") return "Charts are drawn only for binance-usdm 5m series.";
+  if (error.code === "unknown_series") return "The API does not list this series any more.";
+  if (error.code === "busy") return "The tool is busy with another detail; it retries in a minute.";
+  return `The detail could not be loaded: ${error.code}${error.detail ? " (" + error.detail + ")" : ""}`;
+}
+
+function detailApply(key, result) {
+  detailDoc = null; detailDocKey = null; detailError = null;
+  const [symbol, venue, timeframe, range] = JSON.parse(key);
+  if (result.error) detailError = /AbortError/.test(result.error) ? TEXT.timeout : TEXT.down + result.error;
+  else if (result.status !== 200) detailError = detailErrorText(result.body);
+  else if (!result.body || result.body.symbol !== symbol || result.body.venue !== venue || result.body.timeframe !== timeframe || result.body.range !== range) {
+    detailError = "The tool answered for another series.";  // never draw a detail under the wrong name
+  } else { detailDoc = result.body; detailDocKey = key; detailFetchedAt = Date.now(); }
+  detailRender();
+  detailSchedule();
+}
+
+// Re-fetch every 60 s, only while a symbol is shown and the tab is visible.
+function detailSchedule() {
+  clearTimeout(detailTimer);
+  detailTimer = null;
+  if (detailRoute.view !== "symbol" || document.visibilityState !== "visible") return;
+  detailTimer = setTimeout(() => { if (detailRoute.view === "symbol") detailLoader.load(detailKey()); }, 60000);
+}
+
+function detailOverview(data) {
+  detailOverviewFailed = data === null;
+  detailRender();
+}
+
+function detailRouteChanged() {
+  const next = parseRoute(location.hash);
+  const changed = JSON.stringify(next) !== JSON.stringify(detailRoute);
+  detailRoute = next;
+  if (changed) {
+    detailLoader.cancel();
+    detailDoc = null; detailDocKey = null; detailError = null;
+    clearTimeout(detailTimer);
+  }
+  detailRender();
+  if (changed && next.view === "symbol") window.scrollTo(0, 0);
+}
+
+function detailSetRange(range) {
+  if (range === detailRange) return;
+  detailRange = range;
+  detailLoader.cancel();
+  detailDoc = null; detailDocKey = null; detailError = null;
+  detailRender();
+}
+
+function detailFill(box, ...children) { box.replaceChildren(...children); }
+function detailTag(state) { return el("span", { class: `dtag s-${state}` }, stateText(state)); }
+function detailFacts(pairs) {
+  const list = el("dl", { class: "facts" });
+  for (const [name, value] of pairs) list.append(el("dt", {}, name), el("dd", {}, value));
+  return list;
+}
+
+function detailRender() {
+  const state = detailViewState(detailRoute, lastData, { overviewFailed: detailOverviewFailed });
+  const open = state.show !== "overview";
+  $("overview-view").hidden = open;
+  $("detail-view").hidden = !open;
+  document.title = open && detailRoute.symbol ? `${detailRoute.symbol} · ${TEXT.title}` : TEXT.title;
+  if (!open) return;
+  const box = $("detail-state"), body = $("detail-body");
+  if (state.show !== "detail") {
+    const message = { loading: DETAIL_TEXT.loading, invalid: DETAIL_TEXT.invalid, notfound: DETAIL_TEXT.notFound, overview_error: DETAIL_TEXT.overviewError }[state.show];
+    box.className = state.show === "loading" ? "" : "bad";
+    detailFill(box, message, state.show === "loading" ? "" : " ", state.show === "loading" ? "" : el("a", { href: "#" }, `← ${DETAIL_TEXT.back}`));
+    body.hidden = true;
+    return;
+  }
+  detailDrawBody(state.row);
+  const key = detailKey();
+  if (!detailLoader.started(key)) detailLoader.load(key);
+}
+
+function detailDrawBody(row) {
+  const data = lastData, status = oiStatus(data), fstatus = fundingStatus(data), finfo = data.funding_rate || null;
+  const key = detailKey();
+  const doc = detailDocKey === key ? detailDoc : null;
+  $("detail-body").hidden = false;
+  const box = $("detail-state");
+  box.className = detailError ? "bad" : "";
+  box.replaceChildren(detailError || "");
+
+  const worst = worstState(row, status, fstatus);
+  const near = neighbours(data.symbols, detailRoute);
+  const link = (target, text) => (target ? el("a", { class: "dlink", href: rowHref(target), "aria-label": `${text}: ${target.symbol}` }, text) : el("span", { class: "dlink off" }, text));
+  detailFill($("detail-head"),
+    el("a", { class: "dlink", href: "#" }, `← ${DETAIL_TEXT.back}`),
+    el("h1", {}, row.symbol), detailTag(worst), el("span", { class: "chip" }, row.venue || "–"),
+    el("span", { class: "spacer" }), link(near.prev, `← ${DETAIL_TEXT.previous}`), link(near.next, `${DETAIL_TEXT.next} →`));
+
+  const closeAge = lastCloseAgeMs(row);
+  const coverage = historyCoverage(row, data.window);
+  const reasons = reasonLines(row, status, fstatus, finfo);
+  detailFill($("detail-status"), el("h3", {}, DETAIL_TEXT.sections.status),
+    detailFacts([
+      [DETAIL_TEXT.status.state, detailTag(worst)],
+      [DETAIL_TEXT.status.lastUpdate, row.newest_open_time_ms == null ? "–" : `${fmt(row.newest_open_time_ms + DETAIL_TF)} (${ageText(closeAge)} before the API clock)`],
+      [DETAIL_TEXT.status.source, row.venue || "–"],
+      [DETAIL_TEXT.status.timeframe, row.timeframe || "–"],
+      [DETAIL_TEXT.status.history, row.oldest_open_time_ms == null ? "–" : `${fmt(row.oldest_open_time_ms)}${coverage ? ` (${coverage.text} ${DETAIL_TEXT.coverageOf})` : ""}`],
+    ]),
+    ...(reasons.length ? [el("div", { class: "note reasons" }, ...reasons.map((line) => el("p", {}, line)))] : []));
+
+  const cards = doc ? kpiModel(doc) : null;
+  for (const [id, title, card] of [["kpi-candle", DETAIL_TEXT.sections.candles, cards && cards.candle], ["kpi-oi", DETAIL_TEXT.sections.openInterest, cards && cards.openInterest], ["kpi-funding", DETAIL_TEXT.sections.funding, cards && cards.funding]]) {
+    detailFill($(id), el("h3", {}, title),
+      el("div", { class: `big${card && card.head ? "" : " none"}` }, card ? (card.head || "–") : (detailError ? "–" : "…")),
+      ...(card ? card.lines.map((line) => el("div", { class: "line" }, line)) : []));
+  }
+
+  const quality = qualityRows(row, status, fstatus, finfo);
+  detailFill($("detail-quality"), el("h3", {}, DETAIL_TEXT.sections.quality),
+    ...quality.map((q) => el("div", { class: "qrow" },
+      el("span", { class: "lbl" }, DETAIL_TEXT.quality[q.key]),
+      q.state === null ? el("span", { class: "dash" }, "–") : detailTag(q.state),
+      el("span", { class: "note", title: q.lines.join("\n") }, q.lines.join(" · ")))));
+
+  const oiCoverage = oiStateOf(row, status) === null ? null : openInterestCoverage(row.open_interest, data.open_interest && data.open_interest.window);
+  const bar = (label, share, note) => {
+    const track = el("span", { class: "track" });
+    if (share) { const fill = el("b"); fill.style.width = `${share.present / share.span * 100}%`; track.append(fill); }
+    return [el("div", { class: "bar" }, el("span", { class: "lbl" }, label), track, el("span", { class: "v" }, share ? share.text : "–")), ...(note ? [el("div", { class: "note" }, note)] : [])];
+  };
+  const fundingState = fundingStateOf(row, fstatus);
+  detailFill($("detail-coverage"), el("h3", {}, `${DETAIL_TEXT.sections.coverage} (${DETAIL_TEXT.coverageOf})`),
+    ...bar(TEXT.rows.candles, coverage, coverage ? "" : "cannot be computed from the overview's numbers"),
+    ...(oiStateOf(row, status) === null ? [] : bar(TEXT.rows.openInterest, oiCoverage, oiCoverage ? "" : "cannot be computed from the overview's numbers")),
+    ...(fundingState === null ? [] : [el("div", { class: "bar" }, el("span", { class: "lbl" }, TEXT.rows.funding), detailTag(fundingState)), el("div", { class: "note" }, DETAIL_TEXT.coverageFunding)]));
+
+  detailDrawCharts(doc);
+  detailAge();
+}
+
+function detailAge() {
+  const line = $("detail-fetched");
+  if (detailRoute.view !== "symbol" || detailDoc === null || detailFetchedAt === null) { line.textContent = ""; return; }
+  const seconds = Math.round((Date.now() - detailFetchedAt) / 1000);  // display only, never a state
+  line.textContent = `API clock ${fmt(detailDoc.as_of_ms)} · ${DETAIL_TEXT.fetched(seconds)}`;
+}
+
+function detailDrawCharts(doc) {
+  const box = $("detail-charts");
+  box.replaceChildren(doc ? "charts follow" : "");
+}
+
+function detailInit() {
+  detailFill($("detail-charts-title"), DETAIL_TEXT.sections.charts);
+  const ranges = $("detail-ranges");
+  for (const range of DETAIL_RANGES) {
+    const button = el("button", { type: "button", "aria-pressed": String(range === detailRange) }, DETAIL_TEXT.ranges[range]);
+    button.addEventListener("click", () => {
+      detailSetRange(range);
+      for (const other of ranges.children) other.setAttribute("aria-pressed", String(other === button));
+    });
+    ranges.append(button);
+  }
+  const link = el("a", { class: "dlink", rel: "noopener" }, "tradingview.com");
+  link.setAttribute("href", DETAIL_TEXT.noticeLink);
+  detailFill($("detail-notice"), `${DETAIL_TEXT.notice} · `, link);
+  window.addEventListener("hashchange", detailRouteChanged);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && detailRoute.view === "symbol") detailSchedule();
+  });
+  setInterval(detailAge, 1000);
+  detailRouteChanged();
+}
+
+detailInit();

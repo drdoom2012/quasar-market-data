@@ -517,3 +517,90 @@ def test_both_scripts_parse_together() -> None:
         [str(NODE), "--check", "-"], input=SCRIPT + "\n" + DETAIL, capture_output=True, text=True, check=False
     )
     assert done.returncode == 0, done.stderr
+
+
+# --- markup and the rules the page keeps -----------------------------------------------------------------------------
+
+PAGE_HTML = (Path(__file__).resolve().parents[3] / "tools" / "symbol_overview" / "page.html").read_text(
+    encoding="utf-8"
+)
+DETAIL_VIEW = PAGE_HTML.split('<main id="detail-view"')[1].split("</main>")[0]
+HOOK = 'if (typeof detailOverview === "function") detailOverview(lastData);'
+
+
+def test_the_detail_view_has_every_element_the_script_fills() -> None:
+    for element in (
+        "overview-view",
+        "detail-view",
+        "detail-state",
+        "detail-body",
+        "detail-head",
+        "detail-status",
+        "kpi-candle",
+        "kpi-oi",
+        "kpi-funding",
+        "detail-ranges",
+        "detail-charts",
+        "detail-charts-title",
+        "detail-chart-note",
+        "detail-coverage",
+        "detail-quality",
+        "detail-fetched",
+        "detail-notice",
+    ):
+        assert f'id="{element}"' in PAGE_HTML, element
+    assert '<main id="detail-view" hidden>' in PAGE_HTML and '<div id="detail-body" hidden>' in PAGE_HTML
+
+
+def test_the_scripts_load_in_order_after_the_inline_script_and_the_first_script_tag_is_still_the_inline_one() -> None:
+    assert PAGE_HTML.split("<script>")[1].startswith('\n"use strict";\n// All text of the page')
+    tags = re.findall(r"<script[^>]*>", PAGE_HTML)
+    assert tags[0] == "<script>" and tags[1] == '<script src="/vendor/lightweight-charts.js">'
+    assert tags[2].startswith('<script src="/detail.js" onerror="')
+    assert (
+        PAGE_HTML.index("</script>")
+        < PAGE_HTML.index('src="/vendor/lightweight-charts.js"')
+        < PAGE_HTML.index('src="/detail.js"')
+    )
+    assert "could not be loaded" in tags[2]
+
+
+def test_the_inline_script_tells_the_detail_about_every_overview_result_and_nothing_else_changed() -> None:
+    assert SCRIPT.count(HOOK) == 2
+    assert SCRIPT.count("fetch(") == 1 and 'fetch("/overview.json"' in SCRIPT
+    clear = SCRIPT.split("function clearStates()")[1].split("\n}\n")[0]
+    assert HOOK in clear and "lastData = null" in clear  # an overview failure clears the detail too
+    render = SCRIPT.split("function render(data, httpStatus)")[1].split("\n}\n")[0]
+    assert HOOK in render.rstrip().splitlines()[-1]  # after the last thing render does
+
+
+def test_the_page_still_obeys_the_dashboards_rules() -> None:
+    assert re.search(r'(src|href)="https?:', PAGE_HTML) is None  # the attribution link is made by detail.js
+    for forbidden in ("url(", "@import", "heatmap", "<canvas", "legend()", "fundingLine", "drawStrip"):
+        assert forbidden not in PAGE_HTML, forbidden
+    ids = re.findall(r'\sid="([^"]+)"', PAGE_HTML)
+    assert len(ids) == len(set(ids))
+    assert "<header>" in PAGE_HTML and PAGE_HTML.count("<header>") == 1  # the detail header is a div
+
+
+def test_the_detail_markup_has_no_data_text_and_its_hidden_attributes_are_not_overridden() -> None:
+    assert "data-text" not in DETAIL_VIEW and "data-title" not in DETAIL_VIEW
+    for selector in ("#detail-view", "#detail-body", "#overview-view"):
+        for rule in re.findall(re.escape(selector) + r"\s*\{[^}]*\}", PAGE_HTML):
+            assert "display" not in rule or "[hidden]" in rule or "display: none" in rule
+
+
+def test_detail_js_keeps_the_pages_rules() -> None:
+    assert DETAIL.startswith('"use strict";')
+    assert DETAIL.count("fetch(") == 1 and 'fetch("/detail.json?"' in DETAIL
+    for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "data-text"):
+        assert forbidden not in DETAIL, forbidden
+    assert re.search(r"[áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]", DETAIL) is None  # the text is English
+    lines = [line for line in DETAIL.splitlines() if "Date.now()" in line]
+    assert lines and all("detailFetchedAt" in line for line in lines)
+    assert DETAIL.rstrip().endswith("detailInit();")
+
+
+def test_detail_js_has_its_attribution_notice_and_never_turns_the_logo_off() -> None:
+    assert "TradingView Lightweight Charts" in DETAIL and "https://www.tradingview.com/" in DETAIL
+    assert "attributionLogo: false" not in DETAIL and "attributionLogo:false" not in DETAIL
