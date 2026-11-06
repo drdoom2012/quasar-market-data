@@ -450,7 +450,7 @@ function causeRows(symbols, status, fstatus = "absent") {
   rows.sort((a, b) => rank(a.state) - rank(b.state) || b.count - a.count || a.order - b.order);
   return rows.map(({ order, ...row }) => row);
 }
-// The link to a series' detail (not built yet): a hash, so nothing is requested. A name that cannot be encoded gives "#".
+// The link to a series' detail (drawn by detail.js): a hash, so nothing is requested. A name that cannot be encoded gives "#".
 function symbolHref(symbol, venue = "", timeframe = "") {
   try {
     return "#/symbol/" + encodeURIComponent(symbol) + "?venue=" + encodeURIComponent(venue) + "&timeframe=" + encodeURIComponent(timeframe);
@@ -609,7 +609,7 @@ function clearStates() {
   $("banner").className = "";
   $("donut").style.background = donutBackground({ total: 0, ok: 0, warn: 0, bad: 0 });
   $("notes-card").hidden = true;
-  if (typeof detailOverview === "function") detailOverview(lastData);  // the symbol detail (detail.js) follows the overview
+  if (typeof detailOverview === "function") { try { detailOverview(lastData); } catch (error) { console.error("symbol detail:", error); } }  // the symbol detail (detail.js) follows the overview; its failure never touches the dashboard
 }
 
 function showError(text) {
@@ -618,7 +618,7 @@ function showError(text) {
   setPhase("error");
 }
 
-// Names separated by commas, each a link (to the detail page that does not exist yet). Text only, never markup.
+// Names separated by commas, each a link (to the detail view of detail.js). Text only, never markup.
 function linkList(box, entries, emptyText) {
   box.replaceChildren();
   if (entries.length === 0) { box.append(el("span", {}, emptyText)); return; }
@@ -706,7 +706,7 @@ function render(data, httpStatus) {
   for (const note of model.notes) $(note.slot).append(el("p", {}, note.text));
   $("notes-card").hidden = model.notes.length === 0;
   setPhase("ready");
-  if (typeof detailOverview === "function") detailOverview(lastData);  // the symbol detail (detail.js) follows the overview
+  if (typeof detailOverview === "function") { try { detailOverview(lastData); } catch (error) { console.error("symbol detail:", error); } }  // the symbol detail (detail.js) follows the overview; its failure never touches the dashboard
 }
 
 // The filter box: typing filters at once (debounced), "/" jumps to it, Escape clears it.
@@ -763,6 +763,6 @@ setInterval(updateAge, 1000);
 refresh();
 </script>
 <script src="/vendor/lightweight-charts.js"></script>
-<script src="/detail.js" onerror="document.getElementById('detail-view').hidden=false;document.getElementById('overview-view').hidden=true;document.getElementById('detail-state').textContent='The detail script could not be loaded.'"></script>
+<script src="/detail.js" onerror="if(location.hash.indexOf('#/symbol/')===0){document.getElementById('detail-view').hidden=false;document.getElementById('overview-view').hidden=true;document.getElementById('detail-state').textContent='The detail script could not be loaded.'}"></script>
 </body>
 </html>

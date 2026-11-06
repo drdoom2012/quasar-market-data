@@ -7,6 +7,7 @@ no internals: a failure of the snapshot source is a generic ``500``. Beside the 
 """
 
 import json
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Protocol
@@ -26,6 +27,7 @@ _STATIC = {
 _JAVASCRIPT = "text/javascript; charset=utf-8"
 _DETAIL_KEYS = ("symbol", "venue", "timeframe", "range")
 _MAX_VALUE_LENGTH = 64  # the API's own limit for a symbol
+_BAD_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
 class SnapshotSource(Protocol):
@@ -38,9 +40,11 @@ class DetailSource(Protocol):
 
 def _detail_query(query: str) -> tuple[str, str, str, str] | str:
     """The four values of a detail request, or the fixed word that names what is wrong (never the user's text)."""
+    if _BAD_ESCAPE.search(query):
+        return "query"  # parse_qsl would keep a bad %XX literally; a symbol is never guessed at
     try:
         pairs = parse_qsl(query, keep_blank_values=True, strict_parsing=True, errors="strict")
-    except ValueError:  # a bad pair, a bad %XX escape or invalid UTF-8
+    except ValueError:  # a bad pair or invalid UTF-8
         return "query"
     names = [name for name, _ in pairs]
     if sorted(names) != sorted(_DETAIL_KEYS):

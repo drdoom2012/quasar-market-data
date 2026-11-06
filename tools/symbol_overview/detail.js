@@ -31,7 +31,7 @@ const DETAIL_TEXT = {
   noData: "no data in this range",
   nothingStored: "nothing stored yet",
   notEnabled: "not enabled in this deployment",
-  noSettlement: "no settlement in the last 7 days",
+  noSettlement: "no settlement stored in the last 7 days",  // an empty or unverified window does not say none occurred
   specialNotPlotted: (n) => `${n} ${n === 1 ? "special settlement" : "special settlements"} in this range ${n === 1 ? "is" : "are"} not plotted`,
   fetched: (s) => `answer is up to 60 s old; fetched ${s} s ago`,
   notice: "TradingView Lightweight Charts™ · Copyright (c) 2025 TradingView, Inc.",
@@ -204,20 +204,22 @@ function kpiModel(detail) {
   const candleMessage = partMessage(candles, last !== null, candles.newest_ms);
   out.candle = last === null ? { status: candles.status, head: null, lines: [candleMessage] } : {
     status: "ok", head: groupDecimal(last.c),
-    lines: [`open ${groupDecimal(last.o)} · high ${groupDecimal(last.h)} · low ${groupDecimal(last.l)}`, `candle opened ${fmt(last.t)}`,
+    lines: [`open ${groupDecimal(last.o)} · high ${groupDecimal(last.h)} · low ${groupDecimal(last.l)}`,
+      `closed ${fmt(last.t + DETAIL_TF)} · ${ageText(detail.as_of_ms - (last.t + DETAIL_TF))} before the API clock`,
       changeText(candles.change, "vs the previous candle")].concat(last.conflicted ? [DETAIL_TEXT.conflicted] : []),
   };
   const row = interest.status === "ok" && interest.rows.length ? interest.rows[interest.rows.length - 1] : null;
   const interestMessage = partMessage(interest, row !== null, interest.newest_ms);
   out.openInterest = row === null ? { status: interest.status, head: null, lines: [interestMessage] } : {
-    status: "ok", head: groupDecimal(row.value) + (quote ? " " + quote : ""),
-    lines: [`open interest ${groupDecimal(row.oi)}`, `period ended ${fmt(row.t)}`, changeText(interest.change, "over 1 h")].concat(row.conflicted ? [DETAIL_TEXT.conflicted] : []),
+    status: "ok", head: groupDecimal(row.value),
+    lines: [quote ? `value in ${quote} (unit inferred, not documented by Binance)` : "value (unit not documented by Binance)",
+      `open interest ${groupDecimal(row.oi)}`, `period ended ${fmt(row.t)}`, changeText(interest.change, "over 1 h")].concat(row.conflicted ? [DETAIL_TEXT.conflicted] : []),
   };
   const latest = funding.status === "ok" ? funding.latest : null;
   const fundingMessage = funding.status === "ok" ? DETAIL_TEXT.noSettlement : partMessage(funding, false, null);
   out.funding = latest == null ? { status: funding.status, head: null, lines: [fundingMessage] } : {
     status: "ok", head: shiftPercent(latest.rate) + " %",
-    lines: [`${latest.rate_type} settlement ${fmt(latest.t)}`, `rate ${latest.rate} (a fraction per settlement)`].concat(
+    lines: [`${latest.rate_type} settlement ${fmt(latest.t)}`, `rate ${latest.rate} (a fraction per settlement; unit inferred)`].concat(
       latest.mark_price == null ? [] : [`mark price ${groupDecimal(latest.mark_price)}`], latest.conflicted ? [DETAIL_TEXT.conflicted] : []),
   };
   return out;
@@ -478,37 +480,60 @@ function detailAge() {
   line.textContent = `API clock ${fmt(detailDoc.as_of_ms)} · ${DETAIL_TEXT.fetched(seconds)}`;
 }
 
-let detailChart = null, detailDrawn = null;
+let detailChart = null, detailDrawn = null, detailChartState = null;
 
 function detailVariable(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function detailDestroyChart() {
   if (detailChart) { detailChart.remove(); detailChart = null; }
-  detailDrawn = null;
+  detailDrawn = null; detailChartState = null;
 }
-
-// Three panes on one time axis: candles (with volume), open interest, funding. A part that is not ok draws nothing
-// and says why under the chart. The chart is created again only when a new document arrives, so zoom and pan survive
-// the clock ticking.
-function detailDrawCharts(doc) {
-  const box = $("detail-charts"), note = $("detail-chart-note");
-  if (doc === detailDrawn && doc !== null) return;
-  detailDestroyChart();
-  box.replaceChildren();
-  note.replaceChildren();
-  if (doc === null) return;
-  const parts = [["candles", doc.candles], ["openInterest", doc.open_interest], ["funding", doc.funding_rate]];
-  const models = parts.map(([, part]) => paneModel(part));
-  parts.forEach(([name], i) => { if (!models[i].draw) note.append(el("p", {}, `${DETAIL_TEXT.panes[name]}: ${models[i].text}`)); });
-  if (typeof LightweightCharts === "undefined") { note.append(el("p", { class: "notice" }, DETAIL_TEXT.chartsFailed)); return; }
-  if (!models.some((m) => m.draw)) return;
-
-  const LW = LightweightCharts;
+function detailColors() {
   const colors = {
     up: detailVariable("--ok"), down: detailVariable("--bad"), accent: detailVariable("--accent"), line: detailVariable("--line"),
     text: detailVariable("--muted"), card: detailVariable("--card"),
   };
   colors.volUp = withAlpha(colors.up, 0.45);
   colors.volDown = withAlpha(colors.down, 0.45);
+  return colors;
+}
+
+// What the three panes plot, and the rows behind each plotted time (for the tooltip).
+function detailChartData(doc, models, colors) {
+  const window_ = doc.window;
+  const out = { lookups: { candles: new Map(), openInterest: new Map(), funding: new Map() }, places: [0, 0], special: 0 };
+  if (models[0].draw) {
+    const rows = doc.candles.rows;
+    out.candles = candleBars(rows, window_, colors);
+    out.volume = volumeBars(rows, window_, colors);
+    out.places[0] = decimalPlaces(rows.flatMap((r) => [r.o, r.h, r.l, r.c]));
+    for (const r of rows) out.lookups.candles.set(r.t / 1000, r);
+  }
+  if (models[1].draw) {
+    const rows = doc.open_interest.rows;
+    out.area = oiPoints(rows, window_);
+    out.places[1] = Math.min(2, decimalPlaces(rows.map((r) => r.value)));
+    for (const r of rows) out.lookups.openInterest.set(oiPlotMs(r.t) / 1000, r);
+  }
+  if (models[2].draw) {
+    const rows = doc.funding_rate.rows;
+    const funding = fundingPoints(rows, colors);
+    out.funding = funding.points;
+    out.special = funding.special;
+    for (const r of rows) out.lookups.funding.set(Math.floor(r.t / 1000), r);
+  }
+  return out;
+}
+
+// A new document of the same series and range changes the data only, so the user's zoom and pan survive the poll.
+function detailFillChart(state, data) {
+  if (data.candles) { state.series.candles.setData(data.candles); state.series.volume.setData(data.volume); }
+  if (data.area) state.series.area.setData(data.area);
+  if (data.funding) state.series.funding.setData(data.funding);
+  state.lookups = data.lookups;
+}
+
+function detailBuildChart(box, doc, models, colors, data, layout) {
+  const LW = LightweightCharts;
   const chart = LW.createChart(box, {
     autoSize: true,
     layout: { background: { type: "solid", color: colors.card }, textColor: colors.text, panes: { separatorColor: colors.line } },
@@ -517,49 +542,39 @@ function detailDrawCharts(doc) {
     timeScale: { borderColor: colors.line, timeVisible: true, secondsVisible: false },  // the library shows UTC, like the whole page
   });
   detailChart = chart;
-  detailDrawn = doc;
-
-  const window_ = doc.window;
-  const lookups = { candles: new Map(), openInterest: new Map(), funding: new Map() };
-  const shown = [];  // [name, series, factor]
+  const state = { layout, series: {}, lookups: data.lookups };
+  const shown = [];  // stretch factor of each pane that is drawn, in pane order
   let pane = 0;
   if (models[0].draw) {
-    const places = decimalPlaces(doc.candles.rows.flatMap((r) => [r.o, r.h, r.l, r.c]));
-    const price = { type: "price", precision: places, minMove: Math.pow(10, -places) };
-    const candles = chart.addSeries(LW.CandlestickSeries, {
-      upColor: colors.up, downColor: colors.down, borderUpColor: colors.up, borderDownColor: colors.down, wickUpColor: colors.up, wickDownColor: colors.down, priceFormat: price,
+    const places = data.places[0];
+    state.series.candles = chart.addSeries(LW.CandlestickSeries, {
+      upColor: colors.up, downColor: colors.down, borderUpColor: colors.up, borderDownColor: colors.down, wickUpColor: colors.up, wickDownColor: colors.down,
+      priceFormat: { type: "price", precision: places, minMove: Math.pow(10, -places) },
     }, pane);
-    candles.setData(candleBars(doc.candles.rows, window_, colors));
-    const volume = chart.addSeries(LW.HistogramSeries, { priceScaleId: "", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false }, pane);
-    volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-    volume.setData(volumeBars(doc.candles.rows, window_, colors));
-    for (const r of doc.candles.rows) lookups.candles.set(r.t / 1000, r);
-    shown.push(["candles", candles, 0.55]);
+    state.series.volume = chart.addSeries(LW.HistogramSeries, { priceScaleId: "", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false }, pane);
+    state.series.volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    shown.push(0.55);
     pane += 1;
   }
   if (models[1].draw) {
-    const places = decimalPlaces(doc.open_interest.rows.map((r) => r.value));
-    const area = chart.addSeries(LW.AreaSeries, {
+    state.series.area = chart.addSeries(LW.AreaSeries, {
       lineColor: colors.accent, topColor: withAlpha(colors.accent, 0.35), bottomColor: withAlpha(colors.accent, 0.02),
-      priceFormat: { type: "price", precision: Math.min(places, 2), minMove: 0.01 },
+      priceFormat: { type: "price", precision: data.places[1], minMove: Math.pow(10, -data.places[1]) },
     }, pane);
-    area.setData(oiPoints(doc.open_interest.rows, window_));
-    for (const r of doc.open_interest.rows) lookups.openInterest.set(oiPlotMs(r.t) / 1000, r);
-    shown.push(["openInterest", area, 0.25]);
+    shown.push(0.25);
     pane += 1;
   }
   if (models[2].draw) {
-    const funding = fundingPoints(doc.funding_rate.rows, colors);
-    const bars = chart.addSeries(LW.HistogramSeries, { priceFormat: { type: "custom", formatter: (v) => `${v.toFixed(4)} %`, minMove: 0.0001 }, lastValueVisible: false, priceLineVisible: false }, pane);
-    bars.setData(funding.points);
-    for (const r of doc.funding_rate.rows) lookups.funding.set(Math.floor(r.t / 1000), r);
-    if (funding.special > 0) note.append(el("p", {}, DETAIL_TEXT.specialNotPlotted(funding.special)));
-    shown.push(["funding", bars, 0.2]);
+    state.series.funding = chart.addSeries(LW.HistogramSeries, {
+      priceFormat: { type: "custom", formatter: (v) => `${v.toFixed(4)} %`, minMove: 0.0001 }, lastValueVisible: false, priceLineVisible: false,
+    }, pane);
+    shown.push(0.2);
   }
-  const total = shown.reduce((sum, item) => sum + item[2], 0);
+  detailFillChart(state, data);
+  const total = shown.reduce((sum, factor) => sum + factor, 0);
   const paneApis = chart.panes();
-  shown.forEach(([, , factor], i) => { if (paneApis[i]) paneApis[i].setStretchFactor(factor / total); });
-  try { chart.timeScale().setVisibleRange({ from: window_.start / 1000, to: window_.end / 1000 }); } catch (error) { /* no data to show: the notes under the chart say why */ }
+  shown.forEach((factor, i) => { if (paneApis[i]) paneApis[i].setStretchFactor(factor / total); });
+  try { chart.timeScale().setVisibleRange({ from: doc.window.start / 1000, to: doc.window.end / 1000 }); } catch (error) { /* no data to show: the notes under the chart say why */ }
 
   // The exact stored strings of the hovered slot; a slot without a stored row says so (a hole is never filled in).
   const tip = el("div", { class: "ctip", hidden: "" });
@@ -567,16 +582,44 @@ function detailDrawCharts(doc) {
   chart.subscribeCrosshairMove((param) => {
     if (!param.point || param.time === undefined) { tip.hidden = true; return; }
     const lines = [];
-    const candle = lookups.candles.get(param.time), interest = lookups.openInterest.get(param.time), settlement = lookups.funding.get(param.time);
-    if (models[0].draw) lines.push(...(candle ? tooltipLines("candles", candle) : [fmt(param.time * 1000), "no candle stored for this slot"]));
-    if (models[1].draw) lines.push(...(interest ? tooltipLines("openInterest", interest) : ["no open interest row for this slot"]));
+    const onGrid = (param.time * 1000) % DETAIL_TF === 0;  // an instant between slots (a settlement) is not a missing slot
+    const candle = state.lookups.candles.get(param.time), interest = state.lookups.openInterest.get(param.time), settlement = state.lookups.funding.get(param.time);
+    if (models[0].draw && (candle || onGrid)) lines.push(...(candle ? tooltipLines("candles", candle) : [fmt(param.time * 1000), "no candle stored for this slot"]));
+    if (models[1].draw && (interest || onGrid)) lines.push(...(interest ? tooltipLines("openInterest", interest) : ["no open interest row for this slot"]));
     if (settlement) lines.push(...tooltipLines("funding", settlement));
+    if (lines.length === 0) { tip.hidden = true; return; }
     tip.replaceChildren(...lines.map((line) => el("div", {}, line)));
     tip.hidden = false;
     const left = Math.min(param.point.x + 14, Math.max(0, box.clientWidth - tip.offsetWidth - 70));
     tip.style.left = `${left}px`;
     tip.style.top = `${Math.min(param.point.y + 14, Math.max(0, box.clientHeight - tip.offsetHeight))}px`;
   });
+  return state;
+}
+
+// Three panes on one time axis: candles (with volume), open interest, funding. A part that is not ok draws nothing
+// and says why under the chart.
+function detailDrawCharts(doc) {
+  const box = $("detail-charts"), note = $("detail-chart-note");
+  if (doc === detailDrawn && doc !== null) return;
+  note.replaceChildren();
+  if (doc === null) { detailDestroyChart(); box.replaceChildren(); return; }
+  const parts = [["candles", doc.candles], ["openInterest", doc.open_interest], ["funding", doc.funding_rate]];
+  const models = parts.map(([, part]) => paneModel(part));
+  parts.forEach(([name], i) => { if (!models[i].draw) note.append(el("p", {}, `${DETAIL_TEXT.panes[name]}: ${models[i].text}`)); });
+  if (typeof LightweightCharts === "undefined") { detailDestroyChart(); box.replaceChildren(); note.append(el("p", { class: "notice" }, DETAIL_TEXT.chartsFailed)); return; }
+  if (!models.some((m) => m.draw)) { detailDestroyChart(); box.replaceChildren(); detailDrawn = doc; return; }
+  const data = detailChartData(doc, models, detailColors());
+  const layout = JSON.stringify([detailDocKey, models.map((m) => m.draw), data.places]);
+  if (detailChart && detailChartState && detailChartState.layout === layout) {
+    detailFillChart(detailChartState, data);
+  } else {
+    detailDestroyChart();
+    box.replaceChildren();
+    detailChartState = detailBuildChart(box, doc, models, detailColors(), data, layout);
+  }
+  if (data.special > 0) note.append(el("p", {}, DETAIL_TEXT.specialNotPlotted(data.special)));
+  detailDrawn = doc;
 }
 
 function detailInit() {
@@ -595,9 +638,14 @@ function detailInit() {
   detailFill($("detail-notice"), `${DETAIL_TEXT.notice} · `, link);
   window.addEventListener("hashchange", detailRouteChanged);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && detailRoute.view === "symbol") detailSchedule();
+    if (document.visibilityState !== "visible" || detailRoute.view !== "symbol") return;
+    // after a long time in a hidden tab the cards would show old numbers for a minute: load at once
+    if (lastData !== null && (detailFetchedAt === null || Date.now() - detailFetchedAt >= 60000)) detailLoader.load(detailKey());
+    else detailSchedule();
   });
   setInterval(detailAge, 1000);
+  // the overview may have failed before this script was evaluated: its hook was not there to tell us
+  detailOverviewFailed = lastData === null && document.body.dataset.phase === "error";
   detailRouteChanged();
 }
 

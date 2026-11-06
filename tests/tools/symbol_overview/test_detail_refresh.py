@@ -197,6 +197,10 @@ def test_an_unlisted_unsupported_or_never_stored_series() -> None:
     with FakeApi(routes()) as api:
         status, doc = get(api, venue="x")
         assert (status, doc["api_error"]["code"]) == (404, "unsupported_series") and api.requests == []
+    with FakeApi(routes()) as api:
+        answer = Detailer(http_fetch(api.url)).get(SYMBOL, "binance-usdm", "1m", "24h")
+        assert answer.status == 404 and json.loads(answer.body)["api_error"]["code"] == "unsupported_series"
+        assert api.requests == []  # an unsupported timeframe is refused before any call
     with FakeApi(routes(instrument_rows=[instrument(newest=None)])) as api:
         status, doc = get(api)
         assert status == 200 and doc["candles"]["status"] == "empty"

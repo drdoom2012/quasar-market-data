@@ -375,11 +375,15 @@ def test_the_cards_print_exact_strings() -> None:
     cards = call(f"kpiModel({js(detail_doc())})")
     assert cards["candle"]["head"] == f"76{nbsp}432.5"
     assert cards["candle"]["lines"][0] == f"open 76{nbsp}000 · high 77{nbsp}000.5 · low 75{nbsp}721.6"
+    assert (
+        cards["candle"]["lines"][1] == f"closed {call(f'fmt({T0})')} · 0 s before the API clock"
+    )  # the candle closes at as_of
     assert cards["candle"]["lines"][2] == "change +0.84 % vs the previous candle"
-    assert cards["openInterest"]["head"] == f"29{nbsp}870{nbsp}000{nbsp}000.5 USDT"
-    assert cards["openInterest"]["lines"][2] == "change n/a"
+    assert cards["openInterest"]["head"] == f"29{nbsp}870{nbsp}000{nbsp}000.5"  # no unit in the head: it is inferred
+    assert cards["openInterest"]["lines"][0] == "value in USDT (unit inferred, not documented by Binance)"
+    assert cards["openInterest"]["lines"][3] == "change n/a"
     assert cards["funding"]["head"] == "0.01 %"
-    assert cards["funding"]["lines"][1] == "rate 0.0001 (a fraction per settlement)"
+    assert cards["funding"]["lines"][1] == "rate 0.0001 (a fraction per settlement; unit inferred)"
 
 
 @needs_node
@@ -412,7 +416,7 @@ def test_parts_that_are_not_ok_show_why_and_no_numbers() -> None:
     )
     assert cards["funding"]["lines"] == ["nothing stored yet"] and cards["funding"]["head"] is None
     no_settlement = detail_doc(funding_rate=dict(detail_doc()["funding_rate"], latest=None))
-    assert call(f"kpiModel({js(no_settlement)})")["funding"]["lines"] == ["no settlement in the last 7 days"]
+    assert call(f"kpiModel({js(no_settlement)})")["funding"]["lines"] == ["no settlement stored in the last 7 days"]
 
 
 @needs_node
@@ -525,7 +529,7 @@ PAGE_HTML = (Path(__file__).resolve().parents[3] / "tools" / "symbol_overview" /
     encoding="utf-8"
 )
 DETAIL_VIEW = PAGE_HTML.split('<main id="detail-view"')[1].split("</main>")[0]
-HOOK = 'if (typeof detailOverview === "function") detailOverview(lastData);'
+HOOK = 'if (typeof detailOverview === "function") { try { detailOverview(lastData); } catch (error) { console.error("symbol detail:", error); } }'
 
 
 def test_the_detail_view_has_every_element_the_script_fills() -> None:
@@ -563,6 +567,7 @@ def test_the_scripts_load_in_order_after_the_inline_script_and_the_first_script_
         < PAGE_HTML.index('src="/detail.js"')
     )
     assert "could not be loaded" in tags[2]
+    assert "location.hash.indexOf('#/symbol/')===0" in tags[2]  # a failed optional script never replaces the dashboard
 
 
 def test_the_inline_script_tells_the_detail_about_every_overview_result_and_nothing_else_changed() -> None:

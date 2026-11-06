@@ -147,8 +147,13 @@ def test_a_symbol_with_reserved_characters_arrives_decoded() -> None:
     assert stub.calls[0][0] == "A&B#C D/USDT:USDT"
 
 
-def test_a_bad_escape_stays_literal_and_is_never_replaced_by_another_character() -> None:
+def test_a_bad_escape_is_refused_not_kept_literally() -> None:
     stub = DetailStub()
     with running(stub) as connection:
-        fetch(connection, "/detail.json?symbol=%ZZ&venue=v&timeframe=5m&range=1h")
-    assert stub.calls[0][0] == "%ZZ"  # not listed by the API, so it ends in a 404 there, never as another symbol
+        for symbol in ("%ZZ", "100%", "A%2", "%"):
+            status, _, body = fetch(connection, f"/detail.json?symbol={symbol}&venue=v&timeframe=5m&range=1h")
+            assert status == 400 and json.loads(body)["api_error"]["detail"] == "query"
+        assert (
+            fetch(connection, "/detail.json?symbol=100%25&venue=v&timeframe=5m&range=1h")[0] == 200
+        )  # an encoded % is fine
+    assert stub.calls == [("100%", "v", "5m", "1h")]

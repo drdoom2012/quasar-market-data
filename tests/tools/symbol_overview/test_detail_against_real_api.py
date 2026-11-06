@@ -29,8 +29,10 @@ from tests.api.seed import (
     candle_values,
     insert_candle,
     insert_conflict,
+    insert_funding_conflict,
     insert_funding_rate,
     insert_open_interest,
+    insert_open_interest_conflict,
     make_database,
     open_interest_values,
 )
@@ -93,8 +95,12 @@ def seed(path: Path) -> None:
         insert_conflict(conn, NEWEST - 5 * TF_MS, 0, symbol=FULL)  # a stored candle that also has a conflict record
         for t in range(W.shown.start - 10 * TF_MS + TF_MS, OI_NEWEST + 1, TF_MS):
             insert_open_interest(conn, t, symbol=FULL)
+        insert_open_interest_conflict(
+            conn, OI_NEWEST - 3 * TF_MS, 0, symbol=FULL
+        )  # a stored row that also has a conflict record
         for t in SETTLEMENTS:
             insert_funding_rate(conn, t, symbol=FULL)
+        insert_funding_conflict(conn, SETTLEMENTS[1], 0, symbol=FULL)
         conn.execute("COMMIT")
     finally:
         conn.close()
@@ -130,13 +136,23 @@ def test_the_real_answers_pass_the_validation_and_are_what_was_stored(tmp_path: 
     assert all(NEWEST - n * TF_MS not in times for n in HOLE_SLOTS)  # a hole is absent, never filled in
     assert times == sorted(set(times)) and times[0] >= W.shown.start
 
+    conflicted = [r for r in candles["rows"] if r["conflicted"]]
+    assert [r["t"] for r in conflicted] == [NEWEST - 5 * TF_MS]  # marked, with the first stored values
+    assert conflicted[0]["o"] == candle_values(NEWEST - 5 * TF_MS)[0]
+
     interest = doc["open_interest"]
     oi, value = open_interest_values(OI_NEWEST)
     assert interest["rows"][-1] == {"t": OI_NEWEST, "oi": oi, "value": value, "conflicted": False}
+    marked = [r for r in interest["rows"] if r["conflicted"]]
+    assert [r["t"] for r in marked] == [OI_NEWEST - 3 * TF_MS]
+    assert (
+        marked[0]["value"] == open_interest_values(OI_NEWEST - 3 * TF_MS)[1]
+    )  # the first stored value, not the rejected one
 
     funding = doc["funding_rate"]
     assert funding["latest"]["t"] == SETTLEMENTS[0] and funding["latest"]["rate_type"] == "Regular"
     assert [r["t"] for r in funding["rows"]] == sorted(t for t in SETTLEMENTS if t >= W.shown.start)
+    assert [r["t"] for r in funding["rows"] if r["conflicted"]] == [SETTLEMENTS[1]]
 
 
 def test_a_thirty_day_detail_pages_the_real_api_and_stays_exact(tmp_path: Path) -> None:

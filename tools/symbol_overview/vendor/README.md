@@ -7,3 +7,5 @@
 - **Obligations (Apache-2.0 with the notice requirement):** ship `LICENSE` and `NOTICE`; show the NOTICE text and a link to `https://www.tradingview.com/` on the page that uses the library. The detail view does both (a footer made by `detail.js`, and the chart option `attributionLogo`, which stays on).
 - **Why vendored:** the page must work through the SSH tunnel and in a container with no route out, and no unpinned third-party code may run (spec `docs/superpowers/specs/2026-11-06-symbol-detail-design.md`, 5.4). Served by the tool from a fixed route.
 - **Bump only deliberately:** replace the file, update the version and both hashes here and `VENDOR_SHA256` in `tests/tools/symbol_overview/test_vendor.py`.
+
+- The upstream `NOTICE` has a Cyrillic "с" (U+0441) in "Copyright (с) 2025"; the file is shipped unchanged, and the page shows the same text with a Latin "c".
