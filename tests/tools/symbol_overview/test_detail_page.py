@@ -604,3 +604,39 @@ def test_detail_js_keeps_the_pages_rules() -> None:
 def test_detail_js_has_its_attribution_notice_and_never_turns_the_logo_off() -> None:
     assert "TradingView Lightweight Charts" in DETAIL and "https://www.tradingview.com/" in DETAIL
     assert "attributionLogo: false" not in DETAIL and "attributionLogo:false" not in DETAIL
+
+
+# --- the charts ------------------------------------------------------------------------------------------------------
+
+
+@needs_node
+def test_the_price_axis_has_the_decimals_of_the_stored_strings() -> None:
+    assert call("decimalPlaces(['76432.5', '75721.25', '77000'])") == 2
+    assert call("decimalPlaces(['100', '101'])") == 0
+    assert call("decimalPlaces(['0.000012345678912'])") == 8  # capped
+    assert call("decimalPlaces([])") == 0
+
+
+@needs_node
+def test_colors_with_alpha_come_from_hex_and_anything_else_is_left_alone() -> None:
+    assert call("withAlpha('#22c55e', 0.45)") == "rgba(34, 197, 94, 0.45)"
+    assert call("withAlpha(' #3B82F6 ', 0.02)") == "rgba(59, 130, 246, 0.02)"
+    assert call("withAlpha('var(--ok)', 0.5)") == "var(--ok)"
+
+
+def test_the_chart_colors_are_read_from_the_pages_variables_not_written_in_the_script() -> None:
+    assert "getComputedStyle(document.documentElement)" in DETAIL
+    for variable in ("--ok", "--bad", "--accent", "--line", "--muted", "--card"):
+        assert f'detailVariable("{variable}")' in DETAIL
+    literals = set(re.findall(r"#[0-9a-fA-F]{6}\b", DETAIL))
+    assert literals == {"#c2186b"}  # the conflict colour is the only fixed one
+
+
+def test_the_chart_is_made_only_when_a_new_document_arrives_and_is_removed_when_the_view_changes() -> None:
+    assert "if (doc === detailDrawn && doc !== null) return;" in DETAIL
+    assert DETAIL.count("detailDestroyChart();") >= 2 and "detailChart.remove()" in DETAIL
+    assert "setVisibleRange" in DETAIL and "try {" in DETAIL.split("setVisibleRange")[0].split("\n")[-1]  # guarded
+
+
+def test_a_missing_library_is_said_not_thrown() -> None:
+    assert 'typeof LightweightCharts === "undefined"' in DETAIL and "chartsFailed" in DETAIL

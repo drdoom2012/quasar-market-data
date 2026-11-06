@@ -153,6 +153,8 @@
   #detail-chart-note p { margin: 4px 0; }
   .qrow { display: grid; grid-template-columns: 150px 110px 1fr; align-items: baseline; gap: 10px; margin: 8px 0; }
   .qrow .note { overflow-wrap: anywhere; }
+  .ctip { position: absolute; z-index: 5; pointer-events: none; max-width: 340px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); box-shadow: var(--shadow); font-size: 12px; line-height: 1.4; }
+  .ctip[hidden] { display: none; }
   .reasons { margin-top: 6px; }
   #detail-fetched, #detail-notice { margin-top: 6px; }
   .dash { color: var(--muted); }

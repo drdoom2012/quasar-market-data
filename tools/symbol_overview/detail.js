@@ -285,6 +285,23 @@ function fundingPoints(rows, colors) {
   return { points, special };
 }
 
+// The decimals a price axis needs, from the exact strings of the rows (at most 8): a chart never rounds a stored price
+// to two places because that is the library's default.
+function decimalPlaces(texts) {
+  let most = 0;
+  for (const text of texts) {
+    const at = String(text).indexOf(".");
+    if (at >= 0) most = Math.max(most, String(text).length - at - 1);
+  }
+  return Math.min(8, most);
+}
+// "#rrggbb" and an alpha as an rgba() colour (the library wants colours, the page keeps variables).
+function withAlpha(hex, alpha) {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex).trim());
+  if (!match) return String(hex);
+  return `rgba(${parseInt(match[1], 16)}, ${parseInt(match[2], 16)}, ${parseInt(match[3], 16)}, ${alpha})`;
+}
+
 // --- DOM below ---
 
 // The state of the view. `detailOverview` is called by the inline script after every overview render (with the data)
@@ -352,6 +369,7 @@ function detailRouteChanged() {
     detailLoader.cancel();
     detailDoc = null; detailDocKey = null; detailError = null;
     clearTimeout(detailTimer);
+    detailDestroyChart();
   }
   detailRender();
   if (changed && next.view === "symbol") window.scrollTo(0, 0);
@@ -460,9 +478,105 @@ function detailAge() {
   line.textContent = `API clock ${fmt(detailDoc.as_of_ms)} · ${DETAIL_TEXT.fetched(seconds)}`;
 }
 
+let detailChart = null, detailDrawn = null;
+
+function detailVariable(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function detailDestroyChart() {
+  if (detailChart) { detailChart.remove(); detailChart = null; }
+  detailDrawn = null;
+}
+
+// Three panes on one time axis: candles (with volume), open interest, funding. A part that is not ok draws nothing
+// and says why under the chart. The chart is created again only when a new document arrives, so zoom and pan survive
+// the clock ticking.
 function detailDrawCharts(doc) {
-  const box = $("detail-charts");
-  box.replaceChildren(doc ? "charts follow" : "");
+  const box = $("detail-charts"), note = $("detail-chart-note");
+  if (doc === detailDrawn && doc !== null) return;
+  detailDestroyChart();
+  box.replaceChildren();
+  note.replaceChildren();
+  if (doc === null) return;
+  const parts = [["candles", doc.candles], ["openInterest", doc.open_interest], ["funding", doc.funding_rate]];
+  const models = parts.map(([, part]) => paneModel(part));
+  parts.forEach(([name], i) => { if (!models[i].draw) note.append(el("p", {}, `${DETAIL_TEXT.panes[name]}: ${models[i].text}`)); });
+  if (typeof LightweightCharts === "undefined") { note.append(el("p", { class: "notice" }, DETAIL_TEXT.chartsFailed)); return; }
+  if (!models.some((m) => m.draw)) return;
+
+  const LW = LightweightCharts;
+  const colors = {
+    up: detailVariable("--ok"), down: detailVariable("--bad"), accent: detailVariable("--accent"), line: detailVariable("--line"),
+    text: detailVariable("--muted"), card: detailVariable("--card"),
+  };
+  colors.volUp = withAlpha(colors.up, 0.45);
+  colors.volDown = withAlpha(colors.down, 0.45);
+  const chart = LW.createChart(box, {
+    autoSize: true,
+    layout: { background: { type: "solid", color: colors.card }, textColor: colors.text, panes: { separatorColor: colors.line } },
+    grid: { vertLines: { color: colors.line }, horzLines: { color: colors.line } },
+    rightPriceScale: { borderColor: colors.line },
+    timeScale: { borderColor: colors.line, timeVisible: true, secondsVisible: false },  // the library shows UTC, like the whole page
+  });
+  detailChart = chart;
+  detailDrawn = doc;
+
+  const window_ = doc.window;
+  const lookups = { candles: new Map(), openInterest: new Map(), funding: new Map() };
+  const shown = [];  // [name, series, factor]
+  let pane = 0;
+  if (models[0].draw) {
+    const places = decimalPlaces(doc.candles.rows.flatMap((r) => [r.o, r.h, r.l, r.c]));
+    const price = { type: "price", precision: places, minMove: Math.pow(10, -places) };
+    const candles = chart.addSeries(LW.CandlestickSeries, {
+      upColor: colors.up, downColor: colors.down, borderUpColor: colors.up, borderDownColor: colors.down, wickUpColor: colors.up, wickDownColor: colors.down, priceFormat: price,
+    }, pane);
+    candles.setData(candleBars(doc.candles.rows, window_, colors));
+    const volume = chart.addSeries(LW.HistogramSeries, { priceScaleId: "", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false }, pane);
+    volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    volume.setData(volumeBars(doc.candles.rows, window_, colors));
+    for (const r of doc.candles.rows) lookups.candles.set(r.t / 1000, r);
+    shown.push(["candles", candles, 0.55]);
+    pane += 1;
+  }
+  if (models[1].draw) {
+    const places = decimalPlaces(doc.open_interest.rows.map((r) => r.value));
+    const area = chart.addSeries(LW.AreaSeries, {
+      lineColor: colors.accent, topColor: withAlpha(colors.accent, 0.35), bottomColor: withAlpha(colors.accent, 0.02),
+      priceFormat: { type: "price", precision: Math.min(places, 2), minMove: 0.01 },
+    }, pane);
+    area.setData(oiPoints(doc.open_interest.rows, window_));
+    for (const r of doc.open_interest.rows) lookups.openInterest.set(oiPlotMs(r.t) / 1000, r);
+    shown.push(["openInterest", area, 0.25]);
+    pane += 1;
+  }
+  if (models[2].draw) {
+    const funding = fundingPoints(doc.funding_rate.rows, colors);
+    const bars = chart.addSeries(LW.HistogramSeries, { priceFormat: { type: "custom", formatter: (v) => `${v.toFixed(4)} %`, minMove: 0.0001 }, lastValueVisible: false, priceLineVisible: false }, pane);
+    bars.setData(funding.points);
+    for (const r of doc.funding_rate.rows) lookups.funding.set(Math.floor(r.t / 1000), r);
+    if (funding.special > 0) note.append(el("p", {}, DETAIL_TEXT.specialNotPlotted(funding.special)));
+    shown.push(["funding", bars, 0.2]);
+  }
+  const total = shown.reduce((sum, item) => sum + item[2], 0);
+  const paneApis = chart.panes();
+  shown.forEach(([, , factor], i) => { if (paneApis[i]) paneApis[i].setStretchFactor(factor / total); });
+  try { chart.timeScale().setVisibleRange({ from: window_.start / 1000, to: window_.end / 1000 }); } catch (error) { /* no data to show: the notes under the chart say why */ }
+
+  // The exact stored strings of the hovered slot; a slot without a stored row says so (a hole is never filled in).
+  const tip = el("div", { class: "ctip", hidden: "" });
+  box.append(tip);
+  chart.subscribeCrosshairMove((param) => {
+    if (!param.point || param.time === undefined) { tip.hidden = true; return; }
+    const lines = [];
+    const candle = lookups.candles.get(param.time), interest = lookups.openInterest.get(param.time), settlement = lookups.funding.get(param.time);
+    if (models[0].draw) lines.push(...(candle ? tooltipLines("candles", candle) : [fmt(param.time * 1000), "no candle stored for this slot"]));
+    if (models[1].draw) lines.push(...(interest ? tooltipLines("openInterest", interest) : ["no open interest row for this slot"]));
+    if (settlement) lines.push(...tooltipLines("funding", settlement));
+    tip.replaceChildren(...lines.map((line) => el("div", {}, line)));
+    tip.hidden = false;
+    const left = Math.min(param.point.x + 14, Math.max(0, box.clientWidth - tip.offsetWidth - 70));
+    tip.style.left = `${left}px`;
+    tip.style.top = `${Math.min(param.point.y + 14, Math.max(0, box.clientHeight - tip.offsetHeight))}px`;
+  });
 }
 
 function detailInit() {
