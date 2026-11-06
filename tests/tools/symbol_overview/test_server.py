@@ -50,7 +50,7 @@ def test_the_page_is_served_with_the_elements_the_script_fills() -> None:
         text = response.read().decode()
     assert response.status == 200
     assert response.getheader("Content-Type", "").startswith("text/html")
-    for element in ("summary", "problems", "ok-group", "heatmap", "refresh", "api-error"):
+    for element in ("n-ok", "problems", "ok-group", "refresh", "api-error"):
         assert f'id="{element}"' in text
 
 

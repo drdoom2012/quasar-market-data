@@ -211,3 +211,11 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 - **What (arithmetic from the code, not measured):** one round needs at least 2 grants per symbol. At 1000 symbols and `min_request_interval_ms = 100` that is about 2000 grants, about 200 s of a 300 s cycle before any retry or backfill, and `/health/ingest` shows the last symbols as `stale` for part of every cycle (contract 6.2.3, "A round longer than the lag threshold"). Sharing one server-time observation across the symbols of a round would halve the grants; it changes the ADR-0001 P-4 freshness argument (`max_age_ms`) and was not done.
 - **Fixed in the same review:** the rate-limiter wait no longer counts as round-trip time. `KlineSource.fetch_server_time` returns a `ServerTimeObservation` stamped at the network call, after the limiter's grant, so a long queue (many symbols, high `max_concurrency`) cannot make time untrusted (`tests/collector/test_fetch_once.py::test_time_spent_waiting_for_the_rate_limiter_is_not_round_trip_time`).
 - **Review finding, no action:** the review reported `500 internal_error` from `/health/ingest` for a stored timeframe label the domain does not know as a defect. Contract 6.2.3 states it as intended (a series that cannot be judged makes the whole answer `500`, never a made-up status).
+
+## From the overview dashboard redesign (2026-11-06)
+
+### F-24. The symbol detail page does not exist; the overview links to it
+
+- **Where:** `tools/symbol_overview/page.html` (every name in "Needs attention" and "Healthy" links to `#/symbol/<symbol>?venue=...&timeframe=...`).
+- **What:** the links lead nowhere (the hash changes, nothing is drawn). The 30-day strips, the strip legend, the per-symbol history start and the per-symbol funding line were removed from the overview by the redesign (they live in git history, in the commit before `feat(overview): redesign the page as a dashboard`); `/overview.json` still carries `strip`, `oldest_*`, `newest_*` and the funding fields. A tool that hangs or a tunnel that stalls now shows the error state after 90 s instead of waiting for ever.
+- **Fix:** build the detail view from the fields already in `/overview.json` (one series per link; the hash carries venue and timeframe because a symbol name can occur in more than one series). Do not change the API for it.

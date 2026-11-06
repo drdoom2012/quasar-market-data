@@ -22,27 +22,20 @@ HORIZON = 2_505_600_000
 
 
 def test_the_page_keeps_every_existing_element_id() -> None:
-    for element in ("summary", "problems", "ok-group", "heatmap", "refresh", "api-error", "legend", "status-line"):
+    for element in ("problems", "ok-group", "refresh", "api-error", "status-line", "banner"):
         assert f'id="{element}"' in HTML
 
 
 def test_the_page_has_the_new_elements() -> None:
-    for element in ("oi-summary", "oi-notice", "refresh-notice"):
+    for element in ("oi-notice", "refresh-notice"):
         assert f'id="{element}"' in HTML
 
 
 def test_clear_states_clears_the_new_elements() -> None:
     body = SCRIPT.split("function clearStates()")[1].split("\n}\n")[0]
 
-    for element in ("summary", "oi-summary", "oi-notice", "refresh-notice", "problems", "heatmap"):
+    for element in ("oi-notice", "refresh-notice", "problems", "n-ok"):
         assert f'"{element}"' in body  # a later page-level error leaves no old green open interest tile
-
-
-def test_the_legend_has_the_new_character_and_the_open_interest_wording() -> None:
-    assert "no longer recoverable" in HTML
-    assert "before the first stored row" in HTML
-    assert "first stored row" in HTML
-    assert re.search(r'\br: "#[0-9a-f]{6}"', SCRIPT)  # a color for the new strip character
 
 
 def test_every_reason_code_of_open_interest_has_text() -> None:

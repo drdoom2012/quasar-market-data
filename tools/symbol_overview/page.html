@@ -3,160 +3,195 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Symbol overview</title>
+<meta name="color-scheme" content="dark">
+<noscript><style>.skel, .val { animation: none !important; }</style></noscript>
+<title>Market Data Overview</title>
 <style>
   :root {
-    --bg: #f4f5f8; --fg: #1b1d24; --muted: #6a6f7c; --line: #e2e4ea; --card: #ffffff; --hover: #f0f2f7;
-    --ok: #1f8a54; --warn: #b26a00; --bad: #c4301f; --none: #6a6f7c; --accent: #3b5bdb;
-    --shadow: 0 1px 2px rgba(20, 24, 40, .06), 0 4px 14px rgba(20, 24, 40, .04);
-    --lab: 96px; --chip: 112px; --gap: 10px;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #101116; --fg: #e8e9ef; --muted: #8e93a1; --line: #2a2c36; --card: #181a21; --hover: #20232c;
-            --ok: #4cc58a; --warn: #e5a53d; --bad: #ff7a6b; --none: #8e93a1; --accent: #8ba2ff;
-            --shadow: 0 1px 2px rgba(0, 0, 0, .4); }
+    --bg: #0b1220; --card: #111a2c; --line: #1f2b44; --fg: #e6ecf8; --muted: #8a98b5; --track: #1a2540; --hover: #16223a;
+    --ok: #22c55e; --warn: #f5b50a; --bad: #ef4444; --none: #8a98b5; --accent: #3b82f6; --link: #7db3ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4);
   }
   * { box-sizing: border-box; }
+  html { color-scheme: dark; }
   body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; }
   main { max-width: 1280px; margin: 0 auto; padding: 20px 20px 48px; }
-  h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
-  h2 { font-size: 12px; margin: 28px 0 8px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); display: flex; align-items: baseline; gap: 8px; }
-  h2 .count { font-weight: 500; letter-spacing: 0; text-transform: none; }
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 16px; }
-  header .spacer { flex: 1; }
-  #status-line { color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+  h1 { font-size: 22px; margin: 0 0 2px; letter-spacing: -.01em; }
+  h3 { font-size: 13px; margin: 0 0 10px; display: flex; align-items: baseline; gap: 8px; }
+  h3 .count { font-weight: 500; color: var(--muted); }
+  .subtitle { color: var(--muted); font-size: 13px; }
+  .lab { color: var(--muted); font-size: 12px; }
+  .muted { color: var(--muted); }
+  header { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; margin-bottom: 14px; }
+  header .titles { flex: 1 1 280px; }
+  header .right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #status-line { color: var(--muted); font-size: 12px; min-height: 20px; display: inline-flex; align-items: center; gap: 6px; }
   #status-line:not(:empty)::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 var(--ok); animation: pulse 2.4s ease-out infinite; }
   #status-line.old { color: var(--warn); font-weight: 600; }
   #status-line.old::before { background: var(--warn); animation: none; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 7px transparent; } }
-  @media (prefers-reduced-motion: reduce) { #status-line::before { animation: none !important; } }
-  button { font: inherit; }
-  #refresh { padding: 6px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); cursor: pointer; box-shadow: var(--shadow); }
+  @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+  button { font: inherit; color: inherit; }
+  #refresh { padding: 6px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); cursor: pointer; box-shadow: var(--shadow); }
   #refresh:hover:not(:disabled) { border-color: var(--accent); }
   #refresh:disabled { opacity: .5; cursor: default; }
-  button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  #api-error { display: none; border: 1px solid var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--card)); color: var(--bad); border-radius: 10px; padding: 12px 14px; margin: 8px 0; font-weight: 600; }
+  button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #api-error { display: none; border: 1px solid var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--card)); color: #ff8a80; border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; font-weight: 600; }
 
-  #banner:not(:empty) { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-radius: 12px; border: 1px solid; margin-bottom: 14px; font-size: 16px; font-weight: 650; }
+  /* the loading placeholders: the same size as what replaces them, so nothing moves when the data arrives */
+  .skel, body[data-phase="loading"] .val {
+    background: linear-gradient(90deg, var(--track) 25%, #243253 50%, var(--track) 75%); background-size: 200% 100%;
+    animation: shimmer 1.4s linear infinite; border-radius: 6px;
+  }
+  .skel { display: block; height: 14px; margin: 9px 0; }
+  .skel.row { height: 12px; }
+  body[data-phase="loading"] .val, body[data-phase="loading"] .tile .val { color: transparent !important; }
+  body[data-phase="error"] #banner { visibility: hidden; }  /* keeps its place: nothing moves, nothing is claimed */
+  .val { display: inline-block; font-variant-numeric: tabular-nums; }
+  body[data-phase="loading"] .donut { background: var(--track); }
+  @media (prefers-reduced-motion: reduce) { .skel, body[data-phase="loading"] .val, #status-line::before { animation: none !important; } }
+
+  #banner { min-height: 48px; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--line);
+            background: var(--card); margin-bottom: 12px; font-size: 15px; font-weight: 650; }
+  #banner .skel { margin: 0; width: 280px; height: 18px; }
   #banner .dot { width: 12px; height: 12px; border-radius: 50%; background: currentColor; flex: none; }
   #banner .sub { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: auto; text-align: right; }
   #banner.lvl-ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 9%, var(--card)); border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
   #banner.lvl-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--card)); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
-  #banner.lvl-bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--card)); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
-  #banner.lvl-none { color: var(--muted); background: var(--card); border-color: var(--line); }
+  #banner.lvl-bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 9%, var(--card)); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+  #banner.lvl-none { color: var(--muted); }
 
-  #parts { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 16px; box-shadow: var(--shadow); }
-  #parts > div:empty { display: none; }
-  .tilerow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 0; }
-  .tilerow + .tilerow, #parts > div + div > .tilerow { border-top: 1px solid var(--line); }
-  .tilerow-label { min-width: 120px; font-weight: 650; }
-  .tile { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--fg); font-size: 13px; }
-  button.tile { cursor: pointer; }
-  button.tile:hover:not(:disabled) { background: var(--hover); border-color: var(--accent); }
-  button.tile.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); box-shadow: 0 0 0 1px var(--accent); }
-  button.tile:disabled { cursor: default; }
-  .tile.zero { opacity: .5; }
-  .tile.total { background: transparent; border-style: dashed; }
-  .tile .n { font-size: 17px; font-variant-numeric: tabular-nums; }
-  .tile.zero .n { color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: var(--shadow); }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+  .tile { display: flex; align-items: center; gap: 12px; min-height: 76px; }
+  .tile .ico { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; background: #16233d; flex: none; }
+  .tile.ok .ico, .tile.ok .n { color: var(--ok); } .tile.warn .ico, .tile.warn .n { color: var(--warn); } .tile.bad .ico, .tile.bad .n { color: var(--bad); }
+  .tile .n { font-size: 26px; font-weight: 700; line-height: 1.15; }
+  .tile .pct { margin-left: auto; color: var(--muted); font-size: 12px; align-self: flex-end; }
+  .cards { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .cards .card { height: 300px; }  /* fixed: loading and loaded are the same height, so the lists below never move */
+  #causes { max-height: 240px; overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
+  .donutwrap { display: flex; align-items: center; gap: 18px; }
+  .donut { width: 118px; height: 118px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; }
+  .donut .hole { width: 84px; height: 84px; border-radius: 50%; background: var(--card); display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .donut .hole .val { font-size: 20px; font-weight: 700; }
+  .legend { flex: 1; min-width: 0; }
+  .legend > div { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--muted); }
+  .legend .dot { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  .dot.lvl-ok { background: var(--ok); } .dot.lvl-warn { background: var(--warn); } .dot.lvl-bad { background: var(--bad); }
+  .bar, .cause { display: flex; align-items: center; gap: 10px; margin: 9px 0; width: 100%; }
+  .bar .lbl, .cause .lbl { width: 150px; flex: none; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track { flex: 1; height: 7px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .track b { display: block; height: 100%; border-radius: 4px; background: var(--ok); }
+  .track b.lvl-warn { background: var(--warn); } .track b.lvl-bad { background: var(--bad); } .track b.lvl-ok { background: var(--ok); }
+  .bar .v, .cause .v { width: 56px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .cause .lbl { flex: 1 1 auto; width: auto; min-width: 0; white-space: normal; }
+  .cause .track { flex: 0 0 90px; }
+  .cause { background: none; border: 1px solid transparent; border-radius: 8px; padding: 3px 6px; margin: 2px 0; width: 100%; cursor: pointer; }
+  .cause:hover { background: var(--hover); }
+  .cause.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
   .note { color: var(--muted); font-size: 12px; }
-  #funding-health:not(:empty) { padding: 0 0 8px; }
-  .notice { color: var(--warn); font-weight: 600; margin: 4px 0; }
-  .notice:empty { display: none; }
-  #refresh-notice p { margin: 4px 0; }
-
-  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 22px; }
-  #search { flex: 1 1 240px; max-width: 420px; font: inherit; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); }
-  #search::placeholder { color: var(--muted); }
-  #filter-chip button { padding: 4px 10px; border: 1px solid var(--accent); border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, var(--card)); color: var(--fg); cursor: pointer; }
+  .notice { color: var(--warn); font-weight: 600; }
+  .notice p, .note p { margin: 4px 0; }
   kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--muted); }
 
-  table { border-collapse: separate; border-spacing: 0; width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: clip; box-shadow: var(--shadow); }
-  th, td { text-align: left; padding: 9px 12px; border-top: 1px solid var(--line); vertical-align: top; }
-  tr:first-child > th, tr:first-child > td { border-top: 0; }
-  th { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; background: var(--card); position: sticky; top: 0; z-index: 1; }
-  tbody tr:hover > td, tr:hover > td { background: var(--hover); }
-  td.sym { font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
-  tr.lvl-bad > td:first-child { box-shadow: inset 3px 0 var(--bad); }
-  tr.lvl-warn > td:first-child { box-shadow: inset 3px 0 var(--warn); }
-  td.empty { color: var(--muted); padding: 22px; text-align: center; }
-  ul.why { margin: 0; padding: 0; list-style: none; }
-  ul.why li { display: grid; grid-template-columns: 104px 1fr; gap: 8px; align-items: baseline; }
-  ul.why li + li { margin-top: 4px; }
-  .rp { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-
-  .tag { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 650; white-space: nowrap;
-         background: color-mix(in srgb, currentColor 12%, transparent); }
+  .listcard { margin-bottom: 12px; }
+  .listcard .head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 8px; }
+  .listcard .head h3 { margin: 0; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  #search { width: 260px; max-width: 100%; font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: #0e1627; color: var(--fg); }
+  #search::placeholder { color: var(--muted); }
+  #filter-chip button { padding: 4px 10px; border: 1px solid var(--accent); border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, var(--card)); cursor: pointer; }
+  .names { min-height: 84px; line-height: 1.9; color: var(--muted); overflow-wrap: anywhere; }
+  .names a { color: var(--link); text-decoration: none; font-weight: 500; }
+  .names a:hover { text-decoration: underline; }
+  .names a.lvl-warn { color: var(--warn); } .names a.lvl-bad { color: var(--bad); }
   .s-ok { color: var(--ok); } .s-behind, .s-holes, .s-unverified, .s-partly_verified { color: var(--warn); } .s-stale, .s-conflict, .s-unknown, .s-quiet { color: var(--bad); } .s-no_data { color: var(--none); }
-  .dash { color: var(--muted); }
 
-  .line { display: grid; grid-template-columns: var(--lab) var(--chip) 1fr; gap: var(--gap); align-items: center; min-height: 22px; }
-  .line + .line { margin-top: 4px; }
-  .line .lab { color: var(--muted); font-size: 12px; }
-  .line .chip { display: flex; }
-  .line .fline { font-size: 12px; color: var(--muted); }
-  canvas { width: 100%; min-width: 200px; height: 16px; display: block; border-radius: 4px; cursor: crosshair; }
-  .axis { display: flex; justify-content: space-between; margin-left: calc(var(--lab) + var(--chip) + 2 * var(--gap)); font-weight: 500; text-transform: none; letter-spacing: 0; }
-  th:first-child, td.sym { width: 200px; }
-  .since { margin-top: 2px; white-space: nowrap; font: 11px/1.3 -apple-system, system-ui, sans-serif; color: var(--muted); font-weight: 400; white-space: normal; }
-  details { margin-top: 10px; } summary { cursor: pointer; color: var(--muted); }
-  #ok-group > div { margin-top: 6px; line-height: 1.7; }
-  #legend { margin: 0 0 10px; font-size: 12px; color: var(--muted); }
-  #legend > div { display: flex; flex-wrap: wrap; gap: 4px 14px; }
-  #legend > div + div { margin-top: 4px; }
-  #legend b { color: var(--fg); }
-  #legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; }
-  .muted { color: var(--muted); }
-  @media (max-width: 760px) {
-    main { padding: 12px 12px 40px; }
-    :root { --lab: 0px; --chip: 104px; --gap: 8px; }
-    .line .lab { display: none; }
-    .axis { margin-left: calc(var(--chip) + var(--gap)); }
+  @media (max-width: 900px) {
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .cards { grid-template-columns: 1fr; }
+    .cards .card { height: auto; }
+    .cards .card.causes-card { height: 300px; }
     #banner .sub { display: none; }
-    .tilerow-label { min-width: 100%; }
-    #problems th, #heatmap th { display: none; }
-    #problems tr, #heatmap tr { display: block; padding: 8px 12px; border-top: 1px solid var(--line); }
-    #problems tr:first-child, #heatmap tr:first-child { border-top: 0; }
-    #problems td, #heatmap td { display: block; border: 0; padding: 2px 0; width: auto; overflow-wrap: anywhere; }
-    #problems td:nth-child(n+2):nth-child(-n+4) { display: inline-block; margin-right: 6px; }
-    tr.lvl-bad, tr.lvl-warn { box-shadow: inset 3px 0 var(--bad); }
-    tr.lvl-warn { box-shadow: inset 3px 0 var(--warn); }
-    tr.lvl-bad > td:first-child, tr.lvl-warn > td:first-child { box-shadow: none; }
-    canvas { min-width: 0; }
-    ul.why li { grid-template-columns: 1fr; gap: 0; }
+  }
+  @media (max-width: 520px) {
+    main { padding: 12px 12px 40px; }
+    .tiles { grid-template-columns: 1fr; }
+    .bar .lbl, .cause .lbl { width: 110px; }
+    #banner { min-height: 68px; }
   }
 </style>
 </head>
-<body>
+<body data-phase="loading">
 <main>
+<noscript><p class="notice">This page needs JavaScript.</p></noscript>
 <header>
-  <h1>Symbol overview</h1>
-  <span id="status-line" role="status"></span>
-  <span class="spacer"></span>
-  <button id="refresh" type="button">Refresh</button>
+  <div class="titles">
+    <h1 data-text="title"></h1>
+    <div class="subtitle" data-text="subtitle"></div>
+  </div>
+  <div class="right">
+    <span id="status-line"></span>
+    <button id="refresh" type="button">Refresh</button>
+  </div>
 </header>
 <div id="api-error" role="alert"></div>
-<div id="banner" role="status"></div>
-<div id="parts">
-  <div id="summary"></div>
-  <div id="oi-summary"></div>
-  <div id="oi-notice" class="notice" role="status"></div>
-  <div id="funding-summary"></div>
-  <div id="funding-health" class="note"></div>
-  <div id="funding-notice" class="notice" role="status"></div>
-  <div id="refresh-notice" class="notice" role="status"></div>
+<div id="banner" role="status"><span class="skel"></span></div>
+
+<div class="tiles">
+  <div class="card tile"><span class="ico">◈</span><div><div class="lab" data-text="tiles.symbols"></div><b class="val n" id="n-total">000</b></div></div>
+  <div class="card tile ok"><span class="ico">✓</span><div><div class="lab" data-text="tiles.healthy"></div><b class="val n" id="n-ok">000</b></div><span class="val pct" id="p-ok">00.0 %</span></div>
+  <div class="card tile warn"><span class="ico">!</span><div><div class="lab" data-text="tiles.warning"></div><b class="val n" id="n-warn">000</b></div><span class="val pct" id="p-warn">00.0 %</span></div>
+  <div class="card tile bad" data-title="criticalHint"><span class="ico">✕</span><div><div class="lab" data-text="tiles.critical"></div><b class="val n" id="n-bad">000</b></div><span class="val pct" id="p-bad">00.0 %</span></div>
 </div>
-<div class="toolbar">
-  <input id="search" type="search" placeholder="Filter symbols, e.g. BTC or ETH SOL" aria-label="Filter symbols" autocomplete="off" spellcheck="false">
-  <span id="filter-chip"></span>
-  <span class="note"><kbd>/</kbd> to search, <kbd>Esc</kbd> to clear</span>
+
+<div class="cards">
+  <section class="card">
+    <h3 data-text="cards.health"></h3>
+    <div class="donutwrap">
+      <div class="donut" id="donut"><div class="hole"><b class="val" id="donut-total">000</b><span class="lab" data-text="tiles.symbols"></span></div></div>
+      <div class="legend" id="donut-legend"><span class="skel row"></span><span class="skel row"></span><span class="skel row"></span></div>
+    </div>
+  </section>
+  <section class="card">
+    <h3 data-text="cards.parts"></h3>
+    <div id="parts"><span class="skel row"></span><span class="skel row"></span><span class="skel row"></span></div>
+  </section>
+  <section class="card causes-card">
+    <h3 data-text="cards.causes"></h3>
+    <div id="causes"><span class="skel row"></span><span class="skel row"></span><span class="skel row"></span></div>
+  </section>
 </div>
-<h2 id="problems-title">What is wrong <span id="problems-count" class="count"></span></h2>
-<table id="problems"></table>
-<details id="ok-group"></details>
-<h2>Last 30 days</h2>
-<div id="legend"></div>
-<table id="heatmap"></table>
+
+<section class="card listcard">
+  <div class="head">
+    <h3><span data-text="cards.attention"></span> <span class="count" id="problems-count"></span></h3>
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Filter symbols, e.g. BTC or ETH SOL" aria-label="Filter symbols" autocomplete="off" spellcheck="false">
+      <span id="filter-chip"></span>
+      <span class="note"><kbd>/</kbd> to search, <kbd>Esc</kbd> to clear</span>
+    </div>
+  </div>
+  <div class="names" id="problems"><span class="skel" style="width: 92%"></span><span class="skel" style="width: 78%"></span><span class="skel" style="width: 55%"></span></div>
+</section>
+
+<section class="card listcard">
+  <div class="head">
+    <h3><span data-text="cards.healthy"></span> <span class="count" id="ok-count"></span> <span class="count" id="ok-label"></span></h3>
+  </div>
+  <div class="names" id="ok-group"><span class="skel" style="width: 96%"></span><span class="skel" style="width: 88%"></span><span class="skel" style="width: 64%"></span></div>
+</section>
+
+<section class="card listcard" id="notes-card" hidden>
+  <h3 data-text="cards.notes"></h3>
+  <div id="notes">
+    <div id="oi-notice" class="notice" role="status"></div>
+    <div id="funding-notice" class="notice" role="status"></div>
+    <div id="funding-health" class="note"></div>
+    <div id="refresh-notice" class="notice" role="status"></div>
+  </div>
+</section>
 </main>
 
 <script>
@@ -165,17 +200,20 @@
 // make (which symbols are listed, in which order, what is in the ok group) are the pure functions above the marker.
 const TEXT = {
   down: "The tool does not respond: ",
+  timeout: "The tool did not answer within 90 seconds",
   apiNotReady: "The API is not usable: ",
   never: "nothing yet",
   age: (s) => `state from the API, fetched ${s} s ago`,
   states: { no_data: "no data", unknown: "cannot judge", stale: "stale", conflict: "conflict", holes: "holes", behind: "behind", ok: "ok",
-    quiet: "quiet", unverified: "not verified", partly_verified: "partly verified" },
-  tiles: { total: "total" },
+    quiet: "quiet", unverified: "not verified", partly_verified: "partly verified", unrecognised: "unrecognised" },
+  title: "Market Data Overview",
+  subtitle: "State and quality of collection for all tracked symbols.",
+  tiles: { symbols: "Symbols", healthy: "Healthy", warning: "Warning", critical: "Critical" },
+  criticalHint: "Includes \"cannot judge\" and \"no data\": the API cannot say more",
+  cards: { health: "Symbol health", parts: "Healthy symbols by data", causes: "What is wrong (symbols per cause)", attention: "Needs attention", healthy: "Healthy", notes: "Notes" },
+  noHealthy: "No symbol is healthy.",
   rows: { candles: "Candles", openInterest: "Open interest", funding: "Funding rate" },
   noProblems: "Nothing is wrong.",
-  okGroup: (n, label) => `${n} ${plural(n, "symbol", "symbols")} ok ${label}`,
-  columns: { candles: "Candles", openInterest: "Open interest", funding: "Funding rate", symbol: "Symbol", why: "Reason", since: "History since", strips: "30 days" },
-  notApplicable: "–",
   prefix: { candles: "candles: ", openInterest: "open interest: ", funding: "funding: " },
   reasons: {
     no_data: () => "nothing downloaded (the API cannot tell whether something should have been)",
@@ -213,11 +251,6 @@ const TEXT = {
   fundingUnknown: (detail) => `Funding rate could not be judged for any symbol (${detail}); every symbol is listed as a problem because nothing says it is fine`,
   fundingClamped: (days) => `Funding rate is judged over the last ${days} ${plural(days, "day", "days")} only: that is as deep as the Collector is configured to verify`,
   fundingHealth: (h) => `Funding rate, the API's own figures over all stored series (not only these symbols): status ${h.status}, ${h.behind} behind, ${h.catching_up} catching up, ${h.quiet_series} quiet, ${h.conflicted_series} with a conflict in the last 24 hours`,
-  fundingLine: {
-    cannot: "funding: cannot judge",
-    none: "funding: nothing stored",
-    state: (b, w) => `funding: verified ${b.verified_from_ms == null ? "nothing" : `${day(b.verified_from_ms)} to ${fmt(b.verified_through_ms)}`} · newest settlement ${fmt(b.newest_funding_time_ms)} · ${b.events_in_window} ${plural(b.events_in_window, "settlement", "settlements")}${w ? ` from ${day(w.start)} to ${fmt(w.end)}` : ""} · ${b.complete ? "complete as far as the Collector verified" : "not complete"}`,
-  },
   oiMissing: "no open interest answer for this symbol",
   oiDisabled: "Open interest is not enabled in this deployment",
   oiAbsent: "Open interest is not reported by the tool",
@@ -228,22 +261,16 @@ const TEXT = {
     openInterest: (n) => `Open interest: the refresh hit its time limit; ${n == null ? "some symbols were" : `${n} ${plural(n, "symbol", "symbols")} ${plural(n, "was", "were")}`} not asked`,
     funding: (n) => `Funding rate: the refresh hit its time limit; ${n == null ? "some symbols were" : `${n} ${plural(n, "symbol", "symbols")} ${plural(n, "was", "were")}`} not asked`,
   },
-  legend: { candles: "Candles", openInterest: "Open interest" },
-  noStripFunding: "Funding has no time grid, so it has no strip: the line under the strips says what the Collector verified.",
-  strip: { "_": "no history yet", ".": "ok", n: "not expected yet", d: "behind", u: "exchange has no data", m: "hole", c: "conflict", s: "stale" },
-  oiStrip: { "_": "before the first stored row", ".": "ok", r: "no longer recoverable", n: "not expected yet", d: "behind", m: "hole", c: "conflict", s: "stale" },
-  stripNone: "cannot judge",
-  since: { candles: "candles", openInterest: "first stored row" },
   banner: {
     empty: "The API reports no symbols",
     ok: (n) => `All ${n} ${plural(n, "symbol is", "symbols are")} ok`,
     problems: (k, n) => `${k} of ${n} ${plural(n, "symbol needs", "symbols need")} attention`,
     notices: "The refresh did not finish: nothing is shown as ok until it does",
+    incomplete: "refresh incomplete",
     worst: (state) => `worst: ${TEXT.states[state]}`,
   },
-  search: { none: "No symbol matches the filter.", count: (shown, all) => `${shown} of ${all}`, clear: "clear filter" },
+  search: { none: "No symbol matches the filter.", noneInState: "No symbol of this list is in the selected state.", count: (shown, all) => `${shown} of ${all}`, clear: "clear filter" },
   filterHint: "Show only these symbols",
-  axis: { start: (ms) => day(ms), middle: "30 days", end: "now" },
 };
 // English plural: 1 -> one, otherwise many.
 const plural = (n, one, many) => (n === 1 ? one : many);
@@ -254,11 +281,14 @@ const ORDER = ["no_data", "unknown", "stale", "conflict", "holes", "behind", "ok
 // The states of the funding part (design 4.3) and the one rank over all three parts: the worst state of any part decides the order of the list.
 const FUNDING_ORDER = ["no_data", "unknown", "conflict", "quiet", "behind", "unverified", "partly_verified", "ok"];
 const RANK_ORDER = ["no_data", "unknown", "stale", "conflict", "quiet", "holes", "behind", "unverified", "partly_verified", "ok"];
-const COLORS = { "_": "#c9c9cf", ".": "#2e9d62", n: "#9ec5ee", d: "#f0b429", u: "#8e5bd0", r: "#9c6b30", m: "#e0443a", c: "#c2186b", s: "#7a0f0f" };
 const POLL_MS = 60000, OLD_AFTER_S = 180;
 
 function fmt(ms) { return ms == null ? "–" : new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC"; }
-function day(ms) { return ms == null ? "–" : new Date(ms).toISOString().slice(0, 10); }
+
+// A state the page does not know (a new one, a missing one, even "constructor") is "unrecognised": the worst there is,
+// never echoed from the answer and never a key into an object.
+function known(state) { return RANK_ORDER.includes(state) ? state : "unrecognised"; }
+function candleState(s) { return known(s.state); }
 
 // The status of the open interest part: "disabled", "unknown", "enabled", or "absent" (a tool that does not report it).
 function oiStatus(data) { return data.open_interest ? data.open_interest.status : "absent"; }
@@ -267,42 +297,42 @@ function applies(status) { return status !== "disabled" && status !== "absent"; 
 // applies and a symbol has no block, nothing says it is fine.
 function oiStateOf(s, status) {
   if (!applies(status)) return null;
-  return s.open_interest ? s.open_interest.state : "unknown";
+  return s.open_interest ? known(s.open_interest.state) : "unknown";
 }
 // The status of the funding part: "disabled", "unknown", "enabled", or "absent" (a tool that does not report it).
 // Every function below takes it as an OPTIONAL last parameter; "absent" gives exactly the output of a page without funding.
 function fundingStatus(data) { return data.funding_rate ? data.funding_rate.status : "absent"; }
 function fundingStateOf(s, fstatus = "absent") {
   if (!applies(fstatus)) return null;
-  return s.funding_rate ? s.funding_rate.state : "unknown";
+  return s.funding_rate ? known(s.funding_rate.state) : "unknown";
 }
 function rank(state) { return RANK_ORDER.indexOf(state); }
 function worstRank(s, status, fstatus = "absent") {
-  const states = [s.state, oiStateOf(s, status), fundingStateOf(s, fstatus)].filter((x) => x !== null);
+  const states = [candleState(s), oiStateOf(s, status), fundingStateOf(s, fstatus)].filter((x) => x !== null);
   return Math.min(...states.map(rank));
 }
 function isProblem(s, status, fstatus = "absent") {
-  return [s.state, oiStateOf(s, status), fundingStateOf(s, fstatus)].some((x) => x !== null && x !== "ok");
+  return [candleState(s), oiStateOf(s, status), fundingStateOf(s, fstatus)].some((x) => x !== null && x !== "ok");
 }
 // Listed when the candle, the open interest OR the funding state is a problem; the worst of them first, then the candle state.
 function problemSymbols(symbols, status, fstatus = "absent") {
   return symbols.filter((s) => isProblem(s, status, fstatus))
-    .sort((a, b) => worstRank(a, status, fstatus) - worstRank(b, status, fstatus) || rank(a.state) - rank(b.state) || a.symbol.localeCompare(b.symbol));
+    .sort((a, b) => worstRank(a, status, fstatus) - worstRank(b, status, fstatus) || rank(candleState(a)) - rank(candleState(b)) || a.symbol.localeCompare(b.symbol));
 }
 // The state of one part of a symbol ("candles", "openInterest", "funding"), or null when the part does not apply.
 function partState(s, part, status, fstatus = "absent") {
-  if (part === "candles") return s.state;
+  if (part === "candles") return candleState(s);
   if (part === "openInterest") return oiStateOf(s, status);
   if (part === "funding") return fundingStateOf(s, fstatus);
   return null;
 }
 // The worst state of a symbol over all parts that apply.
 function worstState(s, status, fstatus = "absent") {
-  return RANK_ORDER[worstRank(s, status, fstatus)];
+  return RANK_ORDER[worstRank(s, status, fstatus)] || "unrecognised";
 }
 // How loud a state is: "ok", "warn", "bad". `no_data` is "bad" here: a symbol with nothing downloaded is not a quiet one.
 const LEVELS = { ok: "ok", behind: "warn", holes: "warn", unverified: "warn", partly_verified: "warn" };
-function levelOf(state) { return LEVELS[state] || "bad"; }
+function levelOf(state) { return Object.hasOwn(LEVELS, state) ? LEVELS[state] : "bad"; }
 // The headline over the whole page. Green only when there are symbols, none is a problem and the refresh finished;
 // anything else is never green (nothing says it is fine).
 function headline(total, problems, worst, notices) {
@@ -310,6 +340,116 @@ function headline(total, problems, worst, notices) {
   if (problems > 0) return { level: levelOf(worst), text: TEXT.banner.problems(problems, total), sub: TEXT.banner.worst(worst) };
   if (notices > 0) return { level: "warn", text: TEXT.banner.notices };
   return { level: "ok", text: TEXT.banner.ok(total) };
+}
+// --- the dashboard model: every number and list the page draws, decided here and nowhere else ---
+const PARTS = ["candles", "openInterest", "funding"];
+const stateText = (state) => (Object.hasOwn(TEXT.states, state) ? TEXT.states[state] : "unrecognised");
+// How many rows are ok / warn / bad, by the loudness of each row's worst state over all parts that apply.
+function healthCounts(symbols, status, fstatus = "absent") {
+  const counts = { total: symbols.length, ok: 0, warn: 0, bad: 0 };
+  for (const s of symbols) counts[levelOf(worstState(s, status, fstatus))] += 1;
+  return counts;
+}
+// A share as text. A problem is never rounded away: "100.0 %" only when n === total, "0.0 %" only when n === 0.
+function percentText(n, total) {
+  if (total === 0) return "–";
+  if (n === 0) return "0.0 %";
+  if (n === total) return "100.0 %";
+  return Math.min(99.9, Math.max(0.1, Math.round(n / total * 1000) / 10)).toFixed(1) + " %";
+}
+// Per part: how many rows are ok in it. A part that does not apply says why (`note`) and has no share.
+function partCoverage(symbols, status, fstatus = "absent") {
+  const notes = {
+    openInterest: { disabled: TEXT.oiDisabled, absent: TEXT.oiAbsent },
+    funding: { disabled: TEXT.fundingDisabled, absent: TEXT.fundingAbsent },
+  };
+  return PARTS.map((part) => {
+    const partStatus = part === "openInterest" ? status : part === "funding" ? fstatus : "enabled";
+    if (!applies(partStatus)) return { part, active: false, ok: 0, total: 0, note: notes[part][partStatus] || null };
+    const ok = symbols.filter((s) => partState(s, part, status, fstatus) === "ok").length;
+    return { part, active: true, ok, total: symbols.length, note: null };
+  });
+}
+// One row per part and non-ok state actually seen ("unrecognised" counts as the worst), worst state first. A row can be in several rows: the counts are per cause and are not summed.
+function causeRows(symbols, status, fstatus = "absent") {
+  const rows = [];
+  PARTS.forEach((part, order) => {
+    const partStatus = part === "openInterest" ? status : part === "funding" ? fstatus : "enabled";
+    if (!applies(partStatus)) return;
+    const counts = new Map();
+    for (const s of symbols) {
+      const state = partState(s, part, status, fstatus);
+      if (state === "ok" || state === null) continue;
+      counts.set(state, (counts.get(state) || 0) + 1);
+    }
+    for (const [state, count] of counts) rows.push({ part, state, count, level: levelOf(state), order });
+  });
+  rows.sort((a, b) => rank(a.state) - rank(b.state) || b.count - a.count || a.order - b.order);
+  return rows.map(({ order, ...row }) => row);
+}
+// The link to a series' detail (not built yet): a hash, so nothing is requested. A name that cannot be encoded gives "#".
+function symbolHref(symbol, venue = "", timeframe = "") {
+  try {
+    return "#/symbol/" + encodeURIComponent(symbol) + "?venue=" + encodeURIComponent(venue) + "&timeframe=" + encodeURIComponent(timeframe);
+  } catch (error) {
+    return "#";
+  }
+}
+// The ring: ok, warn, bad. A warn or bad share is never narrower than 0.5 %, so a problem is never a pure green ring.
+function donutBackground(counts) {
+  if (counts.total === 0) return "conic-gradient(var(--track) 0 100%)";
+  const warn = Math.max(counts.warn / counts.total * 100, counts.warn > 0 ? 0.5 : 0);
+  const bad = Math.max(counts.bad / counts.total * 100, counts.bad > 0 ? 0.5 : 0);
+  const r = (x) => Math.round(x * 100) / 100;
+  const okEnd = Math.max(0, r(100 - warn - bad)), warnEnd = r(100 - bad);
+  return `conic-gradient(var(--ok) 0 ${okEnd}%, var(--warn) ${okEnd}% ${warnEnd}%, var(--bad) ${warnEnd}% 100%)`;
+}
+// Everything the page draws, from a successful overview object and the user's filter. The filter chooses only what the
+// two lists show; counts, ring, coverage and causes are always those of all rows. A row is a series: when the same
+// symbol name occurs in more than one row, every such row is labelled with its venue and timeframe.
+function dashboardModel(data, f) {
+  const symbols = data.symbols, status = oiStatus(data), fstatus = fundingStatus(data), finfo = data.funding_rate || null;
+  const counts = healthCounts(symbols, status, fstatus);
+  const seen = new Map();
+  for (const s of symbols) seen.set(s.symbol, (seen.get(s.symbol) || 0) + 1);
+  const labelOf = (s) => (seen.get(s.symbol) > 1 ? `${s.symbol} (${s.venue || ""}, ${s.timeframe || ""})` : s.symbol);
+  const hrefOf = (s) => symbolHref(s.symbol, s.venue, s.timeframe);
+  const filtered = (f.query || "").trim() !== "" || !!f.part;
+  const visible = symbols.filter((s) => matchesFilter(s, f, status, fstatus));
+  const attentionAll = problemSymbols(symbols, status, fstatus);
+  const attention = problemSymbols(visible, status, fstatus).map((s) => {
+    const worst = worstState(s, status, fstatus);
+    return { label: labelOf(s), href: hrefOf(s), level: levelOf(worst), title: reasonLines(s, status, fstatus, finfo).join("\n"),
+      aria: `${labelOf(s)}: ${stateText(worst)}` };
+  });
+  const healthyRows = visible.filter((s) => !isProblem(s, status, fstatus));
+  const notesOf = okEntries(healthyRows, status, fstatus);
+  const healthy = healthyRows.map((s, i) => ({ label: labelOf(s), href: hrefOf(s), title: notesOf[i].note,
+    aria: `${labelOf(s)}: ${stateText("ok")}` })).sort((a, b) => a.label.localeCompare(b.label));
+  const healthyTotal = counts.ok;
+  const notes = [];
+  const note = (slot, text) => { if (text) notes.push({ slot, text }); };
+  note("oi-notice", oiNotice(status, data.open_interest ? data.open_interest.detail : ""));
+  note("funding-health", finfo && finfo.health ? TEXT.fundingHealth(finfo.health) : "");
+  note("funding-notice", fundingNotice(fstatus, finfo ? finfo.detail : "", finfo));
+  const incomplete = refreshNotices(data.refresh || {});
+  for (const line of incomplete) note("refresh-notice", line);
+  return {
+    empty: symbols.length === 0,
+    worst: attentionAll.length ? worstState(attentionAll[0], status, fstatus) : "ok",
+    incomplete: incomplete.length,
+    counts,
+    shares: { ok: percentText(counts.ok, counts.total), warn: percentText(counts.warn, counts.total), bad: percentText(counts.bad, counts.total) },
+    donut: donutBackground(counts),
+    coverage: partCoverage(symbols, status, fstatus),
+    causes: causeRows(symbols, status, fstatus),
+    attention, healthy,
+    attentionTotal: attentionAll.length, healthyTotal,
+    attentionLabel: filtered ? TEXT.search.count(attention.length, attentionAll.length) : String(attentionAll.length),
+    healthyLabel: filtered ? TEXT.search.count(healthy.length, healthyTotal) : String(healthyTotal),
+    groupLabel: okGroupLabel(status, fstatus),
+    notes,
+  };
 }
 // The user's filter: `query` (symbol names separated by spaces or commas, any may match, case ignored) and an optional
 // `part` + `state` (a clicked tile). Pure display filter: it decides no state.
@@ -359,13 +499,6 @@ function fundingNotice(fstatus, detail, block) {
   if (fstatus === "unknown") return TEXT.fundingUnknown(detail);
   return TEXT.fundingAbsent;
 }
-// The line under a symbol's strips: what the Collector verified, in words; never a color that could mean "fine".
-function fundingLine(block, info) {
-  if (!block) return TEXT.fundingLine.cannot;
-  if (block.state === "unknown") return TEXT.fundingLine.cannot;
-  if (block.state === "no_data") return TEXT.fundingLine.none;
-  return TEXT.fundingLine.state(block, info && info.window);
-}
 function oiNotice(status, detail) {
   if (status === "enabled") return null;
   if (status === "disabled") return TEXT.oiDisabled;
@@ -389,53 +522,10 @@ function el(tag, attrs, ...children) {
   for (const c of children) node.append(c);
   return node;
 }
-
-function legend() {
-  const box = $("legend");
-  box.replaceChildren();
-  for (const [title, texts] of [[TEXT.legend.candles, TEXT.strip], [TEXT.legend.openInterest, TEXT.oiStrip]]) {
-    const row = el("div", {}, el("b", {}, title + ":"));
-    for (const [ch, text] of Object.entries(texts)) {
-      const swatch = el("i"); swatch.style.background = COLORS[ch];
-      row.append(el("span", {}, swatch, text));
-    }
-    box.append(row);
-  }
-}
-
-function tag(state) { return el("span", { class: `tag s-${state}` }, TEXT.states[state]); }
-
-function drawStrip(canvas, strip, window_, texts) {
-  canvas.width = 720; canvas.height = 16;
-  const ctx = canvas.getContext("2d");
-  if (strip == null) {  // cannot be judged: hatched, never a color that means fine
-    ctx.fillStyle = "#8884"; ctx.fillRect(0, 0, 720, 16);
-    ctx.strokeStyle = "#888"; ctx.lineWidth = 1;
-    for (let x = -16; x < 720; x += 6) { ctx.beginPath(); ctx.moveTo(x, 16); ctx.lineTo(x + 16, 0); ctx.stroke(); }
-    canvas.title = TEXT.stripNone;
-    return;
-  }
-  for (let i = 0; i < strip.length;) {
-    let j = i; while (j < strip.length && strip[j] === strip[i]) j++;
-    ctx.fillStyle = COLORS[strip[i]] || "#000"; ctx.fillRect(i, 0, j - i, 16);
-    i = j;
-  }
-  // Bucket k is the same hour in both strips (an open interest slot is the END of its period).
-  const bucketMs = window_.bucket_slots * 300000;
-  canvas.onmousemove = (event) => {
-    const i = Math.min(strip.length - 1, Math.max(0, Math.floor(event.offsetX / canvas.getBoundingClientRect().width * strip.length)));
-    const from = window_.start + i * bucketMs;
-    canvas.title = `${fmt(from)} – ${fmt(from + bucketMs)}: ${texts[strip[i]] || strip[i]}`;
-  };
-}
-
-function clearStates() {
-  for (const id of ["banner", "summary", "oi-summary", "oi-notice", "funding-summary", "funding-health", "funding-notice", "refresh-notice", "problems", "problems-count", "filter-chip", "heatmap"]) $(id).replaceChildren();
-  $("banner").className = "";
-  $("ok-group").replaceChildren(); $("ok-group").style.display = "none";
-}
-
-function showError(text) { const box = $("api-error"); box.textContent = text; box.style.display = "block"; clearStates(); }
+function lookup(path) { return path.split(".").reduce((node, key) => node[key], TEXT); }
+function setValue(id, text) { $(id).textContent = text; }
+// "loading" (placeholders), "ready" (a good answer is drawn) or "error" (nothing is drawn as known).
+function setPhase(phase) { document.body.dataset.phase = phase; }
 
 // What the user filtered by (display only; the states are the tool's). Kept across refreshes.
 const filter = { query: "", part: null, state: null };
@@ -447,128 +537,111 @@ function toggleFilter(part, state) {
   if (lastData) render(lastData);
 }
 
-function tiles(box, label, summary, order, part) {
+// After a page-level error nothing old may stay on screen, and `lastData = null` keeps typing, Esc and a click on a
+// cause from drawing the last good answer again.
+function clearStates() {
+  lastData = null;
+  for (const id of ["n-total", "n-ok", "n-warn", "n-bad", "p-ok", "p-warn", "p-bad", "donut-total"]) setValue(id, "–");
+  for (const id of ["donut-legend", "parts", "causes", "problems", "ok-group", "banner", "filter-chip", "problems-count", "ok-count", "ok-label", "oi-notice", "funding-notice", "funding-health", "refresh-notice"]) $(id).replaceChildren();
+  $("banner").className = "";
+  $("donut").style.background = donutBackground({ total: 0, ok: 0, warn: 0, bad: 0 });
+  $("notes-card").hidden = true;
+}
+
+function showError(text) {
+  const box = $("api-error"); box.textContent = text; box.style.display = "block";
+  clearStates();
+  setPhase("error");
+}
+
+// Names separated by commas, each a link (to the detail page that does not exist yet). Text only, never markup.
+function linkList(box, entries, emptyText) {
   box.replaceChildren();
-  const row = el("div", { class: "tilerow" }, el("span", { class: "tilerow-label" }, label));
-  row.append(el("div", { class: "tile total" }, el("b", { class: "n" }, String(summary.total)), TEXT.tiles.total));
-  for (const key of order) {
-    const count = summary[key];
-    const active = filter.part === part && filter.state === key;
-    const tile = el("button", { type: "button", class: `tile${count === 0 ? " zero" : ""}${active ? " active" : ""}`, "aria-pressed": String(active), title: TEXT.filterHint },
-      el("b", { class: `n s-${key}` }, String(count)), TEXT.states[key]);
-    tile.disabled = count === 0;
-    tile.addEventListener("click", () => toggleFilter(part, key));
-    row.append(tile);
-  }
-  box.append(row);
+  if (entries.length === 0) { box.append(el("span", {}, emptyText)); return; }
+  entries.forEach((entry, i) => {
+    if (i) box.append(", ");
+    const link = el("a", { "aria-label": entry.aria }, entry.label);
+    link.setAttribute("href", entry.href);
+    if (entry.level) link.className = `lvl-${entry.level}`;
+    if (entry.title) link.title = entry.title;
+    box.append(link);
+  });
 }
 
-// "candles: 5 slots missing" -> <li><span>candles</span>5 slots missing</li>
-function reasonItem(line) {
-  for (const prefix of Object.values(TEXT.prefix)) {
-    if (line.startsWith(prefix)) return el("li", {}, el("span", { class: "rp" }, prefix.slice(0, -2)), line.slice(prefix.length));
-  }
-  return el("li", {}, line);
+function renderBanner(model) {
+  const head = headline(model.counts.total, model.attentionTotal, model.worst, model.incomplete);
+  const banner = $("banner");
+  banner.className = `lvl-${head.level}`;
+  banner.replaceChildren(el("span", { class: "dot" }), el("span", {}, head.text));
+  const sub = [head.sub, model.attentionTotal > 0 && model.incomplete > 0 ? TEXT.banner.incomplete : null].filter(Boolean).join(" · ");
+  if (sub) banner.append(el("span", { class: "sub" }, sub));
 }
 
-function stateCell(state) { return el("td", {}, state === null ? el("span", { class: "dash" }, TEXT.notApplicable) : tag(state)); }
+function renderTiles(model) {
+  const c = model.counts;
+  setValue("n-total", String(c.total)); setValue("n-ok", String(c.ok)); setValue("n-warn", String(c.warn)); setValue("n-bad", String(c.bad));
+  setValue("p-ok", model.shares.ok); setValue("p-warn", model.shares.warn); setValue("p-bad", model.shares.bad);
+  setValue("donut-total", String(c.total));
+  $("donut").style.background = model.donut;
+  const legend = $("donut-legend"); legend.replaceChildren();
+  for (const [level, label] of [["ok", TEXT.tiles.healthy], ["warn", TEXT.tiles.warning], ["bad", TEXT.tiles.critical]]) {
+    legend.append(el("div", {}, el("i", { class: `dot lvl-${level}` }), `${label} ${c[level]} (${model.shares[level]})`));
+  }
+}
 
-// One line of a heatmap row: the part, its state, and its strip (or the funding sentence).
-function stripLine(label, state, content) {
-  return el("div", { class: "line" }, el("span", { class: "lab" }, label), el("span", { class: "chip" }, tag(state)), content);
+function renderCoverage(model) {
+  const box = $("parts"); box.replaceChildren();
+  for (const row of model.coverage) {
+    const track = el("span", { class: "track" });
+    if (row.active && row.total > 0) { const fill = el("b"); fill.style.width = `${row.ok / row.total * 100}%`; track.append(fill); }
+    box.append(el("div", { class: "bar" }, el("span", { class: "lbl" }, TEXT.rows[row.part]), track, el("span", { class: "v" }, row.active ? percentText(row.ok, row.total) : "–")));
+    if (row.note) box.append(el("div", { class: "note" }, row.note));
+  }
+}
+
+function renderCauses(model) {
+  const box = $("causes"); box.replaceChildren();
+  if (model.causes.length === 0) { if (!model.empty) box.append(el("span", { class: "muted" }, TEXT.noProblems)); return; }
+  const max = Math.max(...model.causes.map((row) => row.count));
+  for (const row of model.causes) {
+    const active = filter.part === row.part && filter.state === row.state;
+    const fill = el("b", { class: `lvl-${row.level}` }); fill.style.width = `${row.count / max * 100}%`;
+    const button = el("button", { type: "button", class: `cause${active ? " active" : ""}`, "aria-pressed": String(active), title: TEXT.filterHint },
+      el("span", { class: "lbl" }, `${TEXT.rows[row.part]}: `, el("span", { class: `s-${row.state}` }, stateText(row.state))),
+      el("span", { class: "track" }, fill), el("span", { class: "v" }, String(row.count)));
+    button.addEventListener("click", () => toggleFilter(row.part, row.state));
+    box.append(button);
+  }
 }
 
 function render(data, httpStatus) {
   if (data.api_error) { showError(TEXT.apiNotReady + data.api_error.code + (data.api_error.detail ? ": " + data.api_error.detail : "")); return; }
-  lastData = data;
   $("api-error").style.display = "none";
-  const status = oiStatus(data);
+  const model = dashboardModel(data, filter);
+  lastData = data;
+  renderBanner(model);
+  renderTiles(model);
+  renderCoverage(model);
+  renderCauses(model);
 
-  tiles($("summary"), TEXT.rows.candles, data.summary, ORDER, "candles");
-  const interest = data.open_interest;
-  if (interest && interest.summary) tiles($("oi-summary"), TEXT.rows.openInterest, interest.summary, ORDER, "openInterest"); else $("oi-summary").replaceChildren();
-  $("oi-notice").textContent = oiNotice(status, interest ? interest.detail : "") || "";
-  const fstatus = fundingStatus(data);
-  const funding = data.funding_rate;
-  if (funding && funding.summary) tiles($("funding-summary"), TEXT.rows.funding, funding.summary, FUNDING_ORDER, "funding"); else $("funding-summary").replaceChildren();
-  $("funding-health").textContent = funding && funding.health ? TEXT.fundingHealth(funding.health) : "";
-  $("funding-notice").textContent = fundingNotice(fstatus, funding ? funding.detail : "", funding) || "";
-  const notices = $("refresh-notice"); notices.replaceChildren();
-  const noticeLines = refreshNotices(data.refresh || {});
-  for (const line of noticeLines) notices.append(el("p", { class: "notice" }, line));
-
-  const symbols = data.symbols;
-  const allProblems = problemSymbols(symbols, status, fstatus);
-  const head = headline(symbols.length, allProblems.length, allProblems.length ? worstState(allProblems[0], status, fstatus) : "ok", noticeLines.length);
-  const banner = $("banner");
-  banner.className = `lvl-${head.level}`;
-  banner.replaceChildren(el("span", { class: "dot" }), el("span", {}, head.text));
-  if (head.sub) banner.append(el("span", { class: "sub" }, head.sub));
-
-  const shown = (s) => matchesFilter(s, filter, status, fstatus);
-  const filtered = filter.query.trim() !== "" || filter.part !== null;
   const chip = $("filter-chip"); chip.replaceChildren();
   if (filter.part) {
-    const clear = el("button", { type: "button" }, `${TEXT.rows[filter.part]}: ${TEXT.states[filter.state]}  ✕`);
+    const clear = el("button", { type: "button" }, `${TEXT.rows[filter.part]}: ${stateText(filter.state)}  ✕`);
     clear.title = TEXT.search.clear;
     clear.addEventListener("click", () => toggleFilter(filter.part, filter.state));
     chip.append(clear);
   }
+  setValue("problems-count", model.attentionLabel);
+  setValue("ok-count", model.healthyLabel);
+  setValue("ok-label", model.groupLabel);
+  // With no symbols at all nothing is claimed ("Nothing is wrong" would be a statement about no data).
+  linkList($("problems"), model.attention, model.empty ? "–" : model.attentionTotal > 0 ? TEXT.search.none : TEXT.noProblems);
+  linkList($("ok-group"), model.healthy, model.empty ? "–" : model.healthyTotal > 0 ? (filter.part ? TEXT.search.noneInState : TEXT.search.none) : TEXT.noHealthy);
 
-  const problems = allProblems.filter(shown);
-  $("problems-count").textContent = filtered ? TEXT.search.count(problems.length, allProblems.length) : String(allProblems.length);
-  const table = $("problems"); table.replaceChildren();
-  if (problems.length === 0) {
-    table.append(el("tr", {}, el("td", { class: "empty" }, filtered && allProblems.length ? TEXT.search.none : TEXT.noProblems)));
-  } else {
-    table.append(el("tr", {}, el("th", {}, TEXT.columns.symbol), el("th", {}, TEXT.columns.candles), el("th", {}, TEXT.columns.openInterest),
-      el("th", {}, TEXT.columns.funding), el("th", {}, TEXT.columns.why)));
-    for (const s of problems) {
-      const why = el("ul", { class: "why" });
-      for (const line of reasonLines(s, status, fstatus, funding)) why.append(reasonItem(line));
-      table.append(el("tr", { class: `lvl-${levelOf(worstState(s, status, fstatus))}` }, el("td", { class: "sym" }, s.symbol),
-        stateCell(s.state), stateCell(oiStateOf(s, status)), stateCell(fundingStateOf(s, fstatus)), el("td", {}, why)));
-    }
-  }
-
-  const ok = okEntries(symbols.filter(shown), status, fstatus);
-  const group = $("ok-group"); group.replaceChildren();
-  group.style.display = ok.length ? "block" : "none";
-  if (ok.length) {
-    const names = el("div", { class: "muted" });
-    ok.forEach((entry, i) => {
-      names.append((i ? ", " : "") + entry.symbol);
-      if (entry.note) names.append(el("span", { class: "note" }, ` (${entry.note})`));
-    });
-    group.append(el("summary", {}, TEXT.okGroup(ok.length, okGroupLabel(status, fstatus))), names);
-  }
-
-  const heat = $("heatmap"); heat.replaceChildren();
-  const visible = symbols.filter(shown);
-  if (visible.length === 0) {
-    heat.append(el("tr", {}, el("td", { class: "empty" }, TEXT.search.none)));
-    return;
-  }
-  const axis = el("div", { class: "axis" }, el("span", {}, TEXT.axis.start(data.window.start)), el("span", {}, TEXT.axis.middle), el("span", {}, TEXT.axis.end));
-  heat.append(el("tr", {}, el("th", {}, TEXT.columns.symbol), el("th", {}, axis)));
-  for (const s of visible) {
-    const state = oiStateOf(s, status);
-    const block = s.open_interest;
-    const lines = el("td", {});
-    const candleCanvas = el("canvas");
-    drawStrip(candleCanvas, s.strip, data.window, TEXT.strip);
-    lines.append(stripLine(TEXT.rows.candles, s.state, candleCanvas));
-    const since = el("div", { class: "since" }, `${TEXT.since.candles}: ${day(s.oldest_open_time_ms)}`);
-    if (state !== null) {
-      const interestCanvas = el("canvas");
-      drawStrip(interestCanvas, block ? block.strip : null, data.window, TEXT.oiStrip);
-      lines.append(stripLine(TEXT.rows.openInterest, state, interestCanvas));
-      since.append(el("br"), `${TEXT.since.openInterest}: ${day(block ? block.oldest_time_ms : null)}`);
-    }
-    const fund = fundingStateOf(s, fstatus);
-    if (fund !== null) lines.append(stripLine(TEXT.rows.funding, fund, el("span", { class: "fline", title: TEXT.noStripFunding }, fundingLine(s.funding_rate, funding))));
-    heat.append(el("tr", {}, el("td", { class: "sym" }, s.symbol, since), lines));
-  }
+  for (const id of ["oi-notice", "funding-notice", "funding-health", "refresh-notice"]) $(id).replaceChildren();
+  for (const note of model.notes) $(note.slot).append(el("p", {}, note.text));
+  $("notes-card").hidden = model.notes.length === 0;
+  setPhase("ready");
 }
 
 // The filter box: typing filters at once (debounced), "/" jumps to it, Escape clears it.
@@ -599,24 +672,29 @@ function updateAge() {
 async function refresh() {
   if (inFlight) return;
   inFlight = true; $("refresh").disabled = true;
+  const controller = new AbortController();
+  const giveUp = setTimeout(() => controller.abort(), 90000);  // a hung tool or tunnel ends in the error phase, never in endless placeholders
   try {
-    const response = await fetch("/overview.json", { cache: "no-store" });
+    const response = await fetch("/overview.json", { cache: "no-store", signal: controller.signal });
     const data = await response.json();
     render(data, response.status);
-    lastFetchedAt = Date.now(); lastApiClock = data.generated_at_ms ?? null;
+    if (data.api_error) { lastFetchedAt = null; lastApiClock = null; }
+    else { lastFetchedAt = Date.now(); lastApiClock = data.generated_at_ms ?? null; }
   } catch (error) {
     lastFetchedAt = null;
-    showError(TEXT.down + String(error));  // never leave an old green screen standing
+    showError(error && error.name === "AbortError" ? TEXT.timeout : TEXT.down + String(error));  // never leave an old green screen standing
   } finally {
+    clearTimeout(giveUp);
     inFlight = false; $("refresh").disabled = false;
     clearTimeout(timer); timer = setTimeout(refresh, POLL_MS);  // the next poll starts after this one ended
     updateAge();
   }
 }
 
+for (const node of document.querySelectorAll("[data-text]")) node.textContent = lookup(node.dataset.text);
+for (const node of document.querySelectorAll("[data-title]")) node.title = lookup(node.dataset.title);
 $("refresh").addEventListener("click", refresh);
 setInterval(updateAge, 1000);
-legend();
 refresh();
 </script>
 </body>
