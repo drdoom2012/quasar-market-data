@@ -68,6 +68,46 @@ FUNDING_STATE_ORDER: Final = (
 )
 
 
+# Symbol detail (design 2026-11-06-symbol-detail-design.md). One series, rows instead of counts.
+CANDLES_PATH: Final = "/v1/candles"  # C§5
+OI_ROWS_PATH: Final = "/v1/open-interest"  # C§6.5 (the coverage endpoint is OI_PATH)
+RANGE_SLOTS: Final = {"1h": 12, "6h": 72, "24h": 288, "7d": 2016, "30d": 8640}  # 5m slots of each range
+OI_REFERENCE_SLOTS: Final = 12  # the open interest change is against the row one hour earlier
+FUNDING_MIN_SLOTS: Final = 2016  # funding is always read for at least 7 days (settlements are 8 h apart)
+PAGE_LIMIT: Final = 1000  # the contract maximum of a page (C§5.1)
+MAX_PAGES: Final = 12  # 30 days of 5m plus a lookback slot are 9 pages
+RANGE_TTL_S: Final = {"1h": 15.0, "6h": 15.0, "24h": 15.0, "7d": 60.0, "30d": 60.0}  # cache lifetime of a detail
+
+
+@dataclass(frozen=True, slots=True)
+class CandleRow:
+    t: int  # open time, epoch ms
+    o: str
+    h: str
+    l: str  # the field names of the document are o, h, l, c, v
+    c: str
+    v: str
+    turnover: str | None
+    conflicted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class OiRow:
+    t: int  # time_ms: the END of the period (C§6.5.1)
+    oi: str
+    value: str
+    conflicted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FundingRow:
+    t: int  # funding_time_ms: an instant
+    rate_type: str
+    rate: str
+    mark_price: str | None
+    conflicted: bool
+
+
 # The closed set of reasons an answer is not trusted (spec 5.6, 5.9, 5.10). ``api_error`` carries the API's own
 # ``error.code`` as its detail.
 INVALID_CODES: Final = frozenset(

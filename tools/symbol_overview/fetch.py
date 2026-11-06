@@ -1,4 +1,4 @@
-"""The only code that talks to the API: read-only GETs of five paths (spec 5.1, OI-6 design 8.1, FR-6 design 5)."""
+"""The only code that talks to the API: read-only GETs of seven paths (spec 5.1, OI-6 design 8.1, FR-6 design 5, detail design 5.2)."""
 
 import http.client
 from collections.abc import Callable
@@ -6,16 +6,21 @@ from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
 
 from tools.symbol_overview.model import (
+    CANDLES_PATH,
     FUNDING_LIMIT,
     FUNDING_PATH,
     MAX_BODY_BYTES,
     OI_PATH,
+    OI_ROWS_PATH,
+    PAGE_LIMIT,
     FundingWindow,
     InstrumentRow,
     Window,
 )
 
-ALLOWED_PATHS = frozenset({"/health/ingest", "/v1/instruments", "/v1/coverage", OI_PATH, FUNDING_PATH})
+ALLOWED_PATHS = frozenset(
+    {"/health/ingest", "/v1/instruments", "/v1/coverage", OI_PATH, FUNDING_PATH, CANDLES_PATH, OI_ROWS_PATH}
+)
 
 
 @dataclass(frozen=True)
@@ -68,8 +73,32 @@ def funding_path(instrument: InstrumentRow, window: FundingWindow) -> str:
     )
 
 
+def candles_path(instrument: InstrumentRow, start: int, end: int) -> str:
+    """One page of candles with exactly the documented parameters (C§5.1); same encoding as above."""
+    return (
+        f"{CANDLES_PATH}?venue={quote(instrument.venue, safe='')}&symbol={quote(instrument.symbol, safe='/:')}"
+        f"&timeframe={quote(instrument.timeframe, safe='')}&start={start}&end={end}&limit={PAGE_LIMIT}"
+    )
+
+
+def open_interest_rows_path(instrument: InstrumentRow, start: int, end: int) -> str:
+    """One page of open interest rows (C§6.5.2); ``start`` and ``end`` are period ENDS, ``end`` is exclusive."""
+    return (
+        f"{OI_ROWS_PATH}?venue={quote(instrument.venue, safe='')}&symbol={quote(instrument.symbol, safe='/:')}"
+        f"&period={quote(instrument.timeframe, safe='')}&start={start}&end={end}&limit={PAGE_LIMIT}"
+    )
+
+
+def funding_rows_path(instrument: InstrumentRow, start: int, end: int) -> str:
+    """One page of funding rows (C§6.7.2); the window is the closed interval ``[start, end]``."""
+    return (
+        f"{FUNDING_PATH}?venue={quote(instrument.venue, safe='')}&symbol={quote(instrument.symbol, safe='/:')}"
+        f"&start={start}&end={end}&limit={PAGE_LIMIT}"
+    )
+
+
 def http_fetch(base_url: str, timeout_s: float = 10.0) -> Fetch:
-    """A ``Fetch`` for the API at ``base_url``: GET only, five allowed paths, no redirects, capped body.
+    """A ``Fetch`` for the API at ``base_url``: GET only, seven allowed paths, no redirects, capped body.
 
     ``timeout_s`` applies to each socket operation, not to the whole call; the refresh deadline bounds the total.
     """

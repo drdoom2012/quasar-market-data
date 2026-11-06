@@ -5,7 +5,15 @@ import pytest
 
 from tests.tools.symbol_overview.fake_api import FakeApi, FakeReply
 from tests.tools.symbol_overview.helpers import T0, instrument
-from tools.symbol_overview.fetch import RawResponse, TransportError, coverage_path, http_fetch
+from tools.symbol_overview.fetch import (
+    RawResponse,
+    TransportError,
+    candles_path,
+    coverage_path,
+    funding_rows_path,
+    http_fetch,
+    open_interest_rows_path,
+)
 from tools.symbol_overview.model import MAX_BODY_BYTES
 from tools.symbol_overview.window import window_for
 
@@ -36,7 +44,9 @@ def test_coverage_path_percent_encodes(symbol: str, encoded: str) -> None:
         assert set(api.queries[0]) == {"venue", "symbol", "timeframe", "start", "end"}
 
 
-@pytest.mark.parametrize("path", ["/v1/candles?x=1", "/health", "//v1/coverage", "/v1/instruments/x", "v1/instruments"])
+@pytest.mark.parametrize(
+    "path", ["/v1/indicators?x=1", "/health", "//v1/coverage", "/v1/instruments/x", "v1/instruments"]
+)
 def test_http_fetch_refuses_other_paths(path: str) -> None:
     with FakeApi({}) as api:
         with pytest.raises(ValueError):
@@ -78,3 +88,51 @@ def test_a_redirect_is_not_followed() -> None:
     with FakeApi({"/health/ingest": lambda query: redirect, "/elsewhere": lambda query: OK}) as api:
         assert http_fetch(api.url)("/health/ingest").status == 302
         assert api.requests == ["/health/ingest"]
+
+
+def test_the_detail_paths_are_allowed() -> None:
+    routes = {path: (lambda query: OK) for path in ("/v1/candles", "/v1/open-interest", "/v1/funding-rates")}
+    with FakeApi(routes) as api:
+        fetch = http_fetch(api.url)
+        for path in (
+            candles_path(instrument(), W.start, W.end),
+            open_interest_rows_path(instrument(), W.start, W.end),
+            funding_rows_path(instrument(), W.start, W.end),
+        ):
+            assert fetch(path).status == 200
+
+
+def test_a_path_outside_the_allowlist_is_still_refused() -> None:
+    with FakeApi({}) as api:
+        for refused in ("/v1/indicators", "/v1/candles/", "/v1/open-interest/x"):
+            with pytest.raises(ValueError):
+                http_fetch(api.url)(refused)
+        assert api.requests == []
+
+
+def test_candles_path_has_exactly_the_documented_parameters() -> None:
+    assert candles_path(instrument(), 1792643400000, 1792673400000) == (
+        "/v1/candles?venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m&start=1792643400000&end=1792673400000&limit=1000"
+    )
+
+
+def test_open_interest_rows_path_has_exactly_the_documented_parameters() -> None:
+    assert open_interest_rows_path(instrument(), 1792643400000, 1792673400000) == (
+        "/v1/open-interest?venue=binance-usdm&symbol=BTC/USDT:USDT&period=5m&start=1792643400000&end=1792673400000&limit=1000"
+    )
+
+
+def test_funding_rows_path_has_exactly_the_documented_parameters() -> None:
+    assert funding_rows_path(instrument(), 1792643400000, 1792673400000) == (
+        "/v1/funding-rates?venue=binance-usdm&symbol=BTC/USDT:USDT&start=1792643400000&end=1792673400000&limit=1000"
+    )
+
+
+def test_the_detail_paths_percent_encode_the_symbol() -> None:
+    odd = instrument("A&B+C é/USDT:USDT")
+    for path in (
+        candles_path(odd, 1, 2),
+        open_interest_rows_path(odd, 1, 2),
+        funding_rows_path(odd, 1, 2),
+    ):
+        assert "symbol=A%26B%2BC%20%C3%A9/USDT:USDT&" in path
