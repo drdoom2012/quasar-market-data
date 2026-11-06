@@ -1,12 +1,15 @@
-# Production Compose project (S21). Two services share one SQLite WAL volume; the Collector is the only writer.
+# Production Compose project (S21). Three services: the Collector and the API share one SQLite WAL volume (the
+# Collector is the only writer); the symbol overview page has no volume and reads the API over the internal network.
 #
 # Deploy on the VPS (images come from GHCR; nothing is built there):
 #   docker compose pull && docker compose up -d
 # Reach the API from your machine over SSH (the API has no published port and no route out):
 #   ssh -L 8000:172.31.250.10:8000 <vps>     then   curl localhost:8000/health
+# Reach the symbol overview page the same way (read-only, no published port, no route out):
+#   ssh -L 8765:172.31.250.11:8765 <vps>     then open http://127.0.0.1:8765/
 # Local build instead of GHCR images:  docker compose -f compose.yaml -f compose.build.yaml up -d
 #
-# The volume stays writable for both services: a WAL reader needs the shared-memory file. The API is read-only at
+# The volume stays writable for the Collector and the API: a WAL reader needs the shared-memory file. The API is read-only at
 # the SQLite connection (mode=ro plus query_only), not by the mount (INV-014).
 
 name: quasar
@@ -77,3 +80,23 @@ services:
     # No init: uvicorn re-raises SIGTERM after its graceful shutdown, which exits 143 when it is not PID 1; as PID 1
     # it exits 0, so the exit code still tells a graceful stop from a kill. The API is read-only.
     logging: *logging
+
+  overview:
+    image: ghcr.io/drdoom2012/quasar-market-data-overview:v0.1.0
+    restart: unless-stopped
+    networks:
+      internal:
+        ipv4_address: 172.31.250.11
+    # 128 MiB is twice the largest measured process memory (44 MiB at 600 symbols, README "Overview refresh
+    # benchmark"), rounded up to 64 MiB; not yet measured in the image.
+    mem_limit: 128m
+    memswap_limit: 128m
+    # docker-init as PID 1 forwards SIGTERM: Python as PID 1 would ignore it, and every stop would wait for SIGKILL.
+    init: true
+    logging: *logging
+    # The page itself answers; its request log lines are the reason for the long interval.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/', timeout=3)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3

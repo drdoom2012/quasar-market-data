@@ -58,11 +58,11 @@ def test_a_valid_table_is_parsed() -> None:
     assert parse(table()) == FundingRateSettings(True, 30_000, 60_000, 150, 1, 86_400_000)
 
 
-def test_the_repository_configs_switch_funding_on_at_the_maximum_depth() -> None:
+def test_the_repository_configs_switch_funding_on_with_a_seven_day_backfill() -> None:
     for name in ("quasar.toml", "quasar.compose.toml"):
         path = REPO / "config" / name
         settings = parse_settings(path.read_text(), base_dir=REPO / "config").funding_rate
-        assert settings == FundingRateSettings(True, 30_000, 60_000, 150, 30, 86_400_000)
+        assert settings == FundingRateSettings(True, 30_000, 60_000, 150, 7, 86_400_000)
 
 
 @pytest.mark.parametrize("key", list(VALID_TABLE))

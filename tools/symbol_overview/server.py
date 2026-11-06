@@ -1,7 +1,7 @@
 """The local web server: the page, ``/overview.json``, and a refusal of everything else (spec 5.1).
 
-It binds the address it is given (the command line fixes ``127.0.0.1``), serves ``GET`` only, and shows a client no
-internals: a failure of the snapshot source is a generic ``500``.
+It binds the address it is given (the command line defaults to ``127.0.0.1``), serves ``GET`` only, and shows a client
+no internals: a failure of the snapshot source is a generic ``500``.
 """
 
 import json

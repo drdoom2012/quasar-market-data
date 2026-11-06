@@ -9,12 +9,23 @@ from typing import Any
 
 import pytest
 
-from tests.deploy.docker_cli import API_ADDRESS, IMAGES, PROD, REPO, TEST, resolved_config
+from tests.deploy.docker_cli import (
+    API_ADDRESS,
+    IMAGES,
+    OVERVIEW_ADDRESS,
+    OVERVIEW_IMAGE,
+    PROD,
+    REPO,
+    TEST,
+    resolved_config,
+)
 
 pytestmark = pytest.mark.compose
 
-SERVICES = ("api", "collector")
-GIB = 1024**3
+SERVICES = ("api", "collector")  # the data services: they share the volume and the config
+ALL_SERVICES = (*SERVICES, "overview")
+# Total mem_limit of all services: collector 384 MiB + api 576 MiB + overview 128 MiB (overview spec, section 6).
+MEMORY_BUDGET = 1088 * 1024**2
 
 
 @pytest.fixture(scope="module")
@@ -32,6 +43,25 @@ def test_api_is_on_the_internal_network_only(prod: dict[str, Any]) -> None:
     assert api["networks"]["internal"]["ipv4_address"] == API_ADDRESS
     assert "ports" not in api
     assert "network_mode" not in api
+
+
+def test_overview_is_on_the_internal_network_only(prod: dict[str, Any]) -> None:
+    overview = prod["services"]["overview"]
+    assert set(overview["networks"]) == {"internal"}
+    assert overview["networks"]["internal"]["ipv4_address"] == OVERVIEW_ADDRESS
+    for key in ("ports", "volumes", "depends_on", "network_mode"):
+        assert key not in overview
+
+
+def test_overview_runs_under_an_init_process(prod: dict[str, Any]) -> None:
+    # Python as PID 1 ignores SIGTERM without it, so every stop would wait 10 s and end in SIGKILL.
+    assert prod["services"]["overview"]["init"] is True
+
+
+def test_overview_healthcheck_is_a_local_page_request(prod: dict[str, Any]) -> None:
+    test = prod["services"]["overview"]["healthcheck"]["test"]
+    assert test[:3] == ["CMD", "python", "-c"]
+    assert "127.0.0.1:8765" in test[3]
 
 
 def test_internal_network_is_internal_with_the_fixed_subnet(prod: dict[str, Any]) -> None:
@@ -60,7 +90,7 @@ def test_both_services_mount_the_volume_rw_and_the_config_ro(prod: dict[str, Any
 
 def test_restart_limits_and_log_rotation(prod: dict[str, Any]) -> None:
     total = 0
-    for service in SERVICES:
+    for service in ALL_SERVICES:
         definition = prod["services"][service]
         assert definition["restart"] == "unless-stopped"
         limit = int(definition["mem_limit"])
@@ -69,10 +99,10 @@ def test_restart_limits_and_log_rotation(prod: dict[str, Any]) -> None:
         logging = definition["logging"]
         assert logging["driver"] == "json-file"
         assert {"max-size", "max-file"} <= set(logging["options"])
-    assert total <= GIB
+    assert total <= MEMORY_BUDGET
 
 
-@pytest.mark.parametrize("service", SERVICES)
+@pytest.mark.parametrize("service", ALL_SERVICES)
 def test_memory_limit_is_a_hard_cap_without_extra_swap(prod: dict[str, Any], service: str) -> None:
     # Without memswap_limit Docker allows swap equal to mem_limit, which doubles the cap on the 2 GB VPS.
     definition = prod["services"][service]
@@ -102,7 +132,7 @@ def test_collector_healthcheck_is_the_process_check(prod: dict[str, Any]) -> Non
     assert "healthcheck" not in prod["services"]["api"]
 
 
-@pytest.mark.parametrize("service", SERVICES)
+@pytest.mark.parametrize("service", ALL_SERVICES)
 def test_entrypoints_are_exec_form(prod: dict[str, Any], service: str) -> None:
     # Compose resolves an unset entrypoint or command to null; the image's exec-form values then apply.
     definition = prod["services"][service]
@@ -112,19 +142,20 @@ def test_entrypoints_are_exec_form(prod: dict[str, Any], service: str) -> None:
 
 def test_production_images_pin_the_project_version(prod: dict[str, Any]) -> None:
     version = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-    for service in SERVICES:
+    for service in ALL_SERVICES:
         expected = f"ghcr.io/drdoom2012/quasar-market-data-{service}:v{version}"
         assert prod["services"][service]["image"] == expected
 
 
 def test_build_override_changes_only_the_image(prod: dict[str, Any]) -> None:
     test = resolved_config(*TEST)
-    for service in SERVICES:
-        assert test["services"][service]["image"] == IMAGES[service]
+    images = {**IMAGES, "overview": OVERVIEW_IMAGE}
+    for service in ALL_SERVICES:
+        assert test["services"][service]["image"] == images[service]
         assert test["services"][service]["build"]["target"] == service
     stripped_prod, stripped_test = copy.deepcopy(prod), copy.deepcopy(test)
     for config in (stripped_prod, stripped_test):
-        for service in SERVICES:
+        for service in ALL_SERVICES:
             config["services"][service].pop("image", None)
             config["services"][service].pop("build", None)
     assert stripped_test == stripped_prod

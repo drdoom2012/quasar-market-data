@@ -1,7 +1,8 @@
-"""Isolation of the api service, checked against the running production Compose project (S21 spec 5.6).
+"""Isolation of the api and overview services, checked against the running production Compose project (S21 spec 5.6).
 
 The project is ``compose.yaml`` with only the image source swapped by ``compose.build.yaml``. The Collector service is
 never started (no exchange call); one-off ``collector`` containers seed the volume and run the positive egress control.
+The overview service (a third container with no volume, reaching the API by IP) gets the same network checks.
 
 What this proves: in this Compose file on this engine, the api container had no route out and the probed TCP, UDP
 and DNS attempts failed at the time of the run, while the host reached it and unauthorized containers did not. It
@@ -12,6 +13,7 @@ import json
 import os
 import subprocess
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -20,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from tests.deploy.docker_cli import API_ADDRESS, API_PORT, IMAGES, TEST, docker
+from tests.deploy.docker_cli import API_ADDRESS, API_PORT, IMAGES, OVERVIEW_ADDRESS, OVERVIEW_PORT, TEST, docker
 
 pytestmark = pytest.mark.compose
 
@@ -52,6 +54,17 @@ def get(path: str) -> tuple[int, Any]:
         return response.status, json.loads(response.read())
 
 
+def get_overview(path: str) -> tuple[int, Any]:
+    """(status, parsed body); an HTTP error status is a result here, so a 502 shows its ``api_error`` body."""
+    # 90 s: the first refresh over the 522 shipped symbols takes ~15-19 s; the tool's own deadline is 60 s.
+    try:
+        with urllib.request.urlopen(f"http://{OVERVIEW_ADDRESS}:{OVERVIEW_PORT}{path}", timeout=90) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        with error:
+            return error.code, json.loads(error.read())
+
+
 def container_id(service: str) -> str:
     return compose("ps", "-a", "-q", service).strip()
 
@@ -62,7 +75,7 @@ def project() -> Iterator[Project]:
     if any(name in operating_system for name in NOT_STOCK):
         pytest.fail(f"the isolation test needs a stock Linux Docker Engine; this engine is {operating_system!r}")
     compose("down", "-v", check=False)
-    compose("up", "-d", "--no-build", "api")
+    compose("up", "-d", "--no-build", "api", "overview")
     try:
         seeded = docker(
             *COMPOSE, "run", "--rm", "--no-deps", "-T", "--entrypoint", "python", "collector", "-", DB,
@@ -77,6 +90,18 @@ def project() -> Iterator[Project]:
                 pass
             if time.monotonic() > deadline:
                 pytest.fail("the api did not answer /health on its fixed address within 30 s")
+            time.sleep(1)
+        # Wait on the page, not on /overview.json: the overview keeps a snapshot, errors included, for 15 s.
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                with urllib.request.urlopen(f"http://{OVERVIEW_ADDRESS}:{OVERVIEW_PORT}/", timeout=5) as response:
+                    if response.status == 200:
+                        break
+            except OSError:
+                pass
+            if time.monotonic() > deadline:
+                pytest.fail("the overview did not answer GET / on its fixed address within 30 s")
             time.sleep(1)
         yield Project(seeded.returncode, seeded.stdout + seeded.stderr)
     finally:
@@ -103,6 +128,14 @@ def test_host_reaches_the_api_and_gets_seeded_candles(project: Project) -> None:
     status, ingest = get("/health/ingest")
     assert status == 200
     assert ingest["series_count"] == 1
+
+
+def test_host_reaches_the_overview_and_it_sees_the_seeded_symbol(project: Project) -> None:
+    # The overview reached the API over the internal network by IP (no DNS). First request of /overview.json, after
+    # the seed has finished.
+    status, body = get_overview("/overview.json")
+    assert status == 200, body
+    assert "BTC/USDT:USDT" in [entry["symbol"] for entry in body["symbols"]]
 
 
 def test_probe_succeeds_from_the_collector(project: Project) -> None:
@@ -143,6 +176,24 @@ def test_api_has_no_route_and_no_egress(project: Project) -> None:
     assert result["udp_dns"] == "fail:ENETUNREACH"
 
 
+def test_running_overview_has_exactly_the_internal_network(project: Project) -> None:
+    settings = json.loads(docker("inspect", container_id("overview")).stdout)[0]["NetworkSettings"]
+    assert list(settings["Networks"]) == [f"{PROJECT}_internal"]
+    assert settings["Networks"][f"{PROJECT}_internal"]["IPAddress"] == OVERVIEW_ADDRESS
+    assert [binding for binding in (settings.get("Ports") or {}).values() if binding] == []
+    network = json.loads(docker("network", "inspect", f"{PROJECT}_internal").stdout)[0]
+    assert network["Internal"] is True
+
+
+def test_overview_has_no_route_and_no_egress(project: Project) -> None:
+    result = egress(*COMPOSE, "exec", "-T", "overview", "python")
+    assert result["default_route"] is False
+    assert result["ipv6_global"] is False
+    for key in ("tcp_ip", "tcp_name", "udp_dns", "resolve"):
+        assert result[key].startswith("fail:"), (key, result)
+    assert result["udp_dns"] == "fail:ENETUNREACH"
+
+
 def test_unauthorized_containers_cannot_reach_the_api(project: Project) -> None:
     probe = ["run", "--rm", "-i", "--entrypoint", "python"]
     target = ["-", "http", API_ADDRESS, str(API_PORT), "/health"]
@@ -174,6 +225,13 @@ def test_engine_installed_the_isolation_rules(project: Project) -> None:
     assert backend == "iptables" and not missing, (
         f"engine {engine}, backend {backend}: expected rules {missing or expected} not found\n{dump}"
     )
+
+
+def test_overview_stops_on_sigterm(project: Project) -> None:
+    # docker-init as PID 1 forwards SIGTERM; Python as PID 1 would ignore it and wait for the 10 s SIGKILL.
+    started = time.monotonic()
+    compose("stop", "-t", "10", "overview")
+    assert time.monotonic() - started < 10
 
 
 def test_api_stops_on_sigterm(project: Project) -> None:

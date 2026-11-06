@@ -71,7 +71,7 @@ Collector and API are **separate processes**, built from one repository and depl
 | HTTP interface | FastAPI |
 | Persistence | SQLite in WAL mode |
 | Async orchestration | `asyncio` |
-| Deployment | Docker Compose; separate Collector and API services |
+| Deployment | Docker Compose; separate Collector, API and overview services |
 
 These are implementation choices, not guarantees of exchange capabilities or data precision. Exchange support and data semantics must be verified per venue and data type.
 
@@ -181,9 +181,9 @@ Query limits, pagination, errors, response schemas and freshness semantics belon
 
 ## 9. Operational model and security
 
-- One repository; two independent Docker services/images or entrypoints: `collector` and `api`.
-- Collector can run without API; restarting/deploying API must not restart Collector.
-- Both access one local persistent SQLite volume, with API read-only at the SQLite connection level.
+- One repository; the data core is two independent Docker services/images or entrypoints: `collector` and `api`. The symbol overview page (`tools/symbol_overview`) is a third service with its own image: a read-only consumer of the API over HTTP, with no volume and no route out.
+- Collector can run without API or the overview; restarting/deploying API must not restart Collector; restarting the overview restarts neither.
+- Collector and API both access one local persistent SQLite volume, with API read-only at the SQLite connection level.
 - Structured logs, counters and health checks for ingest lag, coverage, adapter failures, retries and backlog.
 - No private trading credentials or trading functionality; public data endpoints require no trade keys.
 - Bind API to localhost or a private network by default; secure any external exposure.

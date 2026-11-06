@@ -13,7 +13,7 @@ from quasar_market_data.config.settings import (
     Rule,
     load_settings,
 )
-from tests.config_files import TEN_SYMBOLS, write_config
+from tests.config_files import write_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,11 +42,14 @@ def test_the_committed_file_loads() -> None:
     loaded = load_settings(REPO_ROOT / "config" / "quasar.toml")
     s = loaded.settings
     assert s.database_path == REPO_ROOT / "data" / "quasar.db"
-    assert s.venues[0].symbols == TEN_SYMBOLS
+    symbols = s.venues[0].symbols
+    assert len(symbols) == 522
+    assert len(set(symbols)) == 522
+    assert (symbols[0], symbols[-1]) == ("0G/USDT:USDT", "龙虾/USDT:USDT")
     # today's switch values (spec 5.3)
     assert (s.rule, s.collector, s.api) == (
         Rule(15_000, 60_000),
-        CollectorSettings(100, 4, 100, Backfill(True, 30)),
+        CollectorSettings(100, 4, 100, Backfill(True, 7)),
         ApiSettings("127.0.0.1", 8000),
     )
 

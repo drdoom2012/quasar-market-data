@@ -1,7 +1,8 @@
 name: images
 
-# S21: build both images, run the compose suite (images, Compose file, isolation test against the running production
-# project) on the runner's stock Docker Engine, and push to GHCR from pushes only. Deployment stays manual.
+# S21: build the three images (collector, api, overview), run the compose suite (images, Compose file, isolation test
+# against the running production project) on the runner's stock Docker Engine, and push to GHCR from pushes only.
+# Deployment stays manual.
 # The v<version> tag that compose.yaml pins exists in GHCR only after a pushed tag v<version> whose push job succeeded.
 
 on:
@@ -56,7 +57,7 @@ jobs:
       - name: Tag and push
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then tags="${GITHUB_REF_NAME} sha-${GITHUB_SHA}"; else tags="main sha-${GITHUB_SHA}"; fi
-          for name in collector api; do
+          for name in collector api overview; do
             for tag in ${tags}; do
               docker tag "quasar-market-data-${name}:local" "ghcr.io/drdoom2012/quasar-market-data-${name}:${tag}"
               docker push "ghcr.io/drdoom2012/quasar-market-data-${name}:${tag}"

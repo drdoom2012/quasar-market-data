@@ -68,7 +68,7 @@ def test_dockerfile_pins_base_images_by_digest() -> None:
     dockerfile = text(REPO / "Dockerfile")
     bases = re.findall(r"^FROM (\S+)", dockerfile, re.MULTILINE) + re.findall(r"COPY --from=(\S+)", dockerfile)
     external = [b for b in bases if "/" in b or ":" in b]
-    assert len(external) == 3
+    assert len(external) == 4  # builder, overview and runtime bases plus the uv image
     for base in external:
         assert re.search(r"@sha256:[0-9a-f]{64}$", base), base
 

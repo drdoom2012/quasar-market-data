@@ -11,7 +11,7 @@ import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SERVICES = ("api", "collector")
+SERVICES = ("api", "collector", "overview")
 
 
 def project_version() -> str:
@@ -24,6 +24,6 @@ def pinned_images() -> list[str]:
     return sorted(re.findall(r"^\s*image:\s*(\S+)\s*$", text, flags=re.MULTILINE))
 
 
-def test_compose_pins_exactly_the_two_images_at_the_project_version() -> None:
+def test_compose_pins_exactly_the_three_images_at_the_project_version() -> None:
     expected = sorted(f"ghcr.io/drdoom2012/quasar-market-data-{name}:v{project_version()}" for name in SERVICES)
     assert pinned_images() == expected

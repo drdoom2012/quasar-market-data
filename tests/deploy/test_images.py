@@ -1,4 +1,8 @@
-"""The collector and api images: entrypoints, platform, user, SQLite, TA-Lib, no local state (S21 spec 5.1)."""
+"""The collector and api images: entrypoints, platform, user, SQLite, TA-Lib, no local state (S21 spec 5.1).
+
+`IMAGES` is the two data images, so these parametrized tests do not see the symbol overview image; its own checks
+are in `test_overview_image.py`.
+"""
 
 from importlib.metadata import version
 

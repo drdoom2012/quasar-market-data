@@ -13,3 +13,9 @@ services:
       context: .
       target: api
       platforms: [linux/amd64]
+  overview:
+    image: quasar-market-data-overview:local
+    build:
+      context: .
+      target: overview
+      platforms: [linux/amd64]

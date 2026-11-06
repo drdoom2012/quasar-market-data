@@ -163,4 +163,4 @@ def test_the_collector_derives_the_adr_cadence_from_the_parsed_file(count: int, 
 def test_the_shipped_files_switch_open_interest_on(name: str) -> None:
     path = REPO / "config" / name
     parsed = parse_settings(path.read_text(encoding="utf-8"), base_dir=path.parent)
-    assert parsed.open_interest == OpenInterestSettings(True, "5m", 15_000, 200_000, 400, 29)
+    assert parsed.open_interest == OpenInterestSettings(True, "5m", 15_000, 200_000, 400, 7)

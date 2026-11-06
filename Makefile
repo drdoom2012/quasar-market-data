@@ -92,10 +92,11 @@ ARGS ?=
 bench-overview:
 	uv run python -m tests.api.bench_overview_refresh --series $(SERIES) --profile $(OVERVIEW_PROFILE) --oi-mode $(OI_MODE) --funding-mode $(FUNDING_MODE) $(ARGS)
 
-# Builds the collector and api images (linux/amd64) with local tags; needs Docker, not part of `check`.
+# Builds the collector, api and overview images (linux/amd64) with local tags; needs Docker, not part of `check`.
 images:
 	docker build --platform linux/amd64 --target collector -t quasar-market-data-collector:local .
 	docker build --platform linux/amd64 --target api -t quasar-market-data-api:local .
+	docker build --platform linux/amd64 --target overview -t quasar-market-data-overview:local .
 
 # Images, the Compose file and the isolation test against the running production project (S21); not part of `check`.
 # The isolation tests need a stock Linux Docker Engine (not OrbStack or Docker Desktop).
