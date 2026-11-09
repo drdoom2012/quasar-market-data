@@ -627,6 +627,28 @@ def test_the_price_axis_has_the_decimals_of_the_stored_strings() -> None:
 
 
 @needs_node
+def test_the_price_axis_groups_thousands_and_keeps_the_fixed_decimals() -> None:
+    nbsp = " "
+    assert call("axisPriceText(74254.1, 1)") == f"74{nbsp}254.1"
+    assert call("axisPriceText(76500, 1)") == f"76{nbsp}500.0"  # fixed decimals, unlike the quantity axis
+    assert call("axisPriceText(0.02654, 6)") == "0.026540"
+    assert call("axisPriceText(0.00000843, 8)") == "0.00000843"
+    assert call("axisPriceText(1234567, 0)") == f"1{nbsp}234{nbsp}567"
+    assert call("axisPriceText(-1500.25, 2)") == f"-1{nbsp}500.25"
+
+
+@needs_node
+def test_the_open_interest_axis_groups_thousands_and_drops_zero_decimals() -> None:
+    nbsp = "\u00a0"
+    assert call("axisQuantityText(3800000, 1)") == f"3{nbsp}800{nbsp}000"
+    assert call("axisQuantityText(3600214, 1)") == f"3{nbsp}600{nbsp}214"
+    assert call("axisQuantityText(3607581.8, 1)") == f"3{nbsp}607{nbsp}581.8"
+    assert call("axisQuantityText(1234.5, 3)") == f"1{nbsp}234.5"
+    assert call("axisQuantityText(0, 0)") == "0"
+    assert call("axisQuantityText(100, 0)") == "100"  # no decimals at all: the zeros of the integer stay
+
+
+@needs_node
 def test_colors_with_alpha_come_from_hex_and_anything_else_is_left_alone() -> None:
     assert call("withAlpha('#22c55e', 0.45)") == "rgba(34, 197, 94, 0.45)"
     assert call("withAlpha(' #3B82F6 ', 0.02)") == "rgba(59, 130, 246, 0.02)"

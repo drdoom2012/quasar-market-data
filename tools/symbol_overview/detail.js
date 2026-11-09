@@ -288,6 +288,19 @@ function fundingPoints(rows, colors) {
   return { points, special };
 }
 
+// An axis or last-value label of the open interest quantity, like the page's other numbers: thousands separators and no
+// trailing zero decimals ("3800000.0" -> "3 800 000"). A label only; the exact stored strings stay in the tooltip.
+function axisQuantityText(value, places) {
+  const fixed = Number(value).toFixed(places);
+  return groupDecimal(fixed.includes(".") ? fixed.replace(/\.?0+$/, "") : fixed);
+}
+
+// An axis or last-value label of the price: thousands separators and the fixed decimals of the stored prices
+// ("74254.1" -> "74 254.1", "0.026540" stays). A label only; the exact stored strings stay in the tooltip.
+function axisPriceText(value, places) {
+  return groupDecimal(Number(value).toFixed(places));
+}
+
 // The decimals a price axis needs, from the exact strings of the rows (at most 8): a chart never rounds a stored price
 // to two places because that is the library's default.
 function decimalPlaces(texts) {
@@ -550,7 +563,7 @@ function detailBuildChart(box, doc, models, colors, data, layout) {
     const places = data.places[0];
     state.series.candles = chart.addSeries(LW.CandlestickSeries, {
       upColor: colors.up, downColor: colors.down, borderUpColor: colors.up, borderDownColor: colors.down, wickUpColor: colors.up, wickDownColor: colors.down,
-      priceFormat: { type: "price", precision: places, minMove: Math.pow(10, -places) },
+      priceFormat: { type: "custom", formatter: (v) => axisPriceText(v, places), minMove: Math.pow(10, -places) },
     }, pane);
     state.series.volume = chart.addSeries(LW.HistogramSeries, { priceScaleId: "", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false }, pane);
     state.series.volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
@@ -560,7 +573,7 @@ function detailBuildChart(box, doc, models, colors, data, layout) {
   if (models[1].draw) {
     state.series.area = chart.addSeries(LW.AreaSeries, {
       lineColor: colors.accent, topColor: withAlpha(colors.accent, 0.35), bottomColor: withAlpha(colors.accent, 0.02),
-      priceFormat: { type: "price", precision: data.places[1], minMove: Math.pow(10, -data.places[1]) },
+      priceFormat: { type: "custom", formatter: (v) => axisQuantityText(v, data.places[1]), minMove: Math.pow(10, -data.places[1]) },
     }, pane);
     shown.push(0.25);
     pane += 1;
