@@ -5,7 +5,7 @@
   schema (P-11) is contract section 6.5 of `docs/contracts/api-v1.md`, approved by the user on 2026-11-03 and implemented by OI-5. Amendment A-1 (2026-11-02, approved by
   the user): the 100-row transaction criterion of P-9 is checked from production measurements after OI-4, not by
   a benchmark in OI-2 (see the revision history). Amendment A-2 (2026-11-03, approved by the user with contract section 6.6): a per-run gap listing for open interest and the split
-  of the OI-6 slice (see the revision history). Amendment A-4 (2026-11-04, by the user's explicit instruction): the retrieval horizon `H` is the new configuration key `backfill_days` (1 to 30, a larger value stops the process at start), no longer the constant 29 days (see the revision history). Amendment A-3 (2026-11-03 approved, 2026-11-04 applied, ADR-0004 O-6): the open interest task shares the Collector's `ExtensionPause` with funding, so a `429` or `418` seen by either dataset stops both. OI-6a (the endpoint, contract section 6.6) and OI-6b (the overview page) are implemented on one branch at the user's request (one pull request, not two); the OI-6b gate of P-16 (the benchmark numbers read and approved by the user) is recorded in the OI-6 design, section 14: the numbers are measured, the user's reading of them is pending.
+  of the OI-6 slice (see the revision history). Amendment A-4 (2026-11-04, by the user's explicit instruction): the retrieval horizon `H` is the new configuration key `backfill_days` (1 to 30, a larger value stops the process at start), no longer the constant 29 days (see the revision history). Amendment A-3 (2026-11-03 approved, 2026-11-04 applied, ADR-0004 O-6): the open interest task shares the Collector's `ExtensionPause` with funding, so a `429` or `418` seen by either dataset stops both. Amendment A-5 (2026-11-14, approved by the user with ADR-0005): one stamp per transaction taken by the writer, a single-row confirmation after each commit (P-9), schema version 4 (see the revision history). OI-6a (the endpoint, contract section 6.6) and OI-6b (the overview page) are implemented on one branch at the user's request (one pull request, not two); the OI-6b gate of P-16 (the benchmark numbers read and approved by the user) is recorded in the OI-6 design, section 14: the numbers are measured, the user's reading of them is pending.
 - **Date:** 2026-11-02
 - **Scope:** collecting, storing and serving Binance USDT-M open interest history at a 5m period for the
   configured symbols. It is the first extension dataset (`docs/architecture.md` §7); funding, liquidations and
@@ -121,6 +121,8 @@ Rules [P]:
 
 ### P-6 Schema version 2
 
+*Amended by A-5 (2026-11-14): `ingested_at_ms` is the stamp of the row's write transaction, taken by the writer under the lock, and schema version 4 adds a registration trigger on both tables of this section (ADR-0005 P-2, P-3).*
+
 One new migration, `002_open_interest.sql`, following ADR-0002 exactly (STRICT, natural key, `WITHOUT ROWID`,
 immutability triggers, conflicts table, the same `<decimal-shape>` check):
 
@@ -204,6 +206,8 @@ Effect of a conflict [P]:
   keeps its meaning.
 
 ### P-9 Isolation from candle collection
+
+*Amended by A-5 (2026-11-14): a candle write waits for at most one open interest transaction plus its single-row confirmation (ADR-0005 P-6).*
 
 The goal: enabling open interest must not make a candle round later, or make a candle fail. Two kinds of
 isolation are kept apart.
@@ -706,3 +710,19 @@ were throwaway in the session scratchpad and are not in the repository.
   (E-4: 30 days accepted, 31 rejected, and the edge may vary with the server clock): a refused request is a failed
   page and is retried, so use 30 only knowingly. Existing configuration files that enable open interest must add the
   key (every key is required, P-13); `config/quasar.toml` and `config/quasar.compose.toml` do.
+- **Amendment A-5** (2026-11-14, approved by the user together with ADR-0005, row readability):
+  1. **Stamp.** One stamp per page (`open_interest_task.py:805`, `fetch_open_interest_once.py:131`) is replaced by
+     one stamp per transaction. The writer takes it after `BEGIN IMMEDIATE`, and the caller no longer passes
+     `ingested_at_ms`. The rows of a split page therefore no longer share a stamp taken before the first transaction
+     (ADR-0005 P-3).
+  2. **Not stored.** A transaction older than `B − M` at `COMMIT` is rolled back and restamped. After the retry limit
+     the writer raises a new "not stored" error, which the task treats as a failed page and retries as today. It is
+     never fatal.
+  3. **P-9 isolation.** After each committed data transaction the writer takes the lock a second time for a
+     single-row confirmation. A candle write therefore waits for at most one open interest transaction **plus its
+     confirmation**, not one transaction. The P-9 benchmark (`make bench-oi-write`) measures the pair (ADR-0005 P-6,
+     RB-4).
+  4. **P-6 schema.** `open_interest` and `open_interest_conflicts` gain the registration trigger of schema version 4
+     (ADR-0005 P-2). The deployment follows P-14, schema 3 → 4.
+  5. **Unchanged:** the identity, the eligibility, the slot states, the cadence, the budget, the endpoints. The
+     contract gains `readable_by_ms` and `readable_by_unconfirmed` per row (contract §4.1, §6.5.4).

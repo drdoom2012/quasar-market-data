@@ -219,3 +219,15 @@ was found, what is wrong, and a suggested fix. Remove an entry when it is fixed 
 - **Where:** `tools/symbol_overview/page.html` (every name in "Needs attention" and "Healthy" links to `#/symbol/<symbol>?venue=...&timeframe=...`).
 - **What:** the links lead nowhere (the hash changes, nothing is drawn). The 30-day strips, the strip legend, the per-symbol history start and the per-symbol funding line were removed from the overview by the redesign (they live in git history, in the commit before `feat(overview): redesign the page as a dashboard`); `/overview.json` still carries `strip`, `oldest_*`, `newest_*` and the funding fields. A tool that hangs or a tunnel that stalls now shows the error state after 90 s instead of waiting for ever.
 - **Fix (done):** the detail view takes state, reasons, history start and coverage from `/overview.json` (plus two additive fields, `present_slots`) and its rows from a new read-only route of the tool, `/detail.json`, which pages the API's existing `/v1/candles`, `/v1/open-interest` and `/v1/funding-rates`; the hash carries venue and timeframe because a symbol name can occur in more than one series. The API did not change.
+
+## From the row readability request (2026-11-14, Sentaris Engine)
+
+### F-25. Possible later requests from Sentaris, not scheduled
+
+- **Where:** `docs/requests/2026-11-14-expose-ingestion-time.md` section 4, `…-reply-2.md` section 2; ADR-0005 P-2, P-9.
+- **What:** the consumer named three possible later requests. None of them is needed for row readability (contract section 4.1):
+  - **`first_seen_at_ms` of conflict records**, with the meaning of `readable_by_ms`. It would let the consumer judge "conflicted as known at `as_of`". The stamps of conflict records are already registered under schema 4; they need a bound and an API field.
+  - **When a confirmation became readable.** It would remove the one remaining difference between live and replay (a confirmation written after a live read). `write_confirmations.confirmed_at_ms` is stored since schema 4 for this purpose; its bound (presumably `+ B` with the same check) is not defined yet.
+  - **The publication delay in force when a row was written**, so the consumer can check its own delay against it.
+- **Fix:** each needs its own request, contract section and approval.
+
