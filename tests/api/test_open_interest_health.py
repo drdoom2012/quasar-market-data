@@ -13,6 +13,7 @@ from quasar_market_data.api.health_reader import (
     _CONFLICT_PROBE,
     _NEWEST_OI,
     _NEXT_OI_SERIES,
+    _UNCONFIRMED,
     read_ingest_snapshot,
 )
 from quasar_market_data.collector.open_interest_writer import OpenInterestWriter
@@ -36,6 +37,8 @@ from tests.api.test_health_universe import AS_OF as GOLDEN_AS_OF
 from tests.api.test_health_universe import GOLDEN, golden_database, s17_fields
 from tests.api.test_open_interest_endpoint import contract_example
 from tests.config_files import TEN_SYMBOLS
+
+READABILITY_COUNT = _UNCONFIRMED.split(" WHERE ")[0]  # the one statement of 6.2.4 that names every table
 
 P5 = Timeframe("5m")
 TF = 300_000
@@ -163,8 +166,8 @@ def test_a_disabled_answer_issues_no_open_interest_statement(tmp_path: Path) -> 
     ingest(path, (), open_interest=None, open_connection=traced)
 
     assert log and not any(
-        "open_interest" in statement for statement in log if "write_transactions" not in statement
-    )  # the readability object names every table (6.2.4)
+        "open_interest" in statement for statement in log if not statement.startswith(READABILITY_COUNT)
+    )  # only the readability count names every table (6.2.4)
 
 
 # --- counts and status --------------------------------------------------------------------------------------

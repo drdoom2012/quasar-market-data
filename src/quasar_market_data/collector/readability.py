@@ -97,7 +97,9 @@ class TransactionStamper:
         """
         self._pending.clear()  # the pending confirmations were inserted by the committed transaction
         elapsed_ns = self._monotonic_ns() - stamp.t0_ns
-        if elapsed_ns > READABLE_BOUND_MS * _NS_PER_MS:
+        # The stamp is the wall clock rounded down to the millisecond, so the true instant at t0 may lie up to 1 ms
+        # after it: confirm only when COMMIT ended at least 1 ms before stamp + B.
+        if elapsed_ns + _NS_PER_MS > READABLE_BOUND_MS * _NS_PER_MS:
             self._logger.error(
                 "readability bound exceeded, rows stay unconfirmed: table=%s stamp_ms=%d duration_ms=%d %s",
                 self._dataset,

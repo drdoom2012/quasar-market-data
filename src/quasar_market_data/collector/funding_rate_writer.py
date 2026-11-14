@@ -298,6 +298,8 @@ class FundingRateWriter:
             self._conn.execute("BEGIN IMMEDIATE")
             locked = self._monotonic_ns()
             if rows:
+                if merge is not None:
+                    self._conn.execute("SAVEPOINT funding_rows")  # undone below when the rows store nothing new
                 stamp = self._stamper.register()
                 for row in rows:
                     key = row.key
@@ -321,6 +323,12 @@ class FundingRateWriter:
                             newly_recorded=recorded,
                         )
                     )
+            if merge is not None and stamp is not None and inserted == 0 and not recorded_any:
+                # only duplicates: drop the registration, keep the merge (it advances verified_at_ms)
+                self._conn.execute("ROLLBACK TO funding_rows")
+                stamp = None
+            if merge is not None and rows:
+                self._conn.execute("RELEASE funding_rows")
             if merge is not None:
                 span_before, span_after = self._merge_span_statements(merge)
             elif inserted == 0 and not recorded_any:

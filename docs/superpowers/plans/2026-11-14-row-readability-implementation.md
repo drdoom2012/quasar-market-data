@@ -267,3 +267,18 @@ One commit per slice, with `make check` green before each. The pre-commit hook r
   handling, and failed with it.
 - **Benchmarks:** ADR-0005 *Evidence*. The readability read is about 68 of the 80 to 87 ms of `/health/ingest` at
   600 symbols. That is within the 250 ms gate, so the 24 h window is kept.
+
+## 9. Code review (2026-11-14, independent, Opus, read-only): findings and how they were applied
+
+No blocker and no major. Applied:
+
+1. **Bound off by up to 1 ms.** The stamp is the wall clock rounded down to the millisecond, so a confirmed row's
+   bound could be false by up to 1 ms. A confirmation now needs the commit to end at least 1 ms before `stamp + B`.
+   Boundary tests cover `B − 1 ms`, `B − 1 ms + 1 ns` and `B`, and a mutant without the millisecond fails them.
+2. **ADR-0005 P-3 step 7 wording** about the retry after an outcome-unknown `COMMIT` is corrected. The amendment
+   note lists the change.
+3. **Relaxed health assertion.** The two "no open interest statement" tests now exclude only the readability count
+   statement (`health_reader._UNCONFIRMED`), not every statement that names `write_transactions`.
+4. **Wrong file name** in the `test_health_reader` docstring: fixed.
+5. **Funding merge page of duplicates.** It no longer registers a stamp that no row carries: the rows' part is
+   rolled back to a savepoint and the merge commits. A test covers it.

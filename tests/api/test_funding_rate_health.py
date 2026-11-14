@@ -13,6 +13,7 @@ from quasar_market_data.api.health_reader import (
     _FUNDING_CONFLICT_PROBE,
     _NEWEST_FUNDING,
     _NEXT_FUNDING_SPAN,
+    _UNCONFIRMED,
 )
 from quasar_market_data.domain.funding_rate_coverage import FundingRateRule, behind_after_ms
 from quasar_market_data.domain.open_interest_coverage import OpenInterestRule
@@ -28,6 +29,8 @@ from tests.api.seed import (
 from tests.api.test_funding_rate_endpoint import contract_example
 from tests.api.test_health_universe import AS_OF as GOLDEN_AS_OF
 from tests.api.test_health_universe import GOLDEN, golden_database, s17_fields
+
+READABILITY_COUNT = _UNCONFIRMED.split(" WHERE ")[0]  # the one statement of 6.2.4 that names every table
 
 DAY = 86_400_000
 H = 3_600_000
@@ -155,8 +158,8 @@ def test_funding_enabled_with_open_interest_disabled_issues_no_open_interest_sta
     log = traced_log(path)
 
     assert not any(
-        "open_interest" in statement for statement in log if "write_transactions" not in statement
-    )  # the readability object names every table (6.2.4)
+        "open_interest" in statement for statement in log if not statement.startswith(READABILITY_COUNT)
+    )  # only the readability count names every table (6.2.4)
     body = ingest(path, open_interest=None)
     assert body["open_interest"] is None and body["funding_rate"]["series_count"] == 1
 

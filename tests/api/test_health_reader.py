@@ -20,7 +20,7 @@ S = 1792643400000
 
 
 def read_ingest(path: Path, **kwargs: Any) -> tuple[StoredSeries, ...]:
-    """The series part of ``database.read_ingest`` (its readability facts are tested in test_readability_health)."""
+    """The series part of ``database.read_ingest`` (its readability facts are tested in test_readability_rows)."""
     return read_ingest_with_readability(path, as_of_ms=AT, **kwargs)[0]
 
 

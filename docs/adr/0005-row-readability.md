@@ -135,7 +135,8 @@ CREATE TABLE write_confirmations (
   later request to expose when a confirmation became readable (reply 2 §2) would define its bound, presumably `+ B`
   with the same check, without a second migration.
 - **No empty transactions.** A transaction that inserted no row, recorded no conflict and merged no funding span is
-  rolled back, not committed. It registers nothing.
+  rolled back, not committed. It registers nothing. A funding transaction whose rows are all duplicates but that
+  carries a merge commits the merge without a registration (the rows' part is rolled back to a savepoint).
 - The rows already stored are not touched. The migration is additive.
 - **Growth (estimate, not measured).** About 40 bytes per key in each of the two tables. Live candle collection
   stores about one new row per symbol per round:
@@ -160,11 +161,12 @@ CREATE TABLE write_confirmations (
 
    A row is never committed with a stamp older than `B − M` at `COMMIT`.
 5. `COMMIT`. `t1 = monotonic`.
-6. `t1 − t0 ≤ B`: write the confirmation in its own short transaction on the same connection. `t1 − t0 > B`: no
-   confirmation. Log an error line with the table, the stamp, the list of series, the time range of the rows and the
+6. `t1 − t0 ≤ B − 1 ms`: write the confirmation in its own short transaction on the same connection. Otherwise no
+   confirmation. (The stamp is the wall clock rounded down to the millisecond, so the instant at `t0` can lie up to
+   1 ms after it; the millisecond keeps `stamp + B` a true bound.) Log an error line with the table, the stamp, the list of series, the time range of the rows and the
    duration.
-7. An outcome-unknown `COMMIT` (the existing error paths) gets no confirmation. A retry of the same rows registers a
-   new stamp. Rows that the first attempt stored keep the first stamp, which stays unconfirmed. This is correct: that
+7. An outcome-unknown `COMMIT` (the existing error paths) gets no confirmation. A retry that stores anything new
+   registers a new stamp; a retry of rows the first attempt already stored stores nothing new and registers nothing. Rows that the first attempt stored keep the first stamp, which stays unconfirmed. This is correct: that
    commit was never measured.
 8. A forward step of the wall clock pins later stamps ahead through `last + 1`. This is safe, but it delays
    availability, so the writer warns when `s > wall_ms + B`.
@@ -363,3 +365,10 @@ numbers are optimistic.
     inserted again.
   - Every `COMMIT` of a data transaction is followed, in the same job, by the confirmation's own `BEGIN IMMEDIATE`
     and `COMMIT`; tests that count transactions or inject a fault at the n-th `COMMIT` count data transactions only.
+- **Amendment note** (2026-11-14, from the independent code review of the implementation; wording only, every
+  change makes the rule stricter or describes what the accepted rules already imply):
+  1. P-3 step 6 confirms only when `COMMIT` ended at least 1 ms before `stamp + B`. With the stamp rounded down to the
+     millisecond, the earlier `t1 − t0 ≤ B` could confirm a commit that ended up to 1 ms after `stamp + B`.
+  2. P-3 step 7 said a retry after an outcome-unknown `COMMIT` registers a new stamp. A retry of rows already stored
+     is a transaction with nothing new, which P-2 rolls back without a registration.
+  3. P-2: a funding merge whose rows are all duplicates no longer registers a stamp that no row carries.

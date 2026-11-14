@@ -120,7 +120,7 @@ Every row carries two fields:
 
 How the values arise (ADR-0005 P-3, P-4):
 
-- The Collector stamps each write transaction after it holds the database write lock. It measures, on a monotonic clock, the time from the stamp to the end of `COMMIT`. When that time is at most the bound **`B = 2 000 ms`**, it stores a durable confirmation for the transaction. Otherwise it stores none: when the commit was slower than `B`, when the Collector stopped between the commit and the confirmation, or when writing the confirmation failed and no later attempt of the same Collector process succeeded.
+- The Collector stamps each write transaction after it holds the database write lock. It measures, on a monotonic clock, the time from the stamp to the end of `COMMIT`. When that time ends at least 1 ms before the bound **`B = 2 000 ms`** (the stamp is rounded down to the millisecond), it stores a durable confirmation for the transaction. Otherwise it stores none: when the commit was slower than `B`, when the Collector stopped between the commit and the confirmation, or when writing the confirmation failed and no later attempt of the same Collector process succeeded.
 - A row stored **before the cut-over** (the deployment of this section) gets `readable_by_ms = cutover_ms` and `readable_by_unconfirmed: false`. `cutover_ms` is an instant at or after the commit of every such row, and is shown in the `readability` object of `GET /health/ingest` (section 6.2.4).
 - A row stored **after the cut-over** gets `readable_by_ms = stamp + B`. `readable_by_unconfirmed` is `false` when its transaction is confirmed and `true` when it is not.
 

@@ -20,6 +20,7 @@ from tests.collector.test_funding_rate_span_merge import fr, merge_of
 from tests.collector.test_open_interest_writer import oi
 
 S = 1_000_000_000  # one second in ns
+MS = 1_000_000  # one millisecond in ns
 
 
 class Mono:
@@ -154,3 +155,28 @@ def test_a_merge_without_rows_registers_nothing(conn: sqlite3.Connection) -> Non
     report = FundingRateWriter(conn, wall_ms=lambda: AT).write_transaction([], merge=merge_of(X, X + 1))
     assert report.stamp_ms is None and registered(conn, "funding_rates") == 0
     assert conn.execute("SELECT count(*) FROM funding_rate_verified").fetchone() == (1,)
+
+
+@pytest.mark.parametrize(
+    ("commit_end_ns", "confirmed"),
+    [
+        (2_000 * MS - MS, True),  # 1 ms before stamp + B: confirmed
+        (2_000 * MS - MS + 1, False),  # the stamp is the wall clock rounded down, so this may end after stamp + B
+        (2_000 * MS, False),
+    ],
+)
+def test_a_confirmation_needs_the_commit_to_end_a_millisecond_before_the_bound(
+    conn: sqlite3.Connection, commit_end_ns: int, confirmed: bool
+) -> None:
+    reads = iter([0, 1 * S, commit_end_ns])  # register, before COMMIT, after COMMIT
+    CandleWriter(conn, wall_ms=lambda: AT, stamp_monotonic_ns=lambda: next(reads)).write([valid(0)])
+    assert stamps(conn, "write_confirmations") == ([AT] if confirmed else [])
+
+
+def test_a_merge_page_of_duplicates_registers_nothing_and_still_merges(conn: sqlite3.Connection) -> None:
+    writer = FundingRateWriter(conn, wall_ms=lambda: AT)
+    writer.write_transaction([fr(X)], merge=merge_of(X, X + 1, at=AT))
+    report = writer.write_transaction([fr(X)], merge=merge_of(X, X + 1, at=AT + 60_000))
+    assert (report.duplicates, report.stamp_ms) == (1, None)
+    assert registered(conn, "funding_rates") == 1  # the first page only
+    assert conn.execute("SELECT verified_at_ms FROM funding_rate_verified").fetchone() == (AT + 60_000,)
