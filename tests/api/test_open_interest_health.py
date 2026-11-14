@@ -120,7 +120,7 @@ def test_the_contract_example_is_what_the_server_returns(tmp_path: Path) -> None
 # --- the candle part is untouched; the key; null -------------------------------------------------------------
 
 
-def test_open_interest_is_the_last_key_and_null_when_not_enabled(tmp_path: Path) -> None:
+def test_open_interest_precedes_funding_and_readability_and_is_null_when_not_enabled(tmp_path: Path) -> None:
     path = golden_database(tmp_path / "m.db")
 
     body = ingest(path, (), GOLDEN_AS_OF, open_interest=None)

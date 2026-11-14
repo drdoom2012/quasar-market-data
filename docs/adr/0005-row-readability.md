@@ -307,7 +307,7 @@ causes failed writes, not wrong rows (P-2).
   - one stamp per transaction of a split page with interleaved candle writes;
   - uniqueness across two writer connections.
 - **RB-3:** the API fields on the three endpoints and the `readability` object. The tests cover every row of the P-4
-  table and check that every other field stays byte-identical. `tests/api/test_funding_rate_health.py::test_funding_rate_is_the_last_key_and_null_when_not_enabled`
+  table and check that every other field stays byte-identical. `tests/api/test_funding_rate_health.py::test_funding_rate_is_followed_only_by_readability_and_null_when_not_enabled`
   (INV-137) changes to "followed only by `readability`", and the contract examples of 5.2, 6.5.4 and 6.7.4 gain the two
   fields (their tests compare them with the server).
 - **RB-4:** the README deployment text, with the precondition and the restore notice; the benchmarks
