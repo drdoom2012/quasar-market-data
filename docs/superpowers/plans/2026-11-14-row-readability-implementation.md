@@ -254,3 +254,16 @@ One commit per slice, with `make check` green before each. The pre-commit hook r
 10. **Minor:** **Applied:** `collector/readability.py` is added as a source to the extension-isolation contracts, so
     it stays a leaf.
 11. **Minor:** the runner is fine. Test databases use an `applied_at_ms` within the valid timestamp range.
+
+## 8. As implemented (2026-11-14)
+
+- **Finding 7 of the plan review was not applied as written.** The writers' `wall_ms` defaults to the system clock
+  instead of being required. Making it required would have changed 134 writer constructions in the tests. Every
+  production construction passes the clock explicitly (`collector/cli.py`, the async `open` methods). Tests that
+  assert a stamp pass a fixed fake clock.
+- **TDD was not followed for every part.** The domain function and schema 4 had their tests first. For the writers,
+  the API and the health object, the tests were written after the code. For the not-stored handling (loop,
+  backfill, both tasks) and the merge-always-commits rule, each test was checked against a mutant that removes the
+  handling, and failed with it.
+- **Benchmarks:** ADR-0005 *Evidence*. The readability read is about 68 of the 80 to 87 ms of `/health/ingest` at
+  600 symbols. That is within the 250 ms gate, so the 24 h window is kept.

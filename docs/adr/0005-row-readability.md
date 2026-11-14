@@ -8,7 +8,8 @@
     on the confirmation.
 
   The plan was reviewed independently before this text was written (`docs/superpowers/plans/2026-11-14-readable-by-contract.md`,
-  section 5a). **Not yet implemented.** Slices RB-1 to RB-4 (P-10) implement it.
+  section 5a). **Implemented** by slices RB-1 to RB-4 (P-10) on the branch `feat/row-readability`
+  (plan `docs/superpowers/plans/2026-11-14-row-readability-implementation.md`); measurements in *Evidence*.
 - **Date:** 2026-11-14
 - **Scope:**
   - when a stored row of `candles`, `open_interest` and `funding_rates` became readable, and how the API says so;
@@ -326,7 +327,39 @@ causes failed writes, not wrong rows (P-2).
   seeding helper. This is the largest cost of the implementation.
 - An unknown writer fails hard instead of storing. This is intended.
 
+## Evidence (RB-4, 2026-11-14, this development machine: macOS arm64, SQLite 3.53.1, Python 3.12.15)
+
+Not VPS figures and page cache not dropped; on macOS SQLite does not force a write to the medium, so the write
+numbers are optimistic.
+
+- **E-1 open interest write (`make bench-oi-write`, 1 000 transactions of 100 rows on an empty database).** The data
+  transaction alone (schema 2): p50 0.171 ms, p99 0.261 ms, max 1.400 ms. The data transaction together with its
+  registration and its single-row confirmation transaction (schema 1 to 4, P-6): p50 0.278 ms, p99 0.410 ms, max
+  1.426 ms. The ADR-0003 P-9 criterion (p99 at most 50 ms) holds for the pair here; the VPS figure is still to be
+  read from the Collector's hourly measurement line.
+- **E-2 `/health/ingest` (`make bench-health PROFILE=target`: 600 series of 100 000 candles, and 172 800 write
+  transactions per table for candles and open interest in the readability window, every 20th unconfirmed).** The
+  whole handler: 80.5 to 87.4 ms over five calls (H2 criterion 250 ms: met; H1 and H3 met). The readability read
+  alone, on the same transaction volume: median 67.9 ms, max 68.6 ms. It is most of the handler's time and grows
+  linearly with the transactions of the last 24 hours (about 2 x 288 per symbol); at 600 symbols it stays inside the
+  criterion, beyond that the window or the read must be revisited (P-5 allows a shorter window without a contract
+  break).
+- **E-3 `/health/ingest` with open interest and funding (`make bench-health-oi`, 600 series, 300 rows each, one
+  registered transaction per table).** Median 4.3 ms with open interest off, 7.2 ms on, 10.0 ms with funding; within
+  250 ms.
+
 ## Revision history
 
 - **Revision 1** (2026-11-14): written from the reviewed plan, accepted by the user with the scope stated in the
   status line.
+- **Implementation note** (2026-11-14, RB-1 to RB-4, no rule changed):
+  - `COMMIT_MARGIN_MS` is 500. The candle writer makes `CANDLE_STAMP_ATTEMPTS` = 3 attempts; the open interest and
+    funding writers make `EXTENSION_STAMP_ATTEMPTS` = 1 and leave the retry to their tasks, which retry the page
+    through the async front after it yields to candles (P-6).
+  - The writers take `wall_ms` and `stamp_monotonic_ns` as arguments with the system clocks as defaults; the
+    Collector's commands pass their clock explicitly.
+  - A failed confirmation is inserted inside the writer's next committed data transaction (P-3 as written);
+    the confirmation insert is `ON CONFLICT DO NOTHING`, so a confirmation whose `COMMIT` outcome was unknown can be
+    inserted again.
+  - Every `COMMIT` of a data transaction is followed, in the same job, by the confirmation's own `BEGIN IMMEDIATE`
+    and `COMMIT`; tests that count transactions or inject a fault at the n-th `COMMIT` count data transactions only.
