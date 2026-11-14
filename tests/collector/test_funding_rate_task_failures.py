@@ -17,6 +17,7 @@ from quasar_market_data.collector.funding_rate_writer import (
     FundingRateConflict,
     FundingRateWriteBusy,
     FundingRateWriteError,
+    FundingRateWriteNotStored,
     FundingSpanNotAdjacentError,
 )
 from quasar_market_data.domain.funding_rate import FundingRate, FundingRateKey, RateType
@@ -175,6 +176,19 @@ def test_an_unusable_writer_ends_the_task_but_a_refused_merge_only_fails_the_ser
             assert not h.task.done() and BTC in sink.spans  # the series failed once, was re-read and then succeeded
             assert h.lines_starting("funding-warning merge-refused")
             await h.finish()
+
+    run(scenario)
+
+
+def test_a_page_not_stored_within_the_readability_bound_is_retried_and_never_ends_the_task() -> None:
+    async def scenario(tmp_path: Path) -> None:
+        sink = InMemorySink()
+        sink.fail_next.append(FundingRatePageError(FundingRateWriteNotStored("too old to commit"), 0, PARTIAL))
+        rig = await make_rig(tmp_path, symbols=(BTC,), t=t0(), sink=sink)
+        h = await start_task(tmp_path, rig=rig, backfill_days=1)
+        await h.run_for(60 * S, step_ms=2 * S)
+        assert not h.task.done() and BTC in sink.spans  # the page failed once and a later try stored it
+        await h.finish()
 
     run(scenario)
 

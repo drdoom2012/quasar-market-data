@@ -7,10 +7,17 @@ from pathlib import Path
 import pytest
 
 from quasar_market_data.collector.candle_writer import CandleWriteError, CandleWriteNotStored, CandleWriter
+from quasar_market_data.collector.funding_rate_writer import FundingRateWriteNotStored, FundingRateWriter
+from quasar_market_data.collector.open_interest_writer import (
+    OpenInterestWriteNotStored,
+    OpenInterestWriter,
+)
 from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.collector.faulty_connection import Fault, open_faulty_writer
 from tests.collector.test_candle_writer import AT, valid
+from tests.collector.test_funding_rate_span_merge import fr, merge_of
+from tests.collector.test_open_interest_writer import oi
 
 S = 1_000_000_000  # one second in ns
 
@@ -109,3 +116,41 @@ def test_an_outcome_unknown_commit_is_never_confirmed(tmp_path: Path) -> None:
         assert stamps(conn, "write_transactions") == [AT] and stamps(conn, "write_confirmations") == []
     finally:
         conn.close()
+
+
+# --- the extension writers ---------------------------------------------------------------------------------------
+
+
+X = 1_793_836_800_000
+
+
+def registered(conn: sqlite3.Connection, table: str) -> int:
+    count: int = conn.execute("SELECT count(*) FROM write_transactions WHERE table_name = ?", (table,)).fetchone()[0]
+    return count
+
+
+def test_an_extension_transaction_too_old_to_commit_is_not_stored_after_one_attempt(conn: sqlite3.Connection) -> None:
+    writer = OpenInterestWriter(conn, wall_ms=lambda: AT, stamp_monotonic_ns=Mono(step_ns=2 * S))
+    with pytest.raises(OpenInterestWriteNotStored):
+        writer.write_transaction([oi(0)])
+    assert (
+        conn.execute("SELECT count(*) FROM open_interest").fetchone() == (0,) and registered(conn, "open_interest") == 0
+    )
+    funding = FundingRateWriter(conn, wall_ms=lambda: AT, stamp_monotonic_ns=Mono(step_ns=2 * S))
+    with pytest.raises(FundingRateWriteNotStored):
+        funding.write_transaction([fr(X)])
+    assert registered(conn, "funding_rates") == 0
+
+
+def test_a_merge_with_nothing_new_still_commits_and_advances_verified_at(conn: sqlite3.Connection) -> None:
+    writer = FundingRateWriter(conn, wall_ms=lambda: AT)
+    writer.write_transaction([fr(X)], merge=merge_of(X, X + 1, at=AT))
+    report = writer.write_transaction([fr(X)], merge=merge_of(X, X + 1, at=AT + 60_000))  # a duplicate only
+    assert report.duplicates == 1
+    assert conn.execute("SELECT verified_at_ms FROM funding_rate_verified").fetchone() == (AT + 60_000,)
+
+
+def test_a_merge_without_rows_registers_nothing(conn: sqlite3.Connection) -> None:
+    report = FundingRateWriter(conn, wall_ms=lambda: AT).write_transaction([], merge=merge_of(X, X + 1))
+    assert report.stamp_ms is None and registered(conn, "funding_rates") == 0
+    assert conn.execute("SELECT count(*) FROM funding_rate_verified").fetchone() == (1,)

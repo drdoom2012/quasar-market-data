@@ -61,6 +61,7 @@ def insert_candle(
     high: str | None = None,
     low: str | None = None,
     stamp: int = AT,
+    confirmed: bool = True,
 ) -> None:
     values = candle_values(open_time_ms)
     if close is not None:
@@ -68,7 +69,7 @@ def insert_candle(
         derived_high = max(open_, close, key=Decimal)
         derived_low = min(open_, close, key=Decimal)
         values = (open_, high or derived_high, low or derived_low, close, volume, turnover)
-    register(conn, "candles", stamp)
+    register(conn, "candles", stamp, confirmed=confirmed)
     conn.execute(
         "INSERT INTO candles (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume, turnover,"
         " ingested_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -122,10 +123,11 @@ def insert_open_interest(
     open_interest: str | None = None,
     open_interest_value: str | None = None,
     stamp: int = AT,
+    confirmed: bool = True,
 ) -> None:
     """A stored open interest row; ``time_ms`` is the period END."""
     default_oi, default_value = open_interest_values(time_ms)
-    register(conn, "open_interest", stamp)
+    register(conn, "open_interest", stamp, confirmed=confirmed)
     conn.execute(
         "INSERT INTO open_interest (venue, symbol, period, time_ms, open_interest, open_interest_value, ingested_at_ms)"
         " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -172,11 +174,12 @@ def insert_funding_rate(
     funding_rate: str | None = None,
     mark_price: object = _DEFAULT,
     stamp: int = AT,
+    confirmed: bool = True,
 ) -> None:
     """A stored funding settlement; ``mark_price=None`` stores NULL (Binance sends none before 2023-10-31)."""
     default_rate, default_price = funding_values(funding_time_ms)
     price = default_price if mark_price is _DEFAULT else mark_price
-    register(conn, "funding_rates", stamp)
+    register(conn, "funding_rates", stamp, confirmed=confirmed)
     conn.execute(
         "INSERT INTO funding_rates (venue, symbol, funding_time_ms, rate_type, funding_rate, mark_price, ingested_at_ms)"
         " VALUES (?, ?, ?, ?, ?, ?, ?)",

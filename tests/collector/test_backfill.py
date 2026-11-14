@@ -22,7 +22,7 @@ from quasar_market_data.collector.backfill import (
     SliceReport,
     SliceStatus,
 )
-from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown, WriteReport
+from quasar_market_data.collector.candle_writer import CandleWriteNotStored, CandleWriteOutcomeUnknown, WriteReport
 from quasar_market_data.collector.hole_reader import HoleReadError
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.domain.backfill import Attribution
@@ -273,6 +273,18 @@ def test_candles_outside_the_targets_arriving_between_the_reads_change_nothing(t
         assert (r.new_in_targets, r.recovered, r.missing_in_targets, r.attribution) == (10, 10, 0, Attribution.OK)
 
     go(tmp_path, body)
+
+
+def test_a_page_not_stored_within_the_readability_bound_is_a_failed_page_not_an_unknown_one(tmp_path: Path) -> None:
+    async def body(env: Env) -> None:
+        env.store([env.slot(2500)])
+        env.source.series[SYMBOL] = {env.slot(i) for i in range(2500)}
+        env.sink.raises = {2: CandleWriteNotStored("too old to commit")}
+        await env.backfiller().run_idle(env.window())
+        r = only(env)
+        assert r.attribution is not Attribution.WRITE_UNKNOWN and r.status is SliceStatus.BACKOFF
+
+    go(tmp_path, body, days=9)
 
 
 def test_an_unknown_write_outcome_makes_recovery_unverified(tmp_path: Path) -> None:
