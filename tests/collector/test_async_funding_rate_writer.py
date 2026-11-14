@@ -27,6 +27,7 @@ from quasar_market_data.domain.funding_rate_span import Interval
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.collector.faulty_connection import Fault, FaultyConnection, open_faulty_writer
+from tests.readability_seed import register
 
 AT = 1_793_840_000_000
 T = 1_793_836_800_003
@@ -119,7 +120,18 @@ def factory(
 
 
 def begins(conn: FaultyConnection) -> int:
-    return sum(1 for sql in conn.statements if sql == BEGIN)
+    """Data transactions begun: a ``BEGIN`` not followed by the confirmation of the transaction before it.
+
+    Each committed data transaction is followed, in the same job, by its own single-row confirmation transaction
+    (ADR-0005 P-3, P-6); that one is not a new data transaction.
+    """
+    statements = conn.statements
+    return sum(
+        1
+        for i, sql in enumerate(statements)
+        if sql == BEGIN
+        and not (i + 1 < len(statements) and statements[i + 1].startswith("INSERT INTO write_confirmations"))
+    )
 
 
 async def spin(times: int = 5) -> None:
@@ -137,7 +149,7 @@ def test_page_of_500_is_five_transactions(db: Path) -> None:
     async def scenario() -> None:
         made: list[FaultyConnection] = []
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
-        report = await writer.write(page(500), ingested_at_ms=AT)
+        report = await writer.write(page(500))
         await writer.close()
         assert report.inserted == 500 and len(report.durations_ns) == 5 and len(report.lock_wait_ns) == 5
         statements = made[0].statements
@@ -160,14 +172,14 @@ def test_failure_inside_the_third_transaction_keeps_two_and_retry_completes(db: 
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
         made[0].faults.append(Fault(INSERT_ROW, sqlite3.OperationalError("injected"), nth=251))
         with pytest.raises(FundingRatePageError) as error:
-            await writer.write(page(500), ingested_at_ms=AT, merge=merge_for(page(500)))
+            await writer.write(page(500), merge=merge_for(page(500)))
         assert error.value.committed_transactions == 2
         assert error.value.partial.inserted == 200
         assert type(error.value.cause) is FundingRateWriteError
         assert error.value.__cause__ is error.value.cause
         assert stored_count(db) == 200
         assert span_rows(db) == []  # the merge rides with the failed final transaction
-        retry = await writer.write(page(500), ingested_at_ms=AT + 1, merge=merge_for(page(500), AT + 1))
+        retry = await writer.write(page(500), merge=merge_for(page(500), AT + 1))
         assert (retry.inserted, retry.duplicates, retry.conflicts) == (300, 200, ())
         await writer.close()
 
@@ -182,7 +194,7 @@ def test_outcome_unknown_is_the_cause(db: Path) -> None:
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
         made[0].faults.append(Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), after_execution=True))
         with pytest.raises(FundingRatePageError) as error:
-            await writer.write(page(150), ingested_at_ms=AT)
+            await writer.write(page(150))
         assert isinstance(error.value.cause, FundingRateWriteOutcomeUnknown)
         assert error.value.committed_transactions == 0
         await writer.close()
@@ -199,14 +211,14 @@ def test_busy_database_fails_only_that_transaction(db: Path) -> None:
         holder.execute(BEGIN)
         try:
             with pytest.raises(FundingRatePageError) as error:
-                await writer.write(page(10), ingested_at_ms=AT)
+                await writer.write(page(10))
             assert isinstance(error.value.cause, FundingRateWriteBusy)
             assert error.value.committed_transactions == 0
         finally:
             holder.execute("ROLLBACK")
             holder.close()
         assert stored_count(db) == 0 and conflict_count(db) == 0
-        assert (await writer.write(page(10), ingested_at_ms=AT)).inserted == 10
+        assert (await writer.write(page(10))).inserted == 10
         await writer.close()
 
     asyncio.run(scenario())
@@ -221,7 +233,7 @@ def test_waits_while_candle_write_is_active(db: Path) -> None:
             db, activity=activity, connect=factory(made), monotonic_ns=lambda: next(ticks)
         )
         with activity.writing():
-            task = asyncio.ensure_future(writer.write(page(10), ingested_at_ms=AT))
+            task = asyncio.ensure_future(writer.write(page(10)))
             await spin()
             assert begins(made[0]) == 0 and not task.done()
         report = await task
@@ -238,7 +250,7 @@ def test_reentry_in_the_same_iteration_keeps_waiting(db: Path) -> None:
         writer = await AsyncFundingRateWriter.open(db, activity=activity, connect=factory(made))
         first = activity.writing()
         first.__enter__()
-        task = asyncio.ensure_future(writer.write(page(10), ingested_at_ms=AT))
+        task = asyncio.ensure_future(writer.write(page(10)))
         await spin()
         first.__exit__(None, None, None)
         second = activity.writing()
@@ -263,7 +275,7 @@ def test_cancel_between_transactions(db: Path) -> None:
         conn = made[0]
         assert isinstance(conn, GatedConnection)
         rows = page(300)
-        task = asyncio.ensure_future(writer.write(rows, ingested_at_ms=AT, merge=merge_for(rows)))
+        task = asyncio.ensure_future(writer.write(rows, merge=merge_for(rows)))
         assert await asyncio.to_thread(conn.reached.wait, 10)
         with activity.writing():
             conn.release.set()
@@ -275,7 +287,7 @@ def test_cancel_between_transactions(db: Path) -> None:
         await spin()
         assert begins(conn) == 1
         assert writer.state is WriterState.OPEN
-        assert (await writer.write(page(1, start=400), ingested_at_ms=AT)).inserted == 1
+        assert (await writer.write(page(1, start=400))).inserted == 1
         await writer.close()
 
     asyncio.run(scenario())
@@ -290,12 +302,12 @@ def test_write_after_cancel_waits_for_the_running_transaction(db: Path) -> None:
         writer = await AsyncFundingRateWriter.open(db, activity=activity, connect=factory(made, GatedConnection))
         conn = made[0]
         assert isinstance(conn, GatedConnection)
-        cancelled = asyncio.ensure_future(writer.write(page(100), ingested_at_ms=AT))
+        cancelled = asyncio.ensure_future(writer.write(page(100)))
         assert await asyncio.to_thread(conn.reached.wait, 10)  # its COMMIT is blocked on the worker thread
         cancelled.cancel()
         with pytest.raises(asyncio.CancelledError):
             await cancelled
-        follow_up = asyncio.ensure_future(writer.write(page(10, start=200), ingested_at_ms=AT))
+        follow_up = asyncio.ensure_future(writer.write(page(10, start=200)))
         await spin()
         with activity.writing():
             conn.release.set()
@@ -332,7 +344,7 @@ def test_lifecycle(db: Path) -> None:
         states.append(writer.state)
         assert states == [WriterState.OPEN, WriterState.CLOSED]
         with pytest.raises(FundingRateWriteError, match="closed"):
-            await writer.write(page(1), ingested_at_ms=AT)
+            await writer.write(page(1))
 
     asyncio.run(scenario())
 
@@ -343,7 +355,7 @@ def test_wrong_row_type_is_refused_before_any_transaction(db: Path) -> None:
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
         rows: list[Any] = [*page(150), object()]
         with pytest.raises(TypeError):
-            await writer.write(rows, ingested_at_ms=AT)
+            await writer.write(rows)
         assert begins(made[0]) == 0
         await writer.close()
 
@@ -361,7 +373,7 @@ class TwoGates(FaultyConnection):
         self.release = {1: threading.Event(), 2: threading.Event()}
 
     def execute(self, sql: str, *args: Any) -> sqlite3.Cursor:
-        if sql == "COMMIT" and self.armed:
+        if sql == "COMMIT" and self.armed and not self.commit_confirms():
             self.commits += 1
             if self.commits in self.reached:
                 self.reached[self.commits].set()
@@ -384,8 +396,8 @@ def test_two_concurrent_writes_never_queue_a_transaction_past_the_activity_check
         writer = await AsyncFundingRateWriter.open(db, activity=activity, connect=connect)
         conn = made[0]
         assert isinstance(conn, TwoGates)
-        first = asyncio.ensure_future(writer.write(page(200), ingested_at_ms=AT))
-        second = asyncio.ensure_future(writer.write(page(200, start=300), ingested_at_ms=AT))
+        first = asyncio.ensure_future(writer.write(page(200)))
+        second = asyncio.ensure_future(writer.write(page(200, start=300)))
         assert await asyncio.to_thread(conn.reached[1].wait, 10)
         conn.release[1].set()  # both callers wake; only one may submit, the other must re-check
         assert await asyncio.to_thread(conn.reached[2].wait, 10)
@@ -413,10 +425,10 @@ def test_a_cancelled_waiter_leaves_no_unretrieved_exception(db: Path) -> None:
         conn = made[0]
         assert isinstance(conn, GatedConnection)
         conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("injected COMMIT failure")))
-        first = asyncio.ensure_future(writer.write(page(10), ingested_at_ms=AT))
+        first = asyncio.ensure_future(writer.write(page(10)))
         assert await asyncio.to_thread(conn.reached.wait, 10)
         first.cancel()
-        second = asyncio.ensure_future(writer.write(page(10, start=50), ingested_at_ms=AT))
+        second = asyncio.ensure_future(writer.write(page(10, start=50)))
         await spin()  # second now waits for the first's transaction
         second.cancel()
         for task in (first, second):
@@ -443,7 +455,7 @@ def test_close_in_the_middle_of_a_page_reports_the_committed_part(db: Path) -> N
         )
         conn = made[0]
         assert isinstance(conn, GatedConnection)
-        task = asyncio.ensure_future(writer.write(page(300), ingested_at_ms=AT))
+        task = asyncio.ensure_future(writer.write(page(300)))
         assert await asyncio.to_thread(conn.reached.wait, 10)
         closing = asyncio.ensure_future(writer.close())
         await spin(1)
@@ -464,14 +476,15 @@ def test_merge_is_in_the_last_transaction_only(db: Path) -> None:
         made: list[FaultyConnection] = []
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
         rows = page(250)
-        report = await writer.write(rows, ingested_at_ms=AT, merge=merge_for(rows))
+        report = await writer.write(rows, merge=merge_for(rows))
         await writer.close()
         assert report.inserted == 250 and report.span_before is None
         assert report.span_after == Interval(T, T + 250 * 1_000)
         statements = made[0].statements
         span_statements = [i for i, sql in enumerate(statements) if "funding_rate_verified" in sql]
-        begins_at = [i for i, sql in enumerate(statements) if sql == BEGIN]
-        commits_at = [i for i, sql in enumerate(statements) if sql == "COMMIT"]
+        confirming = {i for i, sql in enumerate(statements) if sql.startswith("INSERT INTO write_confirmations")}
+        begins_at = [i for i, sql in enumerate(statements) if sql == BEGIN and i + 1 not in confirming]
+        commits_at = [i for i, sql in enumerate(statements) if sql == "COMMIT" and i - 1 not in confirming]
         assert len(begins_at) == len(commits_at) == 3
         assert span_statements and all(begins_at[2] < i < commits_at[2] for i in span_statements)
         assert len(report.inserted_keys) == 250
@@ -485,7 +498,7 @@ def test_empty_page_with_merge_is_one_transaction(db: Path) -> None:
         made: list[FaultyConnection] = []
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
         merge = SpanMerge(*SERIES, Interval(T, T + HOUR), AT)
-        report = await writer.write([], ingested_at_ms=AT, merge=merge)
+        report = await writer.write([], merge=merge)
         assert (report.inserted, report.span_after) == (0, Interval(T, T + HOUR))
         assert begins(made[0]) == 1 and not any(s.startswith(INSERT_ROW) for s in made[0].statements)
         await writer.close()
@@ -499,7 +512,7 @@ def test_empty_page_without_merge_is_no_transaction(db: Path) -> None:
         made: list[FaultyConnection] = []
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
         baseline = len(made[0].statements)  # the connection's own setup statements
-        report = await writer.write([], ingested_at_ms=AT)
+        report = await writer.write([])
         assert (report.inserted, report.durations_ns, report.span_after) == (0, (), None)
         assert made[0].statements[baseline:] == []
         await writer.close()
@@ -512,7 +525,7 @@ def test_full_page_merge_claims_up_to_the_row_before_the_last(db: Path) -> None:
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity())
         rows = page(1_000)
         last = rows[-1].key.funding_time_ms
-        report = await writer.write(rows, ingested_at_ms=AT, merge=SpanMerge(*SERIES, Interval(T, last - 1), AT))
+        report = await writer.write(rows, merge=SpanMerge(*SERIES, Interval(T, last - 1), AT))
         assert len(report.durations_ns) == 10 and report.span_after == Interval(T, last - 1)
         await writer.close()
 
@@ -525,14 +538,15 @@ def test_outcome_unknown_of_the_final_transaction_is_the_cause(db: Path) -> None
     async def scenario() -> None:
         made: list[FaultyConnection] = []
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
-        made[0].faults.append(Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), nth=2, after_execution=True))
+        # COMMIT #3: the second data transaction (#2 is the first one's confirmation, ADR-0005 P-3)
+        made[0].faults.append(Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), nth=3, after_execution=True))
         rows = page(150)
         with pytest.raises(FundingRatePageError) as error:
-            await writer.write(rows, ingested_at_ms=AT, merge=merge_for(rows))
+            await writer.write(rows, merge=merge_for(rows))
         assert isinstance(error.value.cause, FundingRateWriteOutcomeUnknown)
         assert error.value.committed_transactions == 1  # the unknown one is not counted
         assert stored_count(db) == 150 and span_rows(db) == [(T, T + 150_000, AT)]  # it did commit, atomically
-        retry = await writer.write(rows, ingested_at_ms=AT, merge=merge_for(rows))
+        retry = await writer.write(rows, merge=merge_for(rows))
         assert (retry.inserted, retry.duplicates, retry.conflicts) == (0, 150, ())
         await writer.close()
 
@@ -544,10 +558,10 @@ def test_non_adjacent_merge_fails_the_page_and_stores_nothing_of_the_last_chunk(
     async def scenario() -> None:
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity())
         first = page(10)
-        await writer.write(first, ingested_at_ms=AT, merge=merge_for(first))
+        await writer.write(first, merge=merge_for(first))
         far = page(250, start=10_000)
         with pytest.raises(FundingRatePageError) as error:
-            await writer.write(far, ingested_at_ms=AT + 1, merge=merge_for(far, AT + 1))
+            await writer.write(far, merge=merge_for(far, AT + 1))
         assert isinstance(error.value.cause, FundingSpanNotAdjacentError)
         assert error.value.committed_transactions == 2
         assert stored_count(db) == 10 + 200  # the final chunk of 50 rows is not kept
@@ -567,7 +581,7 @@ def test_cancelling_a_write_while_its_final_transaction_runs_still_commits_rows_
         conn = made[0]
         assert isinstance(conn, GatedConnection)
         rows = page(10)
-        task = asyncio.ensure_future(writer.write(rows, ingested_at_ms=AT, merge=merge_for(rows)))
+        task = asyncio.ensure_future(writer.write(rows, merge=merge_for(rows)))
         assert await asyncio.to_thread(conn.reached.wait, 10)  # the final COMMIT is blocked on the worker thread
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -585,12 +599,12 @@ def test_arguments_are_validated_before_any_transaction(db: Path) -> None:
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
         bad: list[Any] = [*page(150), object()]
         with pytest.raises(TypeError):
-            await writer.write(bad, ingested_at_ms=AT)
+            await writer.write(bad)
         other = SpanMerge("binance-usdm", "ETH/USDT:USDT", Interval(T, T + 1), AT)
         with pytest.raises(ValueError, match="series"):
-            await writer.write(page(150), ingested_at_ms=AT, merge=other)
+            await writer.write(page(150), merge=other)
         with pytest.raises(TypeError):
-            await writer.write(page(1), ingested_at_ms=AT, merge=Interval(T, T + 1))  # type: ignore[arg-type]
+            await writer.write(page(1), merge=Interval(T, T + 1))  # type: ignore[arg-type]
         assert begins(made[0]) == 0
         await writer.close()
 
@@ -601,16 +615,17 @@ def test_a_stored_value_the_value_object_refuses_fails_the_page_with_its_committ
     open_faulty_writer(db, AT).close()
     raw = open_writer(db)
     row = page(150)[120]
+    register(raw, "funding_rates", AT + 5)  # above the cut-over AT + 1
     raw.execute(
         "INSERT INTO funding_rates VALUES (?, ?, ?, 'Regular', ?, NULL, ?)",
-        (*SERIES, row.key.funding_time_ms, "1" * 97, AT),  # accepted by the SQL check, refused by canonical_decimal
+        (*SERIES, row.key.funding_time_ms, "1" * 97, AT + 5),  # accepted by the SQL check, refused by canonical_decimal
     )
     raw.close()
 
     async def scenario() -> None:
         writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity())
         with pytest.raises(FundingRatePageError) as error:
-            await writer.write(page(150), ingested_at_ms=AT)
+            await writer.write(page(150))
         assert type(error.value.cause) is FundingRateWriteError
         assert error.value.committed_transactions == 1 and error.value.partial.inserted == 100
         assert not writer.unusable

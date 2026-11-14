@@ -9,6 +9,8 @@ import sqlite3
 from dataclasses import dataclass
 
 from quasar_market_data.api.params import MAX_WINDOW_SLOTS, CandlesRequest
+from quasar_market_data.api.readability import confirmation_columns, confirmation_join, read_cutover
+from quasar_market_data.domain.readability import readable_by
 from quasar_market_data.domain.span_coverage import SpanCoverage, classify_span
 from quasar_market_data.storage.schema import verify_schema
 
@@ -23,6 +25,8 @@ class StoredCandle:
     volume: str
     turnover: str | None
     conflicted: bool
+    readable_by_ms: int
+    readable_by_unconfirmed: bool
 
 
 @dataclass(frozen=True)
@@ -79,8 +83,11 @@ def _read(conn: sqlite3.Connection, request: CandlesRequest) -> CandlesPage:
         end = start + tf
 
     rows = conn.execute(
-        "SELECT open_time_ms, open, high, low, close, volume, turnover FROM candles"
-        " WHERE venue = ? AND symbol = ? AND timeframe = ? AND open_time_ms >= ? AND open_time_ms < ?"
+        "SELECT open_time_ms, open, high, low, close, volume, turnover"
+        + confirmation_columns("candles")
+        + " FROM candles"
+        + confirmation_join("candles")
+        + " WHERE venue = ? AND symbol = ? AND timeframe = ? AND open_time_ms >= ? AND open_time_ms < ?"
         " ORDER BY open_time_ms LIMIT ?",
         (*series, start, end, request.limit + 1),
     ).fetchall()
@@ -115,8 +122,19 @@ def _read(conn: sqlite3.Connection, request: CandlesRequest) -> CandlesPage:
         unavailable=unavailable,
         newest_open_time_ms=newest,
     )
+    cutover = read_cutover(conn)
     candles = tuple(
-        StoredCandle(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[0] in coverage.conflicted_open_times)
+        StoredCandle(
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+            row[6],
+            row[0] in coverage.conflicted_open_times,
+            *readable_by(row[7], confirmed=bool(row[8]), cutover_ms=cutover),
+        )
         for row in rows
     )
     return CandlesPage(

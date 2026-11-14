@@ -85,7 +85,7 @@ def put(
             for n in slots
         ]
         if candles:
-            CandleWriter(conn).write(candles, ingested_at_ms=AT)
+            CandleWriter(conn).write(candles)
     finally:
         conn.close()
 

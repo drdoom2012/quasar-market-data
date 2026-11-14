@@ -226,8 +226,8 @@ def test_a_schema_from_the_future_exits_one(db: Path, capsys: pytest.CaptureFixt
 def patch_write_to_commit_then_report_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     real = CandleWriter.write
 
-    def write_then_raise(self: CandleWriter, candles: Any, *, ingested_at_ms: int) -> WriteReport:
-        real(self, candles, ingested_at_ms=ingested_at_ms)  # the commit took effect ...
+    def write_then_raise(self: CandleWriter, candles: Any) -> WriteReport:
+        real(self, candles)  # the commit took effect ...
         raise CandleWriteOutcomeUnknown("batch outcome unknown: simulated")  # ... but the writer cannot tell
 
     monkeypatch.setattr(CandleWriter, "write", write_then_raise)
@@ -388,10 +388,10 @@ def test_interrupt_during_an_in_flight_write_waits_for_it_and_reports_unknown(
     started, release = threading.Event(), threading.Event()
     real = CandleWriter.write
 
-    def held_write(self: CandleWriter, candles: Any, *, ingested_at_ms: int) -> WriteReport:
+    def held_write(self: CandleWriter, candles: Any) -> WriteReport:
         started.set()
         assert release.wait(10)
-        return real(self, candles, ingested_at_ms=ingested_at_ms)
+        return real(self, candles)
 
     monkeypatch.setattr(CandleWriter, "write", held_write)
     moments: dict[str, float] = {}

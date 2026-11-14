@@ -1,4 +1,5 @@
 import ast
+import sqlite3
 from importlib import resources
 from pathlib import Path
 
@@ -99,3 +100,30 @@ def test_readme_runs_the_benchmark_in_the_dockerfile_runtime_image() -> None:
     )
     assert "@sha256:" in runtime
     assert f"/src:ro {runtime} \\" in (root / "README.md").read_text("utf-8")
+
+
+def test_with_schema_4_every_transaction_is_registered_and_confirmed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    directory = resources.files("quasar_market_data.storage.migrations")
+    names = ("001_schema_v1.sql", "002_open_interest.sql", "003_funding_rate.sql", "004_readability.sql")
+    schemas = [arg for name in names for arg in ("--schema", str(Path(str(directory.joinpath(name)))))]
+    target = tmp_path / "run"
+    assert bench.main([*schemas, "--dir", str(target), "--transactions", "3", "--keep"]) == 0
+    assert "with_confirmation=True" in capsys.readouterr().out
+    conn = sqlite3.connect(target / bench.DB_NAME)
+    try:
+        counts = [
+            conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
+            for t in ("write_transactions", "write_confirmations", "open_interest")
+        ]
+    finally:
+        conn.close()
+    assert counts == [3, 3, 300]
+
+
+def test_the_registration_and_confirmation_match_the_collector() -> None:
+    from quasar_market_data.collector import readability
+
+    assert bench.REGISTER == readability._REGISTER
+    assert bench.CONFIRM == readability._CONFIRM

@@ -124,7 +124,7 @@ def test_readiness_200_with_schema_version(tmp_path: Path) -> None:
     response = client_for(make_database(tmp_path / "market.db"), boom).get("/health/ready")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ready", "schema_version": 3}
+    assert response.json() == {"status": "ready", "schema_version": 4}
 
 
 def test_v2_database_answers_503_schema_mismatch(tmp_path: Path) -> None:

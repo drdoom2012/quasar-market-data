@@ -34,6 +34,7 @@ from quasar_market_data.config.settings import Instrument
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.api.seed import SAMPLE_RULE
+from tests.readability_seed import register_all
 
 BASE_MS = 1_700_000_100_000
 TF_MS = 300_000
@@ -56,7 +57,8 @@ def symbol_name(index: int) -> str:
 def build_database(path: Path, series: int, rows_per_series: int) -> int:
     conn = open_writer(path)
     try:
-        migrate(conn, applied_at_ms=BASE_MS)
+        migrate(conn, applied_at_ms=BASE_MS - 2)  # the cut-over lies below the seeded stamp BASE_MS
+        register_all(conn, BASE_MS)
         conn.execute("BEGIN")
         for i in range(series):
             conn.executemany(
@@ -65,9 +67,32 @@ def build_database(path: Path, series: int, rows_per_series: int) -> int:
                 ((VENUE, symbol_name(i), BASE_MS + k * TF_MS, BASE_MS) for k in range(rows_per_series)),
             )
         conn.execute("COMMIT")
+        load_readability_window(conn, series)
     finally:
         conn.close()
     return series * rows_per_series
+
+
+READABILITY_TRANSACTIONS_PER_SERIES = 288  # one candle and one open interest transaction per series and 5 minutes
+
+
+def load_readability_window(conn: sqlite3.Connection, series: int) -> int:
+    """A day of write transactions in the readability window of ``/health/ingest`` (contract 6.2.4), every 20th one
+    unconfirmed, for candles and open interest: the read the readability object adds (ADR-0005 P-5, RB-4 gate)."""
+    count = series * READABILITY_TRANSACTIONS_PER_SERIES
+    conn.execute("BEGIN")
+    for table in ("candles", "open_interest"):
+        conn.executemany(
+            "INSERT INTO write_transactions (table_name, stamp_ms) VALUES (?, ?) ON CONFLICT DO NOTHING",
+            ((table, BASE_MS + 1 + i) for i in range(count)),
+        )
+        conn.executemany(
+            "INSERT INTO write_confirmations (table_name, stamp_ms, confirmed_at_ms) VALUES (?, ?, ?)"
+            " ON CONFLICT DO NOTHING",
+            ((table, BASE_MS + 1 + i, BASE_MS + 1 + i) for i in range(count) if i % 20),
+        )
+    conn.execute("COMMIT")
+    return count
 
 
 def steps_per_series(path: Path, series: int) -> float:
@@ -214,6 +239,7 @@ def run(profile: str, work_dir: Path, *, keep: bool) -> dict[str, Any]:
             "series": series,
             "rows_per_series": rows,
             "rows_total": total_rows,
+            "readability_transactions_per_table": series * READABILITY_TRANSACTIONS_PER_SERIES,
             "build_s": round(build_s, 1),
             "steps_per_series": round(steps, 1),
             "baseline_steps_per_series": round(baseline_steps, 1),

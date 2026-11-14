@@ -6,16 +6,22 @@ from typing import Any
 
 import pytest
 
-from quasar_market_data.api.database import read_ingest, read_ready
+from quasar_market_data.api.database import read_ingest as read_ingest_with_readability
+from quasar_market_data.api.database import read_ready
 from quasar_market_data.api.errors import ApiError
 from quasar_market_data.api.health_reader import _NEWEST, _NEXT_SERIES, StoredSeries, read_stored_series
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
 from quasar_market_data.storage.schema import SCHEMA_VERSION
-from tests.api.seed import AT, SYMBOL, VENUE, insert_candle, make_database
+from tests.api.seed import AT, MIGRATED_AT, SYMBOL, VENUE, insert_candle, make_database, register
 
 TF = 300_000
 S = 1792643400000
+
+
+def read_ingest(path: Path, **kwargs: Any) -> tuple[StoredSeries, ...]:
+    """The series part of ``database.read_ingest`` (its readability facts are tested in test_readability_rows)."""
+    return read_ingest_with_readability(path, as_of_ms=AT, **kwargs)[0]
 
 
 def slot(n: int) -> int:
@@ -81,7 +87,7 @@ def test_missing_empty_foreign_newer_and_corrupt_database_map_to_the_503_reasons
 
 
 def test_ready_returns_the_schema_version(tmp_path: Path) -> None:
-    assert read_ready(make_database(tmp_path / "market.db")) == SCHEMA_VERSION == 3
+    assert read_ready(make_database(tmp_path / "market.db")) == SCHEMA_VERSION == 4
 
 
 @pytest.mark.parametrize("reader", [read_ready, read_ingest])
@@ -183,8 +189,9 @@ def test_a_series_at_the_ends_of_the_valid_time_range_is_read(tmp_path: Path) ->
 
 def _bulk(path: Path, rows_per_series: list[int]) -> None:
     conn = open_writer(path)
-    migrate(conn, applied_at_ms=AT)
+    migrate(conn, applied_at_ms=MIGRATED_AT)
     conn.execute("BEGIN")
+    register(conn, "candles")
     for i, count in enumerate(rows_per_series):
         conn.executemany(
             "INSERT INTO candles (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume, turnover,"

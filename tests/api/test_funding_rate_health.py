@@ -13,6 +13,7 @@ from quasar_market_data.api.health_reader import (
     _FUNDING_CONFLICT_PROBE,
     _NEWEST_FUNDING,
     _NEXT_FUNDING_SPAN,
+    _UNCONFIRMED,
 )
 from quasar_market_data.domain.funding_rate_coverage import FundingRateRule, behind_after_ms
 from quasar_market_data.domain.open_interest_coverage import OpenInterestRule
@@ -28,6 +29,8 @@ from tests.api.seed import (
 from tests.api.test_funding_rate_endpoint import contract_example
 from tests.api.test_health_universe import AS_OF as GOLDEN_AS_OF
 from tests.api.test_health_universe import GOLDEN, golden_database, s17_fields
+
+READABILITY_COUNT = _UNCONFIRMED.split(" WHERE ")[0]  # the one statement of 6.2.4 that names every table
 
 DAY = 86_400_000
 H = 3_600_000
@@ -118,12 +121,18 @@ def test_the_contract_example_is_what_the_server_returns(tmp_path: Path) -> None
 # --- the candle part is untouched; the key; null ------------------------------------------------------------------
 
 
-def test_funding_rate_is_the_last_key_and_null_when_not_enabled(tmp_path: Path) -> None:
+def test_funding_rate_is_followed_only_by_readability_and_null_when_not_enabled(tmp_path: Path) -> None:
     path = golden_database(tmp_path / "m.db")
 
     body = ingest(path, GOLDEN_AS_OF, funding_rate=None)
 
-    assert list(body)[-4:] == ["truncated", "universe", "open_interest", "funding_rate"]
+    assert list(body)[-5:] == [
+        "truncated",
+        "universe",
+        "open_interest",
+        "funding_rate",
+        "readability",
+    ]  # readability last (6.2.4)
     assert body["funding_rate"] is None
 
 
@@ -148,7 +157,9 @@ def test_funding_enabled_with_open_interest_disabled_issues_no_open_interest_sta
     path = seed(tmp_path / "m.db", current_series())
     log = traced_log(path)
 
-    assert not any("open_interest" in statement for statement in log)
+    assert not any(
+        "open_interest" in statement for statement in log if not statement.startswith(READABILITY_COUNT)
+    )  # only the readability count names every table (6.2.4)
     body = ingest(path, open_interest=None)
     assert body["open_interest"] is None and body["funding_rate"]["series_count"] == 1
 

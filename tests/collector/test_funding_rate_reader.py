@@ -38,7 +38,7 @@ def db(tmp_path: Path) -> Path:
 def write(db: Path, rows: list[FundingRate], merge: SpanMerge | None = None) -> None:
     writer = FundingRateWriter(open_writer(db))
     try:
-        writer.write_transaction(rows, ingested_at_ms=AT, merge=merge)
+        writer.write_transaction(rows, merge=merge)
     finally:
         writer.close()
 
@@ -103,7 +103,7 @@ def test_an_old_schema_and_a_missing_database_are_read_errors(tmp_path: Path) ->
 
 def test_a_database_newer_than_the_code_is_a_read_error(db: Path) -> None:
     conn = open_writer(db)
-    conn.execute("INSERT INTO schema_migrations VALUES (4, 'future', 'x', 1)")
+    conn.execute("INSERT INTO schema_migrations VALUES (5, 'future', 'x', 1)")
     conn.close()
     with pytest.raises(FundingRateReadError, match="Schema"):
         facts(db)

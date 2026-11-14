@@ -33,6 +33,7 @@ from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.collector.statement_proxy import StatementProxy
+from tests.readability_seed import register
 
 BASE_MS = 1_700_000_100_000
 TF = Timeframe("5m")
@@ -113,7 +114,8 @@ def build_database(
     conflict_rows = min(conflicts_per_symbol, rows_per_symbol)
     conn = open_writer(path)
     try:
-        migrate(conn, applied_at_ms=BASE_MS)
+        migrate(conn, applied_at_ms=BASE_MS - 2)  # the cut-over lies below the seeded stamp BASE_MS
+        register(conn, "candles", BASE_MS)
         conn.execute("PRAGMA synchronous=OFF")  # the benchmark database is disposable
         for index in range(symbols):
             symbol = symbol_name(index)

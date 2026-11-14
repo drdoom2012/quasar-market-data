@@ -13,6 +13,7 @@ from quasar_market_data.api.health_reader import (
     _CONFLICT_PROBE,
     _NEWEST_OI,
     _NEXT_OI_SERIES,
+    _UNCONFIRMED,
     read_ingest_snapshot,
 )
 from quasar_market_data.collector.open_interest_writer import OpenInterestWriter
@@ -24,6 +25,7 @@ from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.api.probe import InterleavingConnection
 from tests.api.seed import (
+    AT,
     SAMPLE_RULE,
     VENUE,
     insert_candle,
@@ -35,6 +37,8 @@ from tests.api.test_health_universe import AS_OF as GOLDEN_AS_OF
 from tests.api.test_health_universe import GOLDEN, golden_database, s17_fields
 from tests.api.test_open_interest_endpoint import contract_example
 from tests.config_files import TEN_SYMBOLS
+
+READABILITY_COUNT = _UNCONFIRMED.split(" WHERE ")[0]  # the one statement of 6.2.4 that names every table
 
 P5 = Timeframe("5m")
 TF = 300_000
@@ -119,12 +123,18 @@ def test_the_contract_example_is_what_the_server_returns(tmp_path: Path) -> None
 # --- the candle part is untouched; the key; null -------------------------------------------------------------
 
 
-def test_open_interest_is_the_last_key_and_null_when_not_enabled(tmp_path: Path) -> None:
+def test_open_interest_precedes_funding_and_readability_and_is_null_when_not_enabled(tmp_path: Path) -> None:
     path = golden_database(tmp_path / "m.db")
 
     body = ingest(path, (), GOLDEN_AS_OF, open_interest=None)
 
-    assert list(body)[-4:] == ["truncated", "universe", "open_interest", "funding_rate"]
+    assert list(body)[-5:] == [
+        "truncated",
+        "universe",
+        "open_interest",
+        "funding_rate",
+        "readability",
+    ]  # readability last (6.2.4)
     assert body["funding_rate"] is None
     assert body["open_interest"] is None
 
@@ -155,7 +165,9 @@ def test_a_disabled_answer_issues_no_open_interest_statement(tmp_path: Path) -> 
 
     ingest(path, (), open_interest=None, open_connection=traced)
 
-    assert log and not any("open_interest" in statement for statement in log)
+    assert log and not any(
+        "open_interest" in statement for statement in log if not statement.startswith(READABILITY_COUNT)
+    )  # only the readability count names every table (6.2.4)
 
 
 # --- counts and status --------------------------------------------------------------------------------------
@@ -283,7 +295,7 @@ def test_a_conflict_of_an_older_slot_and_a_candle_conflict_do_not_count_and_two_
     insert_candle(conn, AS_OF - TF, symbol=sym(1))
     conn.execute(
         "INSERT INTO candle_conflicts (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume,"
-        " turnover, first_seen_at_ms) VALUES (?, ?, '5m', ?, '1', '1', '1', '1', '1', NULL, 0)",
+        f" turnover, first_seen_at_ms) VALUES (?, ?, '5m', ?, '1', '1', '1', '1', '1', NULL, {AT})",
         (VENUE, sym(1), AS_OF - TF),
     )
     conn.close()
@@ -305,10 +317,8 @@ def test_a_conflict_written_by_the_collectors_writer_is_seen_by_health_and_the_e
     migrate(conn, applied_at_ms=WROTE_AT)
     writer = OpenInterestWriter(conn)
     key = OpenInterestKey(VENUE, sym(0), P5, AS_OF - TF)
-    writer.write_transaction([OpenInterest(key, "100.5", "7000000")], ingested_at_ms=WROTE_AT)
-    writer.write_transaction(
-        [OpenInterest(key, "100.6", "7000001")], ingested_at_ms=WROTE_AT + 1
-    )  # differs: a conflict
+    writer.write_transaction([OpenInterest(key, "100.5", "7000000")])
+    writer.write_transaction([OpenInterest(key, "100.6", "7000001")])  # differs: a conflict
     writer.close()
 
     found = oi_object(path, ())
@@ -319,8 +329,14 @@ def test_a_conflict_written_by_the_collectors_writer_is_seen_by_health_and_the_e
     )
 
     assert found["conflicted_series"] == 1 and found["status"] == "degraded"
-    assert rows == [
-        {"time_ms": AS_OF - TF, "open_interest": "100.5", "open_interest_value": "7000000", "conflicted": True}
+    assert [{k: v for k, v in row.items() if k != "readable_by_ms"} for row in rows] == [
+        {
+            "time_ms": AS_OF - TF,
+            "open_interest": "100.5",
+            "open_interest_value": "7000000",
+            "conflicted": True,
+            "readable_by_unconfirmed": False,  # the Collector's writer confirmed its transaction
+        }
     ]
 
 

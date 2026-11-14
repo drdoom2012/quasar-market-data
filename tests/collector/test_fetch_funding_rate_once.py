@@ -52,9 +52,9 @@ def test_requests_one_page_of_class_r_ending_at_the_forward_end_bound_and_writes
     assert (report.start_ms, report.end_ms) == (start, end)
     assert report.fetched == len(report.selection.eligible) == 24 or report.fetched == 25
     assert not report.selection.pending and not report.full_page and report.off_hour_rows == 0
-    ((rows, ingested_at, merge),) = sink.writes
+    ((rows, _, merge),) = sink.writes
     assert merge is None  # the command claims no coverage
-    assert ingested_at == clock.wall_ms()
+    # the writer stamps the transaction under its lock (ADR-0005 P-3); the command passes no stamp
     assert all(start <= row.key.funding_time_ms <= end for row in rows)
     assert report.write is not None and report.write.inserted == len(rows)
 

@@ -325,7 +325,7 @@ def test_idle_work_failure_is_fatal_and_keeps_the_uncertain_symbols() -> None:
 
         async def action(window: IdleWindow) -> None:
             with pytest.raises(CandleWriteOutcomeUnknown):
-                await window.sink_for("A").write([], ingested_at_ms=0)
+                await window.sink_for("A").write([])
             raise RuntimeError("backfill bug")
 
         h.run_kwargs["idle_work"].action = action
@@ -346,7 +346,7 @@ def test_an_unknown_write_outcome_during_the_hook_marks_the_symbol_uncertain() -
 
         async def action(window: IdleWindow) -> None:
             with pytest.raises(CandleWriteOutcomeUnknown):
-                await window.sink_for("A").write([], ingested_at_ms=0)
+                await window.sink_for("A").write([])
 
         h.run_kwargs["idle_work"].action = action
         h.start()

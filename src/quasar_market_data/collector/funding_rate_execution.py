@@ -131,7 +131,7 @@ async def execute_plan(
     else:
         merge = None  # an earlier page of a history chunk: its rows are stored, the chunk is claimed by the last page
     try:
-        report = await writer.write(rows, ingested_at_ms=now_ms, merge=merge)
+        report = await writer.write(rows, merge=merge)  # the writer stamps the rows (ADR-0005 P-3)
     except FundingRatePageError as error:
         late = _late(error.partial.inserted_keys, span_planned) if forward else ()
         raise FundingRateExecutionError(error, late, len(rows)) from error

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown
+from quasar_market_data.collector.candle_writer import CandleWriteNotStored, CandleWriteOutcomeUnknown
 from quasar_market_data.collector.collection_loop import (
     FatalLoopError,
     LoopConfig,
@@ -369,6 +369,21 @@ def test_normally_finished_task_keeps_its_real_result_when_another_expires() -> 
         a, b = h.rounds[0].results
         assert (a.symbol, a.outcome, a.attempts, a.inserted) == ("A", SymbolOutcome.COLLECTED, 1, 3)
         assert b == expired_result("B")
+
+    run(scenario)
+
+
+def test_a_write_not_stored_within_the_readability_bound_is_a_failed_attempt_and_retried() -> None:
+    async def scenario() -> None:
+        h = Harness(sink=ControlledSink(raises=[CandleWriteNotStored("too old to commit")]))
+        h.start()
+        await h.t.until_waiting(1)
+        await h.t.advance(1000)  # attempt 2 writes
+        await h.t.settle()
+        h.stop.set()
+        await h.task
+        result = h.rounds[0].results[0]
+        assert (result.outcome, result.attempts) == (SymbolOutcome.COLLECTED, 2)
 
     run(scenario)
 

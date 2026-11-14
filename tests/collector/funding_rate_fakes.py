@@ -90,12 +90,10 @@ class RecordingFundingSink:
         self.conflicts = conflicts
         self.writes: list[tuple[tuple[FundingRate, ...], int, SpanMerge | None]] = []
 
-    async def write(
-        self, rows: Sequence[FundingRate], *, ingested_at_ms: int, merge: SpanMerge | None = None
-    ) -> FundingRateWriteReport:
+    async def write(self, rows: Sequence[FundingRate], *, merge: SpanMerge | None = None) -> FundingRateWriteReport:
         if self.error is not None:
             raise self.error
-        self.writes.append((tuple(rows), ingested_at_ms, merge))
+        self.writes.append((tuple(rows), 0, merge))  # the real writer stamps; this fake has no clock
         conflicts = tuple(_conflict(row) for row in rows[: self.conflicts])
         return FundingRateWriteReport(len(rows) - len(conflicts), 0, conflicts, (), (), 0, 0, (), None, None)
 

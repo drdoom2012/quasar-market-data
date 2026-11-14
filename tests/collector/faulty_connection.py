@@ -35,6 +35,13 @@ class FaultyConnection(sqlite3.Connection):
         self.faults: list[Fault] = []
         self.statements: list[str] = []
 
+    def commit_confirms(self) -> bool:
+        """Whether a ``COMMIT`` executed now ends a readability confirmation, not a data transaction (ADR-0005 P-3).
+
+        For gates that count data commits; call it before the ``COMMIT`` is executed.
+        """
+        return bool(self.statements) and self.statements[-1].startswith("INSERT INTO write_confirmations")
+
     def execute(self, sql: str, *args: Any) -> sqlite3.Cursor:
         self.statements.append(sql)
         for fault in self.faults:

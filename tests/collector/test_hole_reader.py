@@ -28,6 +28,7 @@ from tests.collector.test_reconcile_reader import (
     put,
     slot,
 )
+from tests.readability_seed import register
 
 
 @pytest.fixture
@@ -73,10 +74,11 @@ def test_conflicted_and_unavailable_slots_are_not_holes(db: Path) -> None:
     put(db, [0, 9])
     mark_unavailable(db, [3])
     conn = open_writer(db)
+    register(conn, "candles", AT + 5)  # above the cut-over AT + 1
     conn.execute(
         "INSERT INTO candle_conflicts (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume,"
         " first_seen_at_ms) VALUES (?, ?, ?, ?, '1', '1', '1', '1', '1', ?)",
-        (VENUE, A, TF.label, slot(6), AT),
+        (VENUE, A, TF.label, slot(6), AT + 5),
     )
     conn.close()
     assert holes(db).interior_runs == ((slot(7), slot(9)), (slot(4), slot(6)), (slot(1), slot(3)))

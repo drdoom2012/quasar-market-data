@@ -14,7 +14,7 @@ check and the writer's open is accepted under the runner's assumption of a singl
 import hashlib
 import re
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from importlib import resources
 from importlib.resources.abc import Traversable
@@ -26,6 +26,9 @@ from quasar_market_data.storage.connection import StorageError, open_reader
 from quasar_market_data.storage.schema import APPLICATION_ID
 
 _FILE_NAME: Final = re.compile(r"(\d{3})_([a-z0-9_]+)\.sql", re.ASCII)
+_APPLIED_AT_PARAMETER: Final = ":applied_at_ms"
+
+type AppliedAt = int | Callable[[], int]
 
 
 class MigrationError(StorageError):
@@ -100,14 +103,20 @@ def _applied(conn: sqlite3.Connection, shipped: Sequence[Migration]) -> int:
     return len(rows)
 
 
-def _apply(conn: sqlite3.Connection, migration: Migration, applied_at_ms: int, *, claim_database: bool) -> None:
+def _apply(conn: sqlite3.Connection, migration: Migration, applied_at: AppliedAt, *, claim_database: bool) -> None:
     statements = _split_statements(migration.sql)
     conn.execute("BEGIN IMMEDIATE")
     try:
+        # A clock is read only now, under the write lock: no transaction of another writer can commit after this
+        # instant and before the migration (ADR-0005 P-2, the cut-over of migration 4).
+        applied_at_ms = ensure_timestamp_ms(applied_at() if callable(applied_at) else applied_at, "applied_at_ms")
         if claim_database:
             conn.execute(f"PRAGMA application_id = {APPLICATION_ID}")
         for statement in statements:
-            conn.execute(statement)
+            if _APPLIED_AT_PARAMETER in statement:
+                conn.execute(statement, {"applied_at_ms": applied_at_ms})
+            else:
+                conn.execute(statement)
         conn.execute(
             "INSERT INTO schema_migrations (version, name, checksum_sha256, applied_at_ms) VALUES (?, ?, ?, ?)",
             (migration.version, migration.name, migration.checksum, applied_at_ms),
@@ -171,13 +180,18 @@ def refuse_foreign_file(path: Path) -> None:
         raise MigrationError(f"{_FOREIGN}; the file was not modified")
 
 
-def migrate(conn: sqlite3.Connection, *, applied_at_ms: int, migrations: Sequence[Migration] | None = None) -> int:
+def migrate(
+    conn: sqlite3.Connection, *, applied_at_ms: AppliedAt, migrations: Sequence[Migration] | None = None
+) -> int:
     """Bring the database to the latest shipped version and return that version.
 
     ``conn`` must be an autocommit-style connection (``isolation_level=None``), as ``open_writer`` returns.
-    ``applied_at_ms`` is the wall-clock time recorded for newly applied migrations.
+    ``applied_at_ms`` is the wall-clock time recorded for newly applied migrations and bound as ``:applied_at_ms``
+    to every statement that names it. Pass a clock (a callable returning epoch ms) to have it read inside each
+    migration's ``BEGIN IMMEDIATE``, after the write lock is held, as the Collector does; an ``int`` is used as is.
     """
-    ensure_timestamp_ms(applied_at_ms, "applied_at_ms")
+    if not callable(applied_at_ms):
+        ensure_timestamp_ms(applied_at_ms, "applied_at_ms")
     if conn.isolation_level is not None:
         raise MigrationError("connection must use isolation_level=None (explicit transactions)")
     shipped = load_migrations() if migrations is None else tuple(migrations)

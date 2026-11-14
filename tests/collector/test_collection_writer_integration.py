@@ -39,7 +39,7 @@ class BlockingWriter:
         self.release = threading.Event()
         self.closed = False
 
-    def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
+    def write(self, candles: Sequence[ValidatedCandle]) -> WriteReport:
         self.started.set()
         if not self.release.wait(SAFETY_S):
             raise AssertionError("the test never released the blocked write")

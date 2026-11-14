@@ -42,7 +42,7 @@ def run(scenario: Callable[[Path], Coroutine[None, None, None]], timeout: float 
 
 async def seed_span(rig: Any, symbol: str, span: Interval, verified_at_ms: int | None = None) -> None:
     merge = SpanMerge(VENUE, symbol, span, verified_at_ms or rig.t.wall_ms())
-    await rig.writer.write([], ingested_at_ms=rig.t.wall_ms(), merge=merge)
+    await rig.writer.write([], merge=merge)
 
 
 def rows_and_conflicts(db: Path) -> tuple[int, int]:
@@ -278,14 +278,14 @@ class FlakyOnce:
     def __init__(self, inner: Any, committed: bool) -> None:
         self.inner, self.committed, self.failed = inner, committed, False
 
-    async def write(self, rows: Any, *, ingested_at_ms: int, merge: Any = None) -> Any:
+    async def write(self, rows: Any, *, merge: Any = None) -> Any:
         if merge is not None and not self.failed:
             self.failed = True
             if self.committed:  # the transaction took effect but the answer was lost
-                await self.inner.write(rows, ingested_at_ms=ingested_at_ms, merge=merge)
+                await self.inner.write(rows, merge=merge)
             partial = FundingRateWriteReport(0, 0, (), (), (), 0, 0, (), None, None)
             raise FundingRatePageError(FundingRateWriteOutcomeUnknown("commit failed"), 0, partial)
-        return await self.inner.write(rows, ingested_at_ms=ingested_at_ms, merge=merge)
+        return await self.inner.write(rows, merge=merge)
 
     @property
     def _executor(self) -> Any:

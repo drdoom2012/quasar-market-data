@@ -59,6 +59,7 @@ from quasar_market_data.storage.migrate import migrate
 from tests.api.seed import SAMPLE_RULE, SAMPLE_UNIVERSE
 from tests.config_files import write_config
 from tests.indicator_data import generated_bars
+from tests.readability_seed import register_all
 
 TF_MS = 300_000
 BASE_MS = 1_700_000_100_000  # aligned to 5m
@@ -99,7 +100,8 @@ def symbol_name(index: int) -> str:
 def build_database(path: Path, series: int) -> None:
     conn = open_writer(path)
     try:
-        migrate(conn, applied_at_ms=BASE_MS)
+        migrate(conn, applied_at_ms=BASE_MS - 2)  # the cut-over lies below the seeded stamp BASE_MS
+        register_all(conn, BASE_MS)
         conn.execute("BEGIN")
         for i in range(series):
             bars = generated_bars(ROWS_PER_SERIES, seed=i)

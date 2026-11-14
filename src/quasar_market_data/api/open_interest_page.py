@@ -10,11 +10,13 @@ from dataclasses import dataclass
 
 from quasar_market_data.api.candle_reader import UnknownSeries
 from quasar_market_data.api.params import MAX_WINDOW_SLOTS, OpenInterestRequest
+from quasar_market_data.api.readability import confirmation_columns, confirmation_join, read_cutover
 from quasar_market_data.domain.open_interest_coverage import (
     OpenInterestCoverage,
     OpenInterestRule,
     classify_open_interest_span,
 )
+from quasar_market_data.domain.readability import readable_by
 from quasar_market_data.storage.schema import verify_schema
 
 
@@ -24,6 +26,8 @@ class StoredOpenInterest:
     open_interest: str
     open_interest_value: str
     conflicted: bool
+    readable_by_ms: int
+    readable_by_unconfirmed: bool
 
 
 @dataclass(frozen=True)
@@ -80,8 +84,11 @@ def _read(
         end = start + step
 
     rows = conn.execute(
-        "SELECT time_ms, open_interest, open_interest_value FROM open_interest"
-        " WHERE venue = ? AND symbol = ? AND period = ? AND time_ms >= ? AND time_ms < ?"
+        "SELECT time_ms, open_interest, open_interest_value"
+        + confirmation_columns("open_interest")
+        + " FROM open_interest"
+        + confirmation_join("open_interest")
+        + " WHERE venue = ? AND symbol = ? AND period = ? AND time_ms >= ? AND time_ms < ?"
         " ORDER BY time_ms LIMIT ?",
         (*series, start, end, request.limit + 1),
     ).fetchall()
@@ -98,6 +105,7 @@ def _read(
         ).fetchall()
     }
 
+    cutover = read_cutover(conn)
     coverage = classify_open_interest_span(
         start=start,
         end=span_end,
@@ -115,7 +123,16 @@ def _read(
         end=end,
         oldest_time_ms=oldest,
         newest_time_ms=newest,
-        rows=tuple(StoredOpenInterest(row[0], row[1], row[2], row[0] in coverage.conflicted_times) for row in rows),
+        rows=tuple(
+            StoredOpenInterest(
+                row[0],
+                row[1],
+                row[2],
+                row[0] in coverage.conflicted_times,
+                *readable_by(row[3], confirmed=bool(row[4]), cutover_ms=cutover),
+            )
+            for row in rows
+        ),
         next=next_time,
         span_start=start,
         span_end=span_end,

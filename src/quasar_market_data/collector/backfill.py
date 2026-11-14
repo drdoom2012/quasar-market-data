@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Final
 
 from quasar_market_data.collector.binance_klines import VENUE_BINANCE_USDM, KlineParseError
-from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown
+from quasar_market_data.collector.candle_writer import CandleWriteNotStored, CandleWriteOutcomeUnknown
 from quasar_market_data.collector.clock import Clock, Sleep
 from quasar_market_data.collector.collection_loop import IdleWindow, LoopConfig
 from quasar_market_data.collector.deadline_source import DeadlineSource
@@ -337,6 +337,8 @@ class Backfiller:
                     return _Walk(None, inserted, stopped=True)
                 return _Walk(None, inserted, failed=True, reason=_reason(error))
             except (KlineParseError, PageViolation) as error:
+                return _Walk(None, inserted, failed=True, reason=_reason(error))
+            except CandleWriteNotStored as error:  # certainly not written: a failed page, retried later
                 return _Walk(None, inserted, failed=True, reason=_reason(error))
             except CandleWriteOutcomeUnknown as error:
                 return _Walk(

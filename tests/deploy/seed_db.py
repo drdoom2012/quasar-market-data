@@ -45,7 +45,7 @@ def seed(db: Path) -> None:
         migrate(conn, applied_at_ms=SEED_AT_MS)
         rows = [row(SEED_START_MS + i * STEP_MS) for i in range(SEED_COUNT)]
         candles = [require_valid(candle) for candle in parse_klines(rows, SEED_SYMBOL, FIVE_MINUTES)]
-        CandleWriter(conn).write(candles, ingested_at_ms=SEED_AT_MS)
+        CandleWriter(conn).write(candles)
     finally:
         conn.close()
 

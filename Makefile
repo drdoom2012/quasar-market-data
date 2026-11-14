@@ -76,7 +76,7 @@ bench-indicators:
 # The 100-row open interest transaction on this machine's temp disk (ADR-0003 P-9: p99 <= 50 ms); not part of `check`.
 # On the VPS run it in the Dockerfile's runtime image instead (README, "Open interest write benchmark").
 bench-oi-write:
-	uv run python tools/bench_open_interest_write.py --schema src/quasar_market_data/storage/migrations/002_open_interest.sql --max-p99-ms 50
+	uv run python tools/bench_open_interest_write.py --schema src/quasar_market_data/storage/migrations/001_schema_v1.sql --schema src/quasar_market_data/storage/migrations/002_open_interest.sql --schema src/quasar_market_data/storage/migrations/003_funding_rate.sql --schema src/quasar_market_data/storage/migrations/004_readability.sql --max-p99-ms 50
 
 # One refresh of the symbol overview against a served API on a generated database in a fresh temp dir (OI-6 spec 7); not part of `check`.
 # SERIES symbols; OVERVIEW_PROFILE smoke | target (target = 100 000 candle rows per series, the size of bench-health's target:

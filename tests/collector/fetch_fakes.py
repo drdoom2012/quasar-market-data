@@ -194,7 +194,7 @@ class ControlledSink:
         self.write_started = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
+    async def write(self, candles: Sequence[ValidatedCandle]) -> WriteReport:
         index = len(self.calls)
         self.calls.append(tuple(candles))
         self.write_started.set()

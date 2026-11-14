@@ -1,4 +1,5 @@
 import hashlib
+import re
 import sqlite3
 from pathlib import Path
 
@@ -47,12 +48,13 @@ def conn(tmp_path: Path) -> sqlite3.Connection:
 
 
 def test_fresh_database_is_migrated_to_the_latest_version(conn: sqlite3.Connection) -> None:
-    assert migrate(conn, applied_at_ms=AT) == 3
+    assert migrate(conn, applied_at_ms=AT) == 4
     assert conn.execute("PRAGMA application_id").fetchone() == (APPLICATION_ID,)
     assert conn.execute("SELECT * FROM schema_migrations ORDER BY version").fetchall() == [
         (1, "schema_v1", M1.checksum, AT),
         (2, "open_interest", load_migrations()[1].checksum, AT),
         (3, "funding_rate", load_migrations()[2].checksum, AT),
+        (4, "readability", load_migrations()[3].checksum, AT),
     ]
     tables = {name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"candles", "candle_conflicts", "unavailable_candles", "schema_migrations"} <= tables
@@ -63,11 +65,12 @@ def test_fresh_database_is_migrated_to_the_latest_version(conn: sqlite3.Connecti
 def test_migrate_is_idempotent(conn: sqlite3.Connection) -> None:
     migrate(conn, applied_at_ms=AT)
     before = inventory(conn)
-    assert migrate(conn, applied_at_ms=AT + 1) == 3
+    assert migrate(conn, applied_at_ms=AT + 1) == 4
     assert conn.execute("SELECT version, applied_at_ms FROM schema_migrations ORDER BY version").fetchall() == [
         (1, AT),
         (2, AT),
         (3, AT),
+        (4, AT),
     ]
     assert inventory(conn) == before
 
@@ -297,7 +300,11 @@ def test_migrated_database_matches_the_shipped_schema_fixture(
 ) -> None:
     migrate(conn, applied_at_ms=AT)
     assert schema_sql(3)  # the fixture applied the same SQL directly
-    assert inventory(conn) == inventory(schema_v3_conn)
+    # Migration 4 binds :applied_at_ms, so it cannot be applied as a script; its objects are compared by name.
+    v4_names = set(re.findall(r"CREATE (?:TABLE|TRIGGER) (\w+)", load_migrations()[3].sql))
+    found = inventory(conn)
+    assert {item for item in found if item[1] not in v4_names} == inventory(schema_v3_conn)
+    assert {item[1] for item in found} >= v4_names
 
 
 V1_TABLES = {
@@ -331,14 +338,14 @@ def test_upgrade_from_v1_keeps_every_v1_row(conn: sqlite3.Connection) -> None:
     before = {table: table_digest(conn, table) for table in V1_TABLES}
     assert conn.execute("SELECT count(*) FROM candles").fetchone() == (3,)
 
-    assert migrate(conn, applied_at_ms=AT + 1) == 3
-    assert versions(conn) == [1, 2, 3]
+    assert migrate(conn, applied_at_ms=AT + 1) == 4
+    assert versions(conn) == [1, 2, 3, 4]
     assert {table: table_digest(conn, table) for table in V1_TABLES} == before
 
     after = inventory(conn)
-    assert migrate(conn, applied_at_ms=AT + 2) == 3
+    assert migrate(conn, applied_at_ms=AT + 2) == 4
     assert inventory(conn) == after
-    assert versions(conn) == [1, 2, 3]
+    assert versions(conn) == [1, 2, 3, 4]
 
 
 V1_AND_V2_TABLES = {
@@ -376,11 +383,11 @@ def test_upgrade_from_v2_keeps_every_v1_and_v2_row(conn: sqlite3.Connection) -> 
     before = {table: table_digest(conn, table, V1_AND_V2_TABLES) for table in V1_AND_V2_TABLES}
     assert conn.execute("SELECT count(*) FROM open_interest").fetchone() == (3,)
 
-    assert migrate(conn, applied_at_ms=AT + 1) == 3
-    assert versions(conn) == [1, 2, 3]
+    assert migrate(conn, applied_at_ms=AT + 1) == 4
+    assert versions(conn) == [1, 2, 3, 4]
     assert {table: table_digest(conn, table, V1_AND_V2_TABLES) for table in V1_AND_V2_TABLES} == before
     assert conn.execute("SELECT count(*) FROM funding_rates").fetchone() == (0,)
-    assert migrate(conn, applied_at_ms=AT + 2) == 3
+    assert migrate(conn, applied_at_ms=AT + 2) == 4
 
 
 def test_applied_version(conn: sqlite3.Connection, tmp_path: Path) -> None:
@@ -390,7 +397,7 @@ def test_applied_version(conn: sqlite3.Connection, tmp_path: Path) -> None:
     migrate(conn, applied_at_ms=AT, migrations=load_migrations()[:2])
     assert applied_version(conn) == 2
     migrate(conn, applied_at_ms=AT)
-    assert applied_version(conn) == 3
+    assert applied_version(conn) == 4
 
     foreign = open_writer(tmp_path / "foreign.db")
     foreign.execute("CREATE TABLE other (a INTEGER)")

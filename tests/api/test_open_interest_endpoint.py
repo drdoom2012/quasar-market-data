@@ -79,15 +79,22 @@ def contract_example(heading: str, *, fragment: bool = False) -> dict[str, Any]:
 
 
 def example_database(path: Path) -> Path:
-    """Rows of the contract example (6.5.4): the series starts earlier, slots 0, 1 (conflicted) and 3 are stored."""
+    """Rows of the contract example (6.5.4): the series starts earlier, slots 0, 1 (conflicted) and 3 are stored.
+
+    Each row is stored by its own confirmed transaction 522 s after its period end (a round at ``c x 5 min +
+    round_offset`` plus a little), so ``readable_by_ms`` is that stamp plus the bound; the conflict comes later.
+    """
     make_database(path)
     conn = open_writer(path)
     try:
-        insert_open_interest(conn, 1792643700000, open_interest="95000.1", open_interest_value="7000000000.5")
-        insert_open_interest(conn, 1792672500000, open_interest="95677.779", open_interest_value="7446123150.675")
-        insert_open_interest(conn, 1792672800000, open_interest="95690.12", open_interest_value="7447031002.4")
-        insert_open_interest(conn, 1792673400000, open_interest="95702.5", open_interest_value="7447990111.25")
-        insert_open_interest_conflict(conn, 1792672800000, 1)
+        for time_ms, oi, value in (
+            (1792643700000, "95000.1", "7000000000.5"),
+            (1792672500000, "95677.779", "7446123150.675"),
+            (1792672800000, "95690.12", "7447031002.4"),
+            (1792673400000, "95702.5", "7447990111.25"),
+        ):
+            insert_open_interest(conn, time_ms, open_interest=oi, open_interest_value=value, stamp=time_ms + 522_000)
+        insert_open_interest_conflict(conn, 1792672800000, 1, stamp=1792673622000)
     finally:
         conn.close()
     return path

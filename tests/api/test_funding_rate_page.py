@@ -471,10 +471,9 @@ def test_the_real_writer_and_the_reader_agree_on_conflicts_and_the_span(tmp_path
 
     writer.write_transaction(
         [row(ev(0), "0.0001"), row(ev(1), "-0.0002")],
-        ingested_at_ms=NOW,
         merge=SpanMerge(VENUE, SYMBOL, Interval(ev(0), ev(2)), NOW),
     )
-    report = writer.write_transaction([row(ev(1), "-0.0003")], ingested_at_ms=NOW + 1)  # a differing re-delivery
+    report = writer.write_transaction([row(ev(1), "-0.0003")])  # a differing re-delivery
     conn.close()
     assert report.conflicts and report.conflicts[0].newly_recorded
 

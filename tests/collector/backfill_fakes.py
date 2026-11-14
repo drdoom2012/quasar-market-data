@@ -105,13 +105,13 @@ class RecordingSink:
         self.raises_after_commit: dict[int, BaseException] = {}
         self.fake_report: WriteReport | None = None
 
-    async def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
+    async def write(self, candles: Sequence[ValidatedCandle]) -> WriteReport:
         self.writes += 1
         if self.writes in self.raises:
             raise self.raises[self.writes]
         if self.fake_report is not None:
             return self.fake_report
-        report = await self.inner.write(candles, ingested_at_ms=ingested_at_ms)
+        report = await self.inner.write(candles)
         if self.writes in self.raises_after_commit:
             raise self.raises_after_commit[self.writes]  # committed, but the caller learns nothing
         if self.after_write is not None:
@@ -178,7 +178,7 @@ class Env:
         candles = [require_valid(c) for c in parse_klines(rows, symbol, timeframe)]
         conn = open_writer(self.db)
         try:
-            CandleWriter(conn).write(candles, ingested_at_ms=AT)
+            CandleWriter(conn).write(candles)
         finally:
             conn.close()
 

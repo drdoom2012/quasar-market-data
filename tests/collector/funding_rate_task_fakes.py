@@ -212,9 +212,7 @@ class InMemorySink:
         self.writes = 0
         self.fail_next: list[BaseException] = []
 
-    async def write(
-        self, rows: Sequence[FundingRate], *, ingested_at_ms: int, merge: SpanMerge | None = None
-    ) -> FundingRateWriteReport:
+    async def write(self, rows: Sequence[FundingRate], *, merge: SpanMerge | None = None) -> FundingRateWriteReport:
         if self.fail_next:
             raise self.fail_next.pop(0)
         self.writes += 1

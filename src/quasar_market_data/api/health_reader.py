@@ -17,8 +17,12 @@ row in ``funding_rate_verified`` (the span); per series one next-series seek on 
 """
 
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Final
 
+from quasar_market_data.api.readability import Dataset, read_cutover
+from quasar_market_data.domain.readability import READABLE_BOUND_MS
 from quasar_market_data.storage.schema import SCHEMA_VERSION, verify_schema
 
 _NEXT_SERIES = (
@@ -91,6 +95,81 @@ class IngestSnapshot:
     candles: tuple[StoredSeries, ...]
     open_interest: OpenInterestFacts | None  # None when open interest is not enabled
     funding_rate: FundingRateFacts
+
+
+READABILITY_WINDOW_MS: Final = 86_400_000  # the window of the readability object (contract 6.2.4); may change
+READABILITY_TABLES: Final[tuple[Dataset, ...]] = ("candles", "open_interest", "funding_rates")
+
+
+@dataclass(frozen=True)
+class UnconfirmedTransactions:
+    transactions: int
+    newest_stamp_ms: int | None
+
+
+@dataclass(frozen=True)
+class ReadabilityFacts:
+    """The ``readability`` object of ``/health/ingest`` (contract 6.2.4, ADR-0005 P-5), from the request's snapshot."""
+
+    cutover_ms: int
+    unconfirmed: tuple[tuple[Dataset, UnconfirmedTransactions], ...]  # in READABILITY_TABLES order
+
+
+_UNCONFIRMED: Final = (
+    "SELECT count(*), max(t.stamp_ms) FROM write_transactions t"
+    " WHERE t.table_name = ? AND t.stamp_ms > ? AND t.stamp_ms <= ?"
+    " AND NOT EXISTS (SELECT 1 FROM write_confirmations w WHERE w.table_name = t.table_name AND w.stamp_ms = t.stamp_ms)"
+)
+
+
+def _walk_readability(conn: sqlite3.Connection, as_of_ms: int) -> ReadabilityFacts:
+    """Unconfirmed write transactions per table with a stamp in ``(as_of - window, as_of - B]``: a range of the key."""
+    unconfirmed = []
+    for table in READABILITY_TABLES:
+        count, newest = conn.execute(
+            _UNCONFIRMED, (table, as_of_ms - READABILITY_WINDOW_MS, as_of_ms - READABLE_BOUND_MS)
+        ).fetchone()
+        unconfirmed.append((table, UnconfirmedTransactions(count, newest)))
+    return ReadabilityFacts(read_cutover(conn), tuple(unconfirmed))
+
+
+def _with_readability[T](
+    conn: sqlite3.Connection, as_of_ms: int, walk: Callable[[sqlite3.Connection], T]
+) -> tuple[T, ReadabilityFacts]:
+    conn.execute("BEGIN")
+    try:
+        verify_schema(conn)
+        return walk(conn), _walk_readability(conn, as_of_ms)
+    finally:
+        _rollback(conn)
+
+
+def read_stored_series_with_readability(
+    conn: sqlite3.Connection, as_of_ms: int
+) -> tuple[tuple[StoredSeries, ...], ReadabilityFacts]:
+    """``read_stored_series`` and the readability facts in ONE snapshot."""
+    return _with_readability(conn, as_of_ms, _walk_candle_series)
+
+
+def read_ingest_snapshot_with_readability(
+    conn: sqlite3.Connection, conflicts_after_ms: int, as_of_ms: int
+) -> tuple[tuple[tuple[StoredSeries, ...], OpenInterestFacts], ReadabilityFacts]:
+    """``read_ingest_snapshot`` and the readability facts in ONE snapshot."""
+    return _with_readability(
+        conn, as_of_ms, lambda c: (_walk_candle_series(c), _walk_open_interest_series(c, conflicts_after_ms))
+    )
+
+
+def read_ingest_extensions_with_readability(
+    conn: sqlite3.Connection, oi_conflicts_after_ms: int | None, funding_conflicts_after_ms: int, as_of_ms: int
+) -> tuple[IngestSnapshot, ReadabilityFacts]:
+    """``read_ingest_extensions`` and the readability facts in ONE snapshot."""
+
+    def walk(c: sqlite3.Connection) -> IngestSnapshot:
+        oi = None if oi_conflicts_after_ms is None else _walk_open_interest_series(c, oi_conflicts_after_ms)
+        return IngestSnapshot(_walk_candle_series(c), oi, _walk_funding_series(c, funding_conflicts_after_ms))
+
+    return _with_readability(conn, as_of_ms, walk)
 
 
 def check_ready(conn: sqlite3.Connection) -> int:

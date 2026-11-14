@@ -39,7 +39,7 @@ MAX_LIMIT: Final = 1000
 class CandleSink(Protocol):
     """Where ``fetch_once`` sends the confirmed closed candles; ``AsyncCandleWriter`` satisfies it."""
 
-    async def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport: ...
+    async def write(self, candles: Sequence[ValidatedCandle]) -> WriteReport: ...
 
 
 @dataclass(frozen=True)
@@ -114,5 +114,5 @@ async def fetch_once(
 
     write = None
     if selection.eligible:
-        write = await writer.write(selection.eligible, ingested_at_ms=clock.wall_ms())
+        write = await writer.write(selection.eligible)  # the writer stamps under the lock (ADR-0005 P-3)
     return FetchOnceReport(fetched=len(candles), selection=selection, write=write, page=outcome)

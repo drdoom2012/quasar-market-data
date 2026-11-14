@@ -39,9 +39,9 @@ def test_requests_the_newest_period_ends_up_to_the_aligned_boundary_and_writes_t
     assert report.fetched == 3
     assert len(report.selection.eligible) == 3 and not report.selection.pending
     assert len(sink.writes) == 1
-    rows, ingested_at = sink.writes[0]
+    rows, _ = sink.writes[0]
     assert [row.key.time_ms for row in rows] == [start, start + STEP, end]
-    assert ingested_at == clock.wall_ms()
+    # the writer stamps the transaction under its lock (ADR-0005 P-3); the command passes no stamp
     assert report.write is not None and report.write.inserted == 3
 
 

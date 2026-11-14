@@ -54,6 +54,7 @@ from quasar_market_data.collector.funding_rate_writer import (
     FundingRateConflict,
     FundingRateWriteBusy,
     FundingRateWriteError,
+    FundingRateWriteNotStored,
     FundingRateWriteOutcomeUnknown,
     FundingSpanNotAdjacentError,
 )
@@ -605,6 +606,8 @@ class _FundingRateTask:
             self.emit(f"funding-warning merge-refused symbol={state.symbol} {_problem(cause)}")
             return _Failed(cause)
         if isinstance(cause, FundingRateWriteBusy):
+            return _Failed(cause)
+        if isinstance(cause, FundingRateWriteNotStored):  # too old to commit within the readability bound (ADR-0005)
             return _Failed(cause)
         raise FundingRateWriterUnusable(_problem(cause))
 

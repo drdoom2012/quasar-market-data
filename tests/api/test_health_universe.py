@@ -11,7 +11,11 @@ from starlette.testclient import TestClient
 
 from quasar_market_data.api import database
 from quasar_market_data.api.app import HEALTH_MISSING_MAX, create_app
-from quasar_market_data.api.health_reader import StoredSeries, read_stored_series
+from quasar_market_data.api.health_reader import (
+    ReadabilityFacts,
+    StoredSeries,
+    read_stored_series_with_readability,
+)
 from quasar_market_data.config.settings import Instrument
 from quasar_market_data.storage.connection import open_reader, open_writer
 from tests.api.seed import SAMPLE_RULE, VENUE, insert_candle, make_database
@@ -189,7 +193,13 @@ def test_configured_flag_on_behind_entries(tmp_path: Path) -> None:
 def test_the_universe_block_follows_truncated_with_the_keys_of_the_contract(tmp_path: Path) -> None:
     body = ingest(seed(tmp_path / "m.db", {("A", "5m"): 999}), AS_OF, (inst("A"),))
 
-    assert list(body)[-4:] == ["truncated", "universe", "open_interest", "funding_rate"]  # funding_rate is last (6.2.3)
+    assert list(body)[-5:] == [
+        "truncated",
+        "universe",
+        "open_interest",
+        "funding_rate",
+        "readability",
+    ]  # readability last (6.2.4)
     assert list(body["universe"]) == [
         "configured_count",
         "configured_stored",
@@ -337,12 +347,12 @@ def test_a_commit_after_the_read_finished_is_not_in_the_answer(tmp_path: Path, m
     path = commit_fixture(tmp_path / "m.db")
     reference = ingest(path, AS_OF, COMMIT_UNIVERSE)
 
-    def read_then_commit(conn: sqlite3.Connection) -> tuple[StoredSeries, ...]:
-        result = read_stored_series(conn)
+    def read_then_commit(conn: sqlite3.Connection, as_of_ms: int) -> tuple[tuple[StoredSeries, ...], ReadabilityFacts]:
+        result = read_stored_series_with_readability(conn, as_of_ms)
         commit_new_data(path)
         return result
 
-    monkeypatch.setattr(database, "read_stored_series", read_then_commit)
+    monkeypatch.setattr(database, "read_stored_series_with_readability", read_then_commit)
 
     body = ingest(path, AS_OF, COMMIT_UNIVERSE)
 

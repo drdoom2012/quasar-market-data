@@ -14,6 +14,11 @@ statement and connection settings as the Collector's open interest writer (WAL, 
 ``recursive_triggers=ON``, ``busy_timeout`` 1000). It times each transaction from holding the write lock to the
 end of ``COMMIT``, prints one line and removes its files unless ``--keep``. It never touches another database.
 
+With the readability migration among the ``--schema`` files (``004_readability.sql``, schema version 4, ADR-0005 P-6;
+pass the files 001 to 004 in order), every transaction is registered and followed by its single-row confirmation
+transaction, as the Collector's writer does since schema 4, and the time runs to the end of the confirmation's
+``COMMIT``: what a candle write can wait for. ``:applied_at_ms`` in a schema file is replaced by a fixed instant.
+
 The database starts empty, so B-tree depth and checkpoint work are lower than in a database that has grown for
 weeks; the number is a lower bound of the steady-state cost, not a proof.
 """
@@ -42,6 +47,13 @@ INSERT_OPEN_INTEREST: Final = (
 )
 
 
+# The registration and the confirmation of ``collector.readability`` (schema 4).
+REGISTER: Final = "INSERT INTO write_transactions (table_name, stamp_ms) VALUES (?, ?)"
+CONFIRM: Final = (
+    "INSERT INTO write_confirmations (table_name, stamp_ms, confirmed_at_ms) VALUES (?, ?, ?) ON CONFLICT DO NOTHING"
+)
+
+
 def nearest_rank(sorted_values: Sequence[int], percent: int) -> int:
     """Nearest-rank percentile of already sorted values (integer arithmetic)."""
     if not sorted_values:
@@ -60,21 +72,30 @@ def _connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def run(schema: Path, directory: Path, transactions: int) -> list[int]:
+def run(schemas: Sequence[Path], directory: Path, transactions: int) -> list[int]:
     conn = _connect(directory / DB_NAME)
     try:
-        conn.executescript(schema.read_text("utf-8"))
+        for schema in schemas:  # the cut-over of migration 4 is START_MS: every stamp below lies above it
+            conn.executescript(schema.read_text("utf-8").replace(":applied_at_ms", str(START_MS - 1)))
+        readability = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'write_transactions'").fetchone()
         durations: list[int] = []
         for tx in range(transactions):
+            stamp = START_MS + 1 + tx
             conn.execute("BEGIN IMMEDIATE")
             locked = time.perf_counter_ns()
+            if readability:
+                conn.execute(REGISTER, ("open_interest", stamp))
             for i in range(ROWS_PER_TRANSACTION):
                 time_ms = START_MS + (tx * ROWS_PER_TRANSACTION + i) * PERIOD_MS
                 conn.execute(
                     INSERT_OPEN_INTEREST,
-                    ("binance-usdm", "BTC/USDT:USDT", "5m", time_ms, "95677.779", "7446123150.675", START_MS),
+                    ("binance-usdm", "BTC/USDT:USDT", "5m", time_ms, "95677.779", "7446123150.675", stamp),
                 )
             conn.execute("COMMIT")
+            if readability:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(CONFIRM, ("open_interest", stamp, stamp))
+                conn.execute("COMMIT")
             durations.append(time.perf_counter_ns() - locked)
         return durations
     finally:
@@ -87,7 +108,13 @@ def _ms(ns: int) -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
-    parser.add_argument("--schema", type=Path, required=True, help="path to 002_open_interest.sql")
+    parser.add_argument(
+        "--schema",
+        type=Path,
+        action="append",
+        required=True,
+        help="a migration file, applied in the given order (002 alone, or 001 to 004 for the readability pair)",
+    )
     parser.add_argument("--dir", type=Path, default=None, help="missing or empty directory (default: a new temp dir)")
     parser.add_argument("--transactions", type=int, default=1_000)
     parser.add_argument("--max-p99-ms", type=float, default=None, help="exit 1 when p99 is above this")
@@ -112,6 +139,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         durations = sorted(run(args.schema, directory, args.transactions))
+        readability = any(path.name.endswith("_readability.sql") for path in args.schema)
     finally:
         if not args.keep:
             for suffix in ("", "-wal", "-shm"):
@@ -121,7 +149,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     p99 = nearest_rank(durations, 99)
     print(
-        f"oi_write rows_per_tx={ROWS_PER_TRANSACTION} transactions={len(durations)}"
+        f"oi_write rows_per_tx={ROWS_PER_TRANSACTION} transactions={len(durations)} with_confirmation={readability}"
         f" p50_ms={_ms(nearest_rank(durations, 50))} p99_ms={_ms(p99)} max_ms={_ms(durations[-1])}"
         f" dir={directory} sqlite={sqlite3.sqlite_version} date={datetime.now(UTC).date().isoformat()}",
         flush=True,

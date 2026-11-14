@@ -17,6 +17,7 @@ from quasar_market_data.collector.open_interest_task import OpenInterestWriterUn
 from quasar_market_data.collector.open_interest_writer import (
     OpenInterestWriteBusy,
     OpenInterestWriteError,
+    OpenInterestWriteNotStored,
     OpenInterestWriteOutcomeUnknown,
 )
 from tests.collector.manual_time import NS_PER_MS, assert_no_leftover_tasks
@@ -518,7 +519,15 @@ def page_error(cause: OpenInterestWriteError) -> OpenInterestPageError:
     return OpenInterestPageError(cause, 0, OpenInterestWriteReport(0, 0, (), (), (), 0, 0))
 
 
-@pytest.mark.parametrize("cause", [OpenInterestWriteBusy("busy"), OpenInterestWriteOutcomeUnknown("unknown")])
+@pytest.mark.parametrize(
+    "cause",
+    [
+        OpenInterestWriteBusy("busy"),
+        OpenInterestWriteNotStored("too old to commit"),
+        OpenInterestWriteOutcomeUnknown("unknown"),
+    ],
+    ids=["busy", "not_stored", "outcome_unknown"],
+)
 def test_busy_and_unknown_outcome_use_the_one_retry_and_the_task_continues(
     tmp_path: Path, cause: OpenInterestWriteError
 ) -> None:

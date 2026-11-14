@@ -30,6 +30,7 @@ from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.api.seed import SAMPLE_RULE
+from tests.readability_seed import register_all
 
 BASE_MS = 1_700_000_100_000
 TF_MS = 300_000
@@ -50,7 +51,8 @@ def symbol_name(index: int) -> str:
 def build_database(path: Path) -> None:
     conn = open_writer(path)
     try:
-        migrate(conn, applied_at_ms=BASE_MS)
+        migrate(conn, applied_at_ms=BASE_MS - 2)  # the cut-over lies below the seeded stamp BASE_MS
+        register_all(conn, BASE_MS)
         conn.execute("BEGIN")
         for i in range(SERIES):
             conn.executemany(

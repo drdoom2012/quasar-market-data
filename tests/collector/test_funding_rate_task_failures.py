@@ -17,6 +17,7 @@ from quasar_market_data.collector.funding_rate_writer import (
     FundingRateConflict,
     FundingRateWriteBusy,
     FundingRateWriteError,
+    FundingRateWriteNotStored,
     FundingSpanNotAdjacentError,
 )
 from quasar_market_data.domain.funding_rate import FundingRate, FundingRateKey, RateType
@@ -179,6 +180,19 @@ def test_an_unusable_writer_ends_the_task_but_a_refused_merge_only_fails_the_ser
     run(scenario)
 
 
+def test_a_page_not_stored_within_the_readability_bound_is_retried_and_never_ends_the_task() -> None:
+    async def scenario(tmp_path: Path) -> None:
+        sink = InMemorySink()
+        sink.fail_next.append(FundingRatePageError(FundingRateWriteNotStored("too old to commit"), 0, PARTIAL))
+        rig = await make_rig(tmp_path, symbols=(BTC,), t=t0(), sink=sink)
+        h = await start_task(tmp_path, rig=rig, backfill_days=1)
+        await h.run_for(60 * S, step_ms=2 * S)
+        assert not h.task.done() and BTC in sink.spans  # the page failed once and a later try stored it
+        await h.finish()
+
+    run(scenario)
+
+
 def test_a_failing_start_up_read_ends_the_task() -> None:
     async def scenario(tmp_path: Path) -> None:
         rig = await make_rig(tmp_path, symbols=(BTC,), t=t0())
@@ -334,12 +348,11 @@ def test_a_success_between_failures_clears_the_count_so_four_failures_do_not_sus
     async def scenario(tmp_path: Path) -> None:
         err = ccxt.NetworkError("x")
         rig = await make_rig(tmp_path, symbols=(BTC,), t=t0())
-        await rig.writer.write([], ingested_at_ms=rig.t.wall_ms(), merge=None)
+        await rig.writer.write([], merge=None)
         from quasar_market_data.collector.funding_rate_writer import SpanMerge
 
         await rig.writer.write(
             [],
-            ingested_at_ms=rig.t.wall_ms(),
             merge=SpanMerge(VENUE, BTC, Interval(B0 - 2 * HOUR, B0 - HOUR), rig.t.wall_ms()),
         )
         rig.exchange.errors = [err, err, None, err, err, None]  # two failures, a success, two failures, a success
@@ -359,9 +372,9 @@ class ConflictThenBusy(InMemorySink):
         super().__init__()
         self.failed = False
 
-    async def write(self, rows: Any, *, ingested_at_ms: int, merge: Any = None) -> FundingRateWriteReport:
+    async def write(self, rows: Any, *, merge: Any = None) -> FundingRateWriteReport:
         if self.failed:
-            return await super().write(rows, ingested_at_ms=ingested_at_ms, merge=merge)
+            return await super().write(rows, merge=merge)
         self.failed = True
         key = FundingRateKey(VENUE, BTC, B0 - HOUR + 3, RateType.REGULAR)
         conflict = FundingRateConflict(FundingRate(key, "0.0002", None), FundingRate(key, "0.0001", None), True)
@@ -390,10 +403,10 @@ class GatedSink(InMemorySink):
         self.release = asyncio.Event()
         self.entered = asyncio.Event()
 
-    async def write(self, rows: Any, *, ingested_at_ms: int, merge: Any = None) -> FundingRateWriteReport:
+    async def write(self, rows: Any, *, merge: Any = None) -> FundingRateWriteReport:
         self.entered.set()
         await self.release.wait()
-        report = await super().write(rows, ingested_at_ms=ingested_at_ms, merge=merge)
+        report = await super().write(rows, merge=merge)
         key = FundingRateKey(VENUE, BTC, B0 - HOUR + 3, RateType.REGULAR)
         conflict = FundingRateConflict(FundingRate(key, "0.0002", None), FundingRate(key, "0.0001", None), True)
         return dataclasses.replace(report, conflicts=(conflict,))

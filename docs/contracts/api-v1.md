@@ -1,6 +1,6 @@
 # Quasar Market Data API v1 — contract
 
-- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). `GET /v1/candles` (section 5) is implemented by S10. `GET /v1/coverage` (section 6.1) was APPROVED by the user on 2026-10-25 (decisions S1–S5 as proposed, including the bounds 300 000 ms and 900 000 ms) and is implemented by S12. Sections for the other reserved endpoints (section 6) still need their own approval before their slices. `GET /v1/indicators` (section 6.3) was APPROVED by the user on 2026-10-28 (decisions I1–I6 as proposed) and is implemented by S18. `GET /v1/open-interest` and the `open_interest` object of `GET /health/ingest` (section 6.5) were APPROVED by the user on 2026-11-03 for OI-5 (ADR-0003 P-11), decisions OA1–OA11 as proposed (section 9), and are implemented by OI-5. `GET /v1/open-interest/coverage` (section 6.6, OI-6a, ADR-0003 amendment A-2) was **APPROVED** by the user on 2026-11-03 (decisions OB1–OB6 as proposed, section 9) and is implemented by OI-6a. **Row readability** (section 4.1, the fields `readable_by_ms` and `readable_by_unconfirmed` of sections 5.2, 6.5.4 and 6.7.4, and the `readability` object of section 6.2.4) was **APPROVED** by the user on 2026-11-14 (ADR-0005; decisions RB1 to RB6, section 9; agreed with Sentaris Engine in `docs/requests/2026-11-14-expose-ingestion-time*.md`). It is **not yet implemented** (ADR-0005 slices RB-1 to RB-4): until it is deployed, the responses do not carry these fields.
+- **Status:** APPROVED by the user on 2026-10-23, after an independent review (decisions Q1–Q8 and R1–R7 as recommended, section 9; the fixed `limit` maximum of 1000, R6, included). `GET /v1/candles` (section 5) is implemented by S10. `GET /v1/coverage` (section 6.1) was APPROVED by the user on 2026-10-25 (decisions S1–S5 as proposed, including the bounds 300 000 ms and 900 000 ms) and is implemented by S12. Sections for the other reserved endpoints (section 6) still need their own approval before their slices. `GET /v1/indicators` (section 6.3) was APPROVED by the user on 2026-10-28 (decisions I1–I6 as proposed) and is implemented by S18. `GET /v1/open-interest` and the `open_interest` object of `GET /health/ingest` (section 6.5) were APPROVED by the user on 2026-11-03 for OI-5 (ADR-0003 P-11), decisions OA1–OA11 as proposed (section 9), and are implemented by OI-5. `GET /v1/open-interest/coverage` (section 6.6, OI-6a, ADR-0003 amendment A-2) was **APPROVED** by the user on 2026-11-03 (decisions OB1–OB6 as proposed, section 9) and is implemented by OI-6a. **Row readability** (section 4.1, the fields `readable_by_ms` and `readable_by_unconfirmed` of sections 5.2, 6.5.4 and 6.7.4, and the `readability` object of section 6.2.4) was **APPROVED** by the user on 2026-11-14 (ADR-0005; decisions RB1 to RB6, section 9; agreed with Sentaris Engine in `docs/requests/2026-11-14-expose-ingestion-time*.md`). It is implemented by ADR-0005 slices RB-1 to RB-4 (schema version 4). A deployment of an earlier release does not send these fields.
 - **Scope of this draft:** the conventions shared by every `/v1` endpoint (sections 1–4, 7) and the full specification of `GET /v1/candles` (section 5), which is what S10 implements. The other endpoints are only reserved (section 6) and get their own sections, approved before their slices.
 - **Inputs:** `docs/architecture.md` §4.2, §8; spec `docs/superpowers/specs/2026-10-20-market-data-v1-design.md` (§6.3, §11.3–11.5, D5); ADR-0001 (P-3, P-6, P-8); ADR-0002 (C-3, C-5, P-2, P-5, P-6, P-7, P-8); `docs/invariants.md` (INV-007, INV-009, INV-013, INV-014, INV-028). Since 2026-11-14 also ADR-0005 (row readability) and INV-140 to INV-145.
 
@@ -12,7 +12,7 @@
 4. **A response never implies completeness it cannot show.** Every candle response carries a `coverage` block and the series' `oldest`/`newest` stored open times. The absence of a candle is never evidence that nothing traded.
 5. A candle in a *conflicted* slot (section 4) is still returned, **with the value first stored**, flagged `conflicted: true`. The rejected value is not exposed in v1 (ADR-0002 C-3, P-7). **Consumers should treat a `conflicted: true` candle as untrusted**: the exchange is known to revise a candle for a few seconds after it closes (ADR-0001 P-6), so the first stored value may be the wrong one.
 6. When the API cannot read the database it understands, it answers **503**, never an empty result.
-7. Once row readability is implemented (section 4.1), every row of `GET /v1/candles`, `GET /v1/open-interest` and `GET /v1/funding-rates` carries `readable_by_ms`, an upper bound on the instant from which the row was readable, and `readable_by_unconfirmed` (section 4.1). **Consumers should treat a row with `readable_by_unconfirmed: true` as untrusted**, like a `conflicted: true` one: its bound was not confirmed.
+7. Every row of `GET /v1/candles`, `GET /v1/open-interest` and `GET /v1/funding-rates` carries `readable_by_ms`, an upper bound on the instant from which the row was readable, and `readable_by_unconfirmed` (section 4.1). **Consumers should treat a row with `readable_by_unconfirmed: true` as untrusted**, like a `conflicted: true` one: its bound was not confirmed.
 
 What the API does **not** promise: that a closed candle can never be revised by the exchange (a revision shows up as a conflict), freshness (a series that stopped growing three days ago still answers `gap_free: true` for a window that ends at its newest candle; the age is visible in `series.newest_open_time_ms`, and staleness is evaluated by `/v1/coverage`, section 6.1), or that the stored history reaches back to any date.
 
@@ -101,7 +101,7 @@ Hence, for every span: `slots = present + conflicted + unavailable + missing + b
 
 ## 4.1 Readability of a row
 
-- **Status:** APPROVED by the user on 2026-11-14 (ADR-0005, decisions RB1 to RB6); **not yet implemented**. It applies to every row of `GET /v1/candles` (section 5.2), `GET /v1/open-interest` (section 6.5.4) and `GET /v1/funding-rates` (section 6.7.4).
+- **Status:** APPROVED by the user on 2026-11-14 (ADR-0005, decisions RB1 to RB6); implemented by ADR-0005 RB-1 to RB-4. It applies to every row of `GET /v1/candles` (section 5.2), `GET /v1/open-interest` (section 6.5.4) and `GET /v1/funding-rates` (section 6.7.4).
 
 Every row carries two fields:
 
@@ -120,7 +120,7 @@ Every row carries two fields:
 
 How the values arise (ADR-0005 P-3, P-4):
 
-- The Collector stamps each write transaction after it holds the database write lock. It measures, on a monotonic clock, the time from the stamp to the end of `COMMIT`. When that time is at most the bound **`B = 2 000 ms`**, it stores a durable confirmation for the transaction. Otherwise it stores none: when the commit was slower than `B`, when the Collector stopped between the commit and the confirmation, or when writing the confirmation failed and no later attempt of the same Collector process succeeded.
+- The Collector stamps each write transaction after it holds the database write lock. It measures, on a monotonic clock, the time from the stamp to the end of `COMMIT`. When that time ends at least 1 ms before the bound **`B = 2 000 ms`** (the stamp is rounded down to the millisecond), it stores a durable confirmation for the transaction. Otherwise it stores none: when the commit was slower than `B`, when the Collector stopped between the commit and the confirmation, or when writing the confirmation failed and no later attempt of the same Collector process succeeded.
 - A row stored **before the cut-over** (the deployment of this section) gets `readable_by_ms = cutover_ms` and `readable_by_unconfirmed: false`. `cutover_ms` is an instant at or after the commit of every such row, and is shown in the `readability` object of `GET /health/ingest` (section 6.2.4).
 - A row stored **after the cut-over** gets `readable_by_ms = stamp + B`. `readable_by_unconfirmed` is `false` when its transaction is confirmed and `true` when it is not.
 
@@ -190,7 +190,9 @@ GET /v1/candles?venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m&start=17926
       "close": "82768.2",
       "volume": "369.221",
       "turnover": "30587379.8759",
-      "conflicted": false
+      "conflicted": false,
+      "readable_by_ms": 1792677002000,
+      "readable_by_unconfirmed": false
     },
     {
       "open_time_ms": 1792643700000,
@@ -200,7 +202,9 @@ GET /v1/candles?venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m&start=17926
       "close": "82709",
       "volume": "580.95",
       "turnover": "48054366.2802",
-      "conflicted": false
+      "conflicted": false,
+      "readable_by_ms": 1792677002000,
+      "readable_by_unconfirmed": false
     },
     {
       "open_time_ms": 1792644000000,
@@ -210,7 +214,9 @@ GET /v1/candles?venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m&start=17926
       "close": "82744.5",
       "volume": "380.864",
       "turnover": "31506256.9708",
-      "conflicted": false
+      "conflicted": false,
+      "readable_by_ms": 1792677002000,
+      "readable_by_unconfirmed": false
     }
   ],
   "next": 1792644300000,
@@ -229,7 +235,7 @@ GET /v1/candles?venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m&start=17926
 
 - The example is **illustrative**: it shows a database loaded from the committed fixture `tests/fixtures/binance/btcusdt_5m_closed_raw.json` (100 consecutive 5m candles, values in canonical form), which is why the series ends at `1792673100000`.
 - `start` and `end` echo the effective window. `series` is present on every `200`: the open times of the oldest and newest stored candle of the series (a series that exists has at least one candle, and candles are never deleted).
-- `candles` are ascending, unique by `open_time_ms`, each with exactly the fields shown. `conflicted` is always present. `turnover` may be `null`. Once row readability is implemented (section 4.1, ADR-0005 RB-3), every row also carries `readable_by_ms` and `readable_by_unconfirmed`, and this example gains them; until then they are absent.
+- `candles` are ascending, unique by `open_time_ms`, each with exactly the fields shown. `conflicted`, `readable_by_ms` and `readable_by_unconfirmed` are always present (section 4.1). `turnover` may be `null`.
 
 ### 5.3 The `coverage` block
 
@@ -369,7 +375,7 @@ The rule comes from the `[rule]` table of the configuration file (`config/quasar
 
 ### 6.2.2 `GET /health/ready` (readiness)
 
-`200 {"status":"ready","schema_version":<schema version of this build>}` (3 since FR-2, ADR-0004 P-6; 4 once row readability is implemented, ADR-0005 P-2) when the database opens read-only and its schema is the one this API was built for, checked inside one read transaction on every call. Otherwise `503 not_ready` with the reason and headers of section 2 (`database_missing`, `schema_mismatch`, `database_unreadable`). Readiness says nothing about freshness: an idle Collector does not make the API unready.
+`200 {"status":"ready","schema_version":<schema version of this build>}` (4 since row readability, ADR-0005 P-2; 3 from FR-2, ADR-0004 P-6) when the database opens read-only and its schema is the one this API was built for, checked inside one read transaction on every call. Otherwise `503 not_ready` with the reason and headers of section 2 (`database_missing`, `schema_mismatch`, `database_unreadable`). Readiness says nothing about freshness: an idle Collector does not make the API unready.
 
 ### 6.2.3 `GET /health/ingest` (ingestion freshness)
 
@@ -410,7 +416,7 @@ Information, never a gate: `200` whenever the database is readable, `503 not_rea
   - One read transaction serves both the fields above and `universe`. The API holds the universe in memory from the file it read at start; a change of the file takes effect after a restart.
 - **What it cannot tell.** It reads only the newest stored candle per series. A series with holes behind its newest candle is `current` (`/v1/coverage` reports holes). A stopped Collector, an exchange outage, a halted or delisted symbol and a wrong publication delay all show as `stale`; the endpoint does not know the cause or whether the Collector runs. A retired symbol stays a stored series and keeps `status` at `behind`. A mismatch between the API's rule and the Collector's delay shifts `current`/`due` by the difference.
 - **`funding_rate`** (added by FR-5, ADR-0004 P-13; an additive amendment, section 6.2 compatibility; **APPROVED** 2026-11-04): an object about the stored funding rate series, or `null` when funding is not enabled in the configuration. Specified in section 6.7.8. It follows `open_interest`; since row readability it is followed by `readability` (section 6.2.4). Every field above keeps its meaning and its value; a request before and a request after FR-5 on the same database give the same values for them.
-- **`readability`** (row readability, ADR-0005 P-5; an additive amendment, section 6.2 compatibility; **APPROVED** 2026-11-14, not yet implemented): an object about the readability confirmations of section 4.1, present whatever datasets are enabled. Specified in section 6.2.4. It is the **last key** of the body, after `funding_rate`. Every field above keeps its meaning and its value.
+- **`readability`** (row readability, ADR-0005 P-5; an additive amendment, section 6.2 compatibility; **APPROVED** 2026-11-14, implemented by ADR-0005 RB-3): an object about the readability confirmations of section 4.1, present whatever datasets are enabled. Specified in section 6.2.4. It is the **last key** of the body, after `funding_rate`. Every field above keeps its meaning and its value.
 - **`open_interest`** (added by OI-5, ADR-0003 P-11; an additive amendment, section 6.2 compatibility): an object about the stored open interest series, or `null` when open interest is not enabled in the configuration. Specified in section 6.5.8. It follows `universe`; `funding_rate` follows it. Every field above keeps its meaning and its value; a request before and a request after OI-5 on the same database give the same values for them.
 - The answer reflects one read transaction, like every other endpoint.
 - A series that cannot be judged (a timeframe label this software does not know, or an open time not aligned to its timeframe; the Collector cannot write either, a hand-edited row can) makes the whole answer `500 internal_error`, never a made-up status.
@@ -420,7 +426,7 @@ Information, never a gate: `200` whenever the database is readable, `503 not_rea
 
 ### 6.2.4 The `readability` object of `GET /health/ingest`
 
-- **Status:** APPROVED by the user on 2026-11-14 (ADR-0005 P-5, decision RB6); **not yet implemented**.
+- **Status:** APPROVED by the user on 2026-11-14 (ADR-0005 P-5, decision RB6); implemented by ADR-0005 RB-3.
 
 ```json
 "readability": {
@@ -579,7 +585,7 @@ No parameter. Any query parameter, known or not, is `400 invalid_parameter` (sec
 
 - A slot is one `time_ms`, the **end** of a 5m period, aligned to 5 minutes. The row with `time_ms = T` belongs to the period `[T - 5m, T)`, that is to the candle with `open_time_ms = T - 5m`. **Never join a row to a candle by equal timestamps.** This is why the field is called `time_ms` and the response states `"time_semantics": "period_end"`.
 - `open_interest` and `open_interest_value` are decimal strings in the canonical form of section 1, exactly as stored (Binance's own figures; `open_interest_value` is never computed here). Binance does not document the units; the project inferred them from one sample (ADR-0003 P-2, E-3): `open_interest` in the base asset (BTC for `BTC/USDT:USDT`), `open_interest_value` in USDT. Whether a value is the open interest at the instant `T` or a statistic over the period is not documented, and this API claims only "the value Binance reports for the period ending at `T`".
-- Identity is `(venue, symbol, period, time_ms)`. The response carries no `ingested_at_ms`; once implemented, it carries `readable_by_ms` and `readable_by_unconfirmed` per row (section 4.1, decision RB1, which supersedes Q5 for rows).
+- Identity is `(venue, symbol, period, time_ms)`. The response carries no `ingested_at_ms`; it carries `readable_by_ms` and `readable_by_unconfirmed` per row (section 4.1, decision RB1, which supersedes Q5 for rows).
 
 ### 6.5.2 Request
 
@@ -643,9 +649,9 @@ Two consequences of the order, both different from candle coverage (section 6.1.
     "newest_time_ms": 1792673400000
   },
   "rows": [
-    { "time_ms": 1792672500000, "open_interest": "95677.779", "open_interest_value": "7446123150.675", "conflicted": false },
-    { "time_ms": 1792672800000, "open_interest": "95690.12", "open_interest_value": "7447031002.4", "conflicted": true },
-    { "time_ms": 1792673400000, "open_interest": "95702.5", "open_interest_value": "7447990111.25", "conflicted": false }
+    { "time_ms": 1792672500000, "open_interest": "95677.779", "open_interest_value": "7446123150.675", "conflicted": false, "readable_by_ms": 1792673024000, "readable_by_unconfirmed": false },
+    { "time_ms": 1792672800000, "open_interest": "95690.12", "open_interest_value": "7447031002.4", "conflicted": true, "readable_by_ms": 1792673324000, "readable_by_unconfirmed": false },
+    { "time_ms": 1792673400000, "open_interest": "95702.5", "open_interest_value": "7447990111.25", "conflicted": false, "readable_by_ms": 1792673924000, "readable_by_unconfirmed": false }
   ],
   "next": null,
   "coverage": {
@@ -666,7 +672,7 @@ Two consequences of the order, both different from candle coverage (section 6.1.
 - The example is **illustrative and computed by hand**: seven slots `1792672500000` to `1792674300000`; rows stored for the 1st, 2nd (conflicted) and 4th slots; the newest stored `time_ms` is the 4th; `as_of_ms` is the 6th slot plus `expected_after_ms` plus 30 000 ms, so the 5th slot is `stale`, the 6th `due` and the 7th `not_yet_expected`; the 3rd slot has no row and lies before the newest, so it is `missing`. The values are not real.
 - `start` and `end` echo the effective window. `as_of_ms` is the server clock read once for this request. `series` is present on every `200`: the `time_ms` of the oldest and newest stored row of the series (a series that exists has at least one row, and rows are never deleted).
 - `rule` is what the states were computed with: `cadence` is `c` of ADR-0003 P-10 (each symbol is asked every `c` periods); `expected_after_ms = c x 300 000 + round_offset_ms`; `lag_threshold_ms` is `rule.lag_threshold_ms` of the configuration file (the value `/v1/coverage` uses, decision OA3); `retrieval_horizon_ms` is `H`, the `backfill_days` of the `[open_interest]` table in milliseconds (1 to 30 days; 29 in the shipped files; the Collector and the API read the same key, ADR-0003 amendment A-4).
-- `rows` are ascending, unique by `time_ms`, each with exactly the fields shown; `conflicted` is always present. `next` is always present and defined as in section 3. Once row readability is implemented (section 4.1, ADR-0005 RB-3), every row also carries `readable_by_ms` and `readable_by_unconfirmed`, and this example gains them; until then they are absent.
+- `rows` are ascending, unique by `time_ms`, each with exactly the fields shown; `conflicted`, `readable_by_ms` and `readable_by_unconfirmed` are always present (section 4.1). `next` is always present and defined as in section 3.
 
 ### 6.5.5 Errors and order of checks
 
@@ -816,7 +822,7 @@ What it cannot tell: **when collection began** (`O` is the oldest *stored* row; 
 - A row is one **settlement**: the instant `funding_time_ms` at which Binance applied `funding_rate` to the contract. `"time_semantics": "settlement"` is stated in every response. It is an instant, not an interval: it covers nothing, and **it must not be joined to a candle or an open interest row by equal timestamps** (it lies a few milliseconds after a whole hour in all measured data, ADR-0004 P-3, but the contract does not promise that).
 - **`funding_rate` is the rate of one settlement, not per day or per year, and the length of the interval it applies to is not part of the row.** A symbol settles every 8, 4 or 1 hour and its interval has changed over time; the spacing of two consecutive rows is an observation, wrong across a gap, not a definition. Nothing in this API computes a cost, an average or an annualised rate (ADR-0004 NG-1).
 - `funding_rate` is a **signed** decimal string: the canonical form of section 1 with an optional leading `-` (`"0.0001"`, `"-0.00005123"`, `"0"`; never `"-0"`, never an exponent). Binance's own figure, exactly as stored; the unit (a fraction per settlement, `0.0001` = 0.01 %) is inferred, not documented (ADR-0004 P-2). `mark_price` is a canonical non-negative decimal string, or **`null`**: Binance sends an empty value for settlements before 2023-10-31 08:00 UTC, and a price is never computed, copied from a candle or filled in.
-- `rate_type` is `"Regular"` or `"Special"` (an extra charge, for example for stock dividends on TradFi perpetuals). Both can occur in one hour of one symbol with different `funding_time_ms`. Identity is `(venue, symbol, funding_time_ms, rate_type)`. The response carries no `ingested_at_ms`; once implemented, it carries `readable_by_ms` and `readable_by_unconfirmed` per row (section 4.1, decision RB1, which supersedes Q5 for rows).
+- `rate_type` is `"Regular"` or `"Special"` (an extra charge, for example for stock dividends on TradFi perpetuals). Both can occur in one hour of one symbol with different `funding_time_ms`. Identity is `(venue, symbol, funding_time_ms, rate_type)`. The response carries no `ingested_at_ms`; it carries `readable_by_ms` and `readable_by_unconfirmed` per row (section 4.1, decision RB1, which supersedes Q5 for rows).
 
 ### 6.7.2 Request
 
@@ -861,10 +867,10 @@ Pagination is by time, ascending by `(funding_time_ms, rate_type)` (`Regular` be
     "newest_funding_time_ms": 1792713600650
   },
   "rows": [
-    { "funding_time_ms": 1792656000000, "rate_type": "Regular", "funding_rate": "0.0001", "mark_price": "82709.1", "conflicted": false },
-    { "funding_time_ms": 1792684800000, "rate_type": "Regular", "funding_rate": "-0.00005123", "mark_price": "82744.5", "conflicted": false },
-    { "funding_time_ms": 1792713600000, "rate_type": "Regular", "funding_rate": "0.00011", "mark_price": "82790", "conflicted": true },
-    { "funding_time_ms": 1792713600650, "rate_type": "Special", "funding_rate": "0.0003", "mark_price": "82801", "conflicted": false }
+    { "funding_time_ms": 1792656000000, "rate_type": "Regular", "funding_rate": "0.0001", "mark_price": "82709.1", "conflicted": false, "readable_by_ms": 1792656042000, "readable_by_unconfirmed": false },
+    { "funding_time_ms": 1792684800000, "rate_type": "Regular", "funding_rate": "-0.00005123", "mark_price": "82744.5", "conflicted": false, "readable_by_ms": 1792684842000, "readable_by_unconfirmed": false },
+    { "funding_time_ms": 1792713600000, "rate_type": "Regular", "funding_rate": "0.00011", "mark_price": "82790", "conflicted": true, "readable_by_ms": 1792713642000, "readable_by_unconfirmed": false },
+    { "funding_time_ms": 1792713600650, "rate_type": "Special", "funding_rate": "0.0003", "mark_price": "82801", "conflicted": false, "readable_by_ms": 1792713642000, "readable_by_unconfirmed": false }
   ],
   "next": null,
   "coverage": {
@@ -882,7 +888,7 @@ Pagination is by time, ascending by `(funding_time_ms, rate_type)` (`Regular` be
 
 - The example is **illustrative and computed by hand**; the values are not real. Four stored settlements in a window that lies entirely inside the verified span, so `window_state` is `verified`; the third is conflicted, so `conflicted_events` is `1` and `complete` is `false` although the whole window was verified. The fourth is a `Special` record 650 ms after the third.
 - `start` and `end` echo the effective window. `series` is present on every `200`: the `funding_time_ms` of the oldest and newest stored **row** of the series, whole series, not only the window, or `null` for both when the series has a verified span but no row yet (decision FA4). A conflict record never moves them.
-- `rows` are ascending, unique by `(funding_time_ms, rate_type)`, each with exactly the fields shown; `conflicted` is always present and `mark_price` may be `null`. Once row readability is implemented (section 4.1, ADR-0005 RB-3), every row also carries `readable_by_ms` and `readable_by_unconfirmed`, and this example gains them; until then they are absent. `next` is always present (section 6.7.3). A returned row with `conflicted: true` carries its **first stored** values; the rejected value is not exposed.
+- `rows` are ascending, unique by `(funding_time_ms, rate_type)`, each with exactly the fields shown; `conflicted`, `readable_by_ms` and `readable_by_unconfirmed` are always present (section 4.1) and `mark_price` may be `null`. `next` is always present (section 6.7.3). A returned row with `conflicted: true` carries its **first stored** values; the rejected value is not exposed.
 
 ### 6.7.5 The `coverage` block
 

@@ -28,9 +28,9 @@ def db(tmp_path: Path) -> Path:
     conn = open_writer(path)
     migrate(conn, applied_at_ms=BASE)
     writer = OpenInterestWriter(conn)
-    writer.write_transaction([row(n) for n in (1, 2, 3, 5, 8)], ingested_at_ms=BASE)
-    writer.write_transaction([row(2, value="9"), row(8, value="9")], ingested_at_ms=BASE)  # two conflicts
-    writer.write_transaction([row(2, "ETH/USDT:USDT"), row(4, "ETH/USDT:USDT")], ingested_at_ms=BASE)
+    writer.write_transaction([row(n) for n in (1, 2, 3, 5, 8)])
+    writer.write_transaction([row(2, value="9"), row(8, value="9")])  # two conflicts
+    writer.write_transaction([row(2, "ETH/USDT:USDT"), row(4, "ETH/USDT:USDT")])
     writer.close()
     return path
 
@@ -80,7 +80,7 @@ def test_8352_rows_are_read_in_one_call(tmp_path: Path) -> None:
     migrate(conn, applied_at_ms=BASE)
     writer = OpenInterestWriter(conn)
     for start in range(0, 8352, 100):
-        writer.write_transaction([row(n) for n in range(start, min(start + 100, 8352))], ingested_at_ms=BASE)
+        writer.write_transaction([row(n) for n in range(start, min(start + 100, 8352))])
     writer.close()
     facts = read(path, oldest_ms=BASE, newest_ms=BASE + 8351 * STEP)
     assert len(facts.stored) == 8352  # type: ignore[attr-defined]
