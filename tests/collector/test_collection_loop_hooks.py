@@ -102,11 +102,11 @@ def test_the_duration_of_every_write_is_reported_including_a_failed_one() -> Non
 
         original = h.sink.write
 
-        async def slow(candles: Any, *, ingested_at_ms: int) -> Any:
+        async def slow(candles: Any) -> Any:
             t_start = t.monotonic_ns()
             await t.sleep(40)
             assert t.monotonic_ns() - t_start == 40_000_000
-            return await original(candles, ingested_at_ms=ingested_at_ms)
+            return await original(candles)
 
         h.sink.write = slow  # type: ignore[method-assign]
         hooked(h, durations.append)
@@ -189,7 +189,7 @@ def test_backfill_writes_in_the_idle_window_enter_the_activity() -> None:
         async def idle(window: Any) -> None:
             sink.release.clear()
             sink_for = window.sink_for("A")
-            task = asyncio.create_task(sink_for.write([], ingested_at_ms=h.t.wall_ms()))
+            task = asyncio.create_task(sink_for.write([]))
             await h.t.settle()
             seen.append(activity.active)
             sink.release.set()

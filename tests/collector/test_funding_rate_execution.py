@@ -311,7 +311,7 @@ def test_a_non_adjacent_merge_is_refused_and_nothing_of_the_page_is_kept() -> No
 
 def test_the_late_events_of_a_failed_page_are_classified_with_the_planned_span() -> None:
     class Failing:
-        async def write(self, rows: Any, *, ingested_at_ms: int, merge: Any = None) -> FundingRateWriteReport:
+        async def write(self, rows: Any, *, merge: Any = None) -> FundingRateWriteReport:
             keys = tuple(row.key for row in rows[:3])
             partial = FundingRateWriteReport(3, 0, (), (), (), 0, 0, keys, None, None)
             raise FundingRatePageError(FundingRateWriteOutcomeUnknown("commit failed"), 1, partial)
@@ -345,7 +345,7 @@ class Gated(FaultyConnection):
         self.release = threading.Event()
 
     def execute(self, sql: str, *args: Any) -> sqlite3.Cursor:
-        if sql == "COMMIT" and self.armed:
+        if sql == "COMMIT" and self.armed and not self.commit_confirms():
             self.commits += 1
             if self.commits == self.gate_on:
                 self.reached.set()
@@ -385,7 +385,8 @@ FAULT_POINTS = {
     "chunk2_row": (Fault("INSERT INTO funding_rates (", sqlite3.OperationalError("injected"), nth=150), 100),
     "final_first_row": (Fault("INSERT INTO funding_rates (", sqlite3.OperationalError("injected"), nth=201), 200),
     "span_update": (Fault("UPDATE funding_rate_verified", sqlite3.OperationalError("injected")), 200),
-    "commit_before": (Fault("COMMIT", sqlite3.OperationalError("injected"), nth=3), 200),
+    # COMMIT #5 is the third data transaction: each data COMMIT is followed by its confirmation's (ADR-0005 P-3)
+    "commit_before": (Fault("COMMIT", sqlite3.OperationalError("injected"), nth=5), 200),
 }
 
 

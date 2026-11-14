@@ -48,7 +48,6 @@ from quasar_market_data.collector.funding_rate_writer import (
 )
 from quasar_market_data.domain.funding_rate import FundingRate, FundingRateKey
 from quasar_market_data.domain.funding_rate_span import Interval
-from quasar_market_data.domain.timestamps import ensure_timestamp_ms
 from quasar_market_data.storage.connection import open_writer
 
 DEFAULT_FUNDING_RATE_BUSY_TIMEOUT_MS: Final = 1_000
@@ -119,10 +118,12 @@ class _Totals:
         )
 
 
-def _connect_writer(path: Path, busy_timeout_ms: int, connect: Connect | None) -> FundingRateWriter:
+def _connect_writer(
+    path: Path, busy_timeout_ms: int, connect: Connect | None, wall_ms: Callable[[], int]
+) -> FundingRateWriter:
     conn = open_writer(path, busy_timeout_ms=busy_timeout_ms) if connect is None else connect(path, busy_timeout_ms)
     try:
-        return FundingRateWriter(conn)
+        return FundingRateWriter(conn, wall_ms=wall_ms)
     except BaseException:
         conn.close()
         raise
@@ -172,10 +173,14 @@ class AsyncFundingRateWriter:
         busy_timeout_ms: int = DEFAULT_FUNDING_RATE_BUSY_TIMEOUT_MS,
         connect: Connect | None = None,
         monotonic_ns: Callable[[], int] = time.monotonic_ns,
+        wall_ms: Callable[[], int] = lambda: time.time_ns() // 1_000_000,
     ) -> "AsyncFundingRateWriter":
-        """Open the writer; ``monotonic_ns`` times the yields (the sync writer times transactions itself)."""
+        """Open the writer; ``monotonic_ns`` times the yields (the sync writer times transactions itself).
+
+        ``wall_ms`` is the clock the sync writer stamps transactions with (ADR-0005 P-3).
+        """
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=_THREAD_NAME_PREFIX)
-        connecting = executor.submit(_connect_writer, path, busy_timeout_ms, connect)
+        connecting = executor.submit(_connect_writer, path, busy_timeout_ms, connect, wall_ms)
         try:
             writer = await asyncio.wrap_future(connecting)
         except asyncio.CancelledError:
@@ -213,12 +218,9 @@ class AsyncFundingRateWriter:
         totals.yield_wait_ns += self._monotonic_ns() - started
         return True
 
-    async def write(
-        self, rows: Sequence[FundingRate], *, ingested_at_ms: int, merge: SpanMerge | None = None
-    ) -> FundingRateWriteReport:
+    async def write(self, rows: Sequence[FundingRate], *, merge: SpanMerge | None = None) -> FundingRateWriteReport:
         if self._state is not WriterState.OPEN:
             raise FundingRateWriteError(f"writer is {self._state.value}")
-        ensure_timestamp_ms(ingested_at_ms, "ingested_at_ms")
         page = tuple(rows)
         for index, row in enumerate(page):
             if type(row) is not FundingRate:
@@ -245,9 +247,7 @@ class AsyncFundingRateWriter:
                 closed = FundingRateWriteError(f"writer is {self._state.value}")
                 raise FundingRatePageError(closed, committed, totals.report()) from closed
             # no await between the last activity check and the submission
-            job = self._executor.submit(
-                partial(self._writer.write_transaction, chunk, ingested_at_ms=ingested_at_ms, merge=final_merge)
-            )
+            job = self._executor.submit(partial(self._writer.write_transaction, chunk, merge=final_merge))
             self._last_job = job
             try:
                 batch = await asyncio.wrap_future(job)

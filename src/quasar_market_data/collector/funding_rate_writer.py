@@ -22,9 +22,10 @@ stall candle writes (P-9).
 import sqlite3
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
+from quasar_market_data.collector.readability import EXTENSION_STAMP_ATTEMPTS, Stamp, TransactionStamper
 from quasar_market_data.domain.candle import ensure_symbol, ensure_venue
 from quasar_market_data.domain.funding_rate import FundingRate, FundingRateKey
 from quasar_market_data.domain.funding_rate_span import Interval
@@ -77,6 +78,13 @@ class FundingRateWriteBusy(FundingRateWriteError):
     """The database was locked longer than the busy timeout; rolled back, nothing was written."""
 
 
+class FundingRateWriteNotStored(FundingRateWriteError):
+    """The transaction was too old to commit within the readability bound and was rolled back: nothing was written.
+
+    Certain, like ``FundingRateWriteBusy``: retry the page later (ADR-0005 P-3, P-6).
+    """
+
+
 class FundingSpanNotAdjacentError(FundingRateWriteError):
     """The ``merge`` interval does not touch the verified span; the transaction was rolled back."""
 
@@ -124,6 +132,7 @@ class FundingRateBatchReport:
     inserted_keys: tuple[FundingRateKey, ...] = ()
     span_before: Interval | None = None
     span_after: Interval | None = None
+    stamp_ms: int | None = field(default=None, compare=False)  # the committed transaction's stamp; None if none
 
 
 def _require_writer_connection(conn: sqlite3.Connection) -> None:
@@ -151,11 +160,23 @@ def _is_busy(error: sqlite3.Error) -> bool:
 class FundingRateWriter:
     """Owns one writer connection; ``write_transaction`` runs one ``BEGIN IMMEDIATE`` transaction per call."""
 
-    def __init__(self, conn: sqlite3.Connection, *, monotonic_ns: Callable[[], int] = time.monotonic_ns) -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        monotonic_ns: Callable[[], int] = time.monotonic_ns,
+        wall_ms: Callable[[], int] = lambda: time.time_ns() // 1_000_000,
+        stamp_monotonic_ns: Callable[[], int] = time.monotonic_ns,
+        stamp_attempts: int = EXTENSION_STAMP_ATTEMPTS,
+    ) -> None:
         _require_writer_connection(conn)
         verify_schema(conn)
+        if type(stamp_attempts) is not int or stamp_attempts < 1:
+            raise ValueError(f"stamp_attempts must be an int >= 1, got {stamp_attempts!r}")
         self._conn = conn
         self._monotonic_ns = monotonic_ns
+        self._stamper = TransactionStamper(conn, "funding_rates", wall_ms=wall_ms, monotonic_ns=stamp_monotonic_ns)
+        self._attempts = stamp_attempts
         self._closed = False
         self._unusable = False
 
@@ -229,13 +250,12 @@ class FundingRateWriter:
         return before, Interval(after_row[0], after_row[1])
 
     def write_transaction(
-        self, rows: Sequence[FundingRate], *, ingested_at_ms: int, merge: SpanMerge | None = None
+        self, rows: Sequence[FundingRate], *, merge: SpanMerge | None = None
     ) -> FundingRateBatchReport:
         if self._closed:
             raise FundingRateWriteError("writer is closed")
         if self._unusable:
             raise FundingRateWriteError("writer is unusable after a failed rollback; open a new one")
-        ensure_timestamp_ms(ingested_at_ms, "ingested_at_ms")
         for index, row in enumerate(rows):
             if type(row) is not FundingRate:
                 raise TypeError(f"rows[{index}] must be a FundingRate, got {type(row).__name__}")
@@ -249,40 +269,67 @@ class FundingRateWriter:
                     raise ValueError(f"rows[{index}] is not of the merge series {merge.venue} {merge.symbol}")
         if not rows and merge is None:
             return FundingRateBatchReport(0, 0, (), 0, 0)
+        for _ in range(self._attempts):
+            report = self._attempt(rows, merge)
+            if report is not None:
+                return report
+        raise FundingRateWriteNotStored(
+            f"every one of {self._attempts} attempts was too old to commit within the readability bound and was "
+            "rolled back; nothing was written; retry later"
+        )
 
+    def _attempt(self, rows: Sequence[FundingRate], merge: SpanMerge | None) -> FundingRateBatchReport | None:
+        """One transaction: a report, or ``None`` when it expired before ``COMMIT`` and was rolled back.
+
+        Rows are stamped and registered (ADR-0005 P-3); a merge-only transaction stores no row and registers
+        nothing. A transaction that carries a merge always commits, even with nothing new: the merge advances
+        ``verified_at_ms`` of the span. Without a merge, a transaction that stores nothing new is rolled back.
+        """
         inserted = duplicates = 0
+        recorded_any = False
         inserted_keys: list[FundingRateKey] = []
         conflicts: list[FundingRateConflict] = []
         span_before: Interval | None = None
         span_after: Interval | None = None
+        stamp: Stamp | None = None
         commit_issued = False
         started = self._monotonic_ns()
         try:
             self._conn.execute("BEGIN IMMEDIATE")
             locked = self._monotonic_ns()
-            for row in rows:
-                key = row.key
-                slot = (key.venue, key.symbol, key.funding_time_ms, key.rate_type.value)
-                values = (row.funding_rate, row.mark_price)
-                if self._conn.execute(INSERT_FUNDING_RATE, (*slot, *values, ingested_at_ms)).rowcount == 1:
-                    inserted += 1
-                    inserted_keys.append(key)
-                    continue
-                stored_values = tuple(self._conn.execute(_SELECT_STORED, slot).fetchone())
-                if stored_values == values:
-                    duplicates += 1
-                    continue
-                recorded = self._conn.execute(RECORD_CONFLICT, (*slot, *values, ingested_at_ms)).rowcount == 1
-                stored_rate, stored_price = stored_values
-                conflicts.append(
-                    FundingRateConflict(
-                        incoming=row,
-                        stored=FundingRate(key, stored_rate, stored_price),
-                        newly_recorded=recorded,
+            if rows:
+                stamp = self._stamper.register()
+                for row in rows:
+                    key = row.key
+                    slot = (key.venue, key.symbol, key.funding_time_ms, key.rate_type.value)
+                    values = (row.funding_rate, row.mark_price)
+                    if self._conn.execute(INSERT_FUNDING_RATE, (*slot, *values, stamp.stamp_ms)).rowcount == 1:
+                        inserted += 1
+                        inserted_keys.append(key)
+                        continue
+                    stored_values = tuple(self._conn.execute(_SELECT_STORED, slot).fetchone())
+                    if stored_values == values:
+                        duplicates += 1
+                        continue
+                    recorded = self._conn.execute(RECORD_CONFLICT, (*slot, *values, stamp.stamp_ms)).rowcount == 1
+                    recorded_any |= recorded
+                    stored_rate, stored_price = stored_values
+                    conflicts.append(
+                        FundingRateConflict(
+                            incoming=row,
+                            stored=FundingRate(key, stored_rate, stored_price),
+                            newly_recorded=recorded,
+                        )
                     )
-                )
             if merge is not None:
                 span_before, span_after = self._merge_span_statements(merge)
+            elif inserted == 0 and not recorded_any:
+                self._conn.execute("ROLLBACK")  # nothing new and no merge: register nothing (ADR-0005 P-2)
+                finished = self._monotonic_ns()
+                return FundingRateBatchReport(0, duplicates, tuple(conflicts), locked - started, finished - locked)
+            if stamp is not None and self._stamper.expired(stamp):
+                self._conn.execute("ROLLBACK")
+                return None
             commit_issued = True
             self._conn.execute("COMMIT")
             finished = self._monotonic_ns()
@@ -304,6 +351,8 @@ class FundingRateWriter:
         except BaseException:
             self._roll_back()
             raise
+        if stamp is not None:
+            self._stamper.committed(stamp, lambda: _describe(rows), self._roll_back)
         return FundingRateBatchReport(
             inserted,
             duplicates,
@@ -313,4 +362,11 @@ class FundingRateWriter:
             tuple(inserted_keys),
             span_before,
             span_after,
+            None if stamp is None else stamp.stamp_ms,
         )
+
+
+def _describe(rows: Sequence[FundingRate]) -> str:
+    series = sorted({f"{r.key.venue} {r.key.symbol}" for r in rows})
+    times = [r.key.funding_time_ms for r in rows]
+    return f"series={series} funding_time_ms=[{min(times)}, {max(times)}] rows={len(rows)}"

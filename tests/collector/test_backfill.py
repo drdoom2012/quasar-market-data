@@ -247,9 +247,7 @@ def test_a_late_write_draining_from_a_cancelled_round_is_not_credited_to_backfil
             candles = [
                 require_valid(c) for c in parse_klines([kline_row(env.slot(8), TF)], SYMBOL, env.loop_config.timeframe)
             ]
-            await env.writer.write(
-                candles, ingested_at_ms=1_792_677_000_000
-            )  # a job still on the writer thread, in a target
+            await env.writer.write(candles)  # a job still on the writer thread, in a target
 
         env.source.on_klines = late_drain
         await env.backfiller().run_idle(env.window())

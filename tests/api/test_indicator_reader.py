@@ -11,7 +11,7 @@ from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.api.seed import (
-    AT,
+    MIGRATED_AT,
     SYMBOL,
     VENUE,
     candle_values,
@@ -36,7 +36,7 @@ def request(start: int, end: int | None = None, symbol: str = SYMBOL) -> Indicat
 def test_reads_exactly_the_read_range(tmp_path: Path) -> None:
     path = tmp_path / "m.db"
     conn = open_writer(path)
-    migrate(conn, applied_at_ms=AT)
+    migrate(conn, applied_at_ms=MIGRATED_AT)
     for n in range(-1, 8):  # slot(-1) before the read range, slot(7) == end
         insert_candle(conn, slot(n))
         insert_conflict(conn, slot(n), 0)
@@ -93,7 +93,7 @@ def test_unknown_series_raises(tmp_path: Path) -> None:
 def test_closes_are_the_stored_text(tmp_path: Path) -> None:
     path = tmp_path / "m.db"
     conn = open_writer(path)
-    migrate(conn, applied_at_ms=AT)
+    migrate(conn, applied_at_ms=MIGRATED_AT)
     insert_candle(conn, slot(0), close="80000.1")
     insert_candle(conn, slot(1), close="79999.123456789012")
     conn.close()
@@ -110,7 +110,7 @@ def test_closes_are_the_stored_text(tmp_path: Path) -> None:
 def test_reads_high_low_close_of_the_read_range(tmp_path: Path) -> None:
     path = tmp_path / "m.db"
     conn = open_writer(path)
-    migrate(conn, applied_at_ms=AT)
+    migrate(conn, applied_at_ms=MIGRATED_AT)
     for n in range(-2, 4):  # slots -2 and -1 are before the read range
         insert_candle(conn, slot(n))
     conn.close()

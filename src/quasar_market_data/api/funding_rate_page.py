@@ -11,8 +11,10 @@ from dataclasses import dataclass
 
 from quasar_market_data.api.candle_reader import UnknownSeries
 from quasar_market_data.api.params import FundingRatesRequest
+from quasar_market_data.api.readability import confirmation_columns, confirmation_join, read_cutover
 from quasar_market_data.domain.funding_rate_coverage import WindowState, is_complete, window_state
 from quasar_market_data.domain.funding_rate_span import Interval
+from quasar_market_data.domain.readability import readable_by
 from quasar_market_data.storage.schema import verify_schema
 
 
@@ -23,6 +25,8 @@ class StoredFundingRate:
     funding_rate: str  # signed canonical decimal text, per settlement
     mark_price: str | None
     conflicted: bool
+    readable_by_ms: int
+    readable_by_unconfirmed: bool
 
 
 @dataclass(frozen=True)
@@ -75,8 +79,11 @@ def _read(conn: sqlite3.Connection, request: FundingRatesRequest, end: int) -> F
         raise UnknownSeries
 
     fetched = conn.execute(
-        "SELECT funding_time_ms, rate_type, funding_rate, mark_price FROM funding_rates"
-        " WHERE venue = ? AND symbol = ? AND funding_time_ms >= ? AND funding_time_ms <= ?"
+        "SELECT funding_time_ms, rate_type, funding_rate, mark_price"
+        + confirmation_columns("funding_rates")
+        + " FROM funding_rates"
+        + confirmation_join("funding_rates")
+        + " WHERE venue = ? AND symbol = ? AND funding_time_ms >= ? AND funding_time_ms <= ?"
         " ORDER BY funding_time_ms, rate_type LIMIT ?",
         (*series, start, end, limit + 1),
     ).fetchall()
@@ -87,6 +94,7 @@ def _read(conn: sqlite3.Connection, request: FundingRatesRequest, end: int) -> F
     else:
         page_rows, next_ms = fetched, None
 
+    cutover = read_cutover(conn)
     conflicted_keys: set[tuple[int, str]] = set()
     if page_rows:
         conflicted_keys = {
@@ -118,7 +126,17 @@ def _read(conn: sqlite3.Connection, request: FundingRatesRequest, end: int) -> F
         end=end,
         oldest_ms=oldest,
         newest_ms=newest,
-        rows=tuple(StoredFundingRate(r[0], r[1], r[2], r[3], (r[0], r[1]) in conflicted_keys) for r in page_rows),
+        rows=tuple(
+            StoredFundingRate(
+                r[0],
+                r[1],
+                r[2],
+                r[3],
+                (r[0], r[1]) in conflicted_keys,
+                *readable_by(r[4], confirmed=bool(r[5]), cutover_ms=cutover),
+            )
+            for r in page_rows
+        ),
         next=next_ms,
         span=span,
         verified_at_ms=None if span_row is None else span_row[2],

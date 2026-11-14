@@ -14,7 +14,7 @@ from quasar_market_data.storage.migrate import migrate
 from quasar_market_data.storage.schema import SCHEMA_VERSION, SchemaMismatchError
 from tests.api.probe import InterleavingConnection
 from tests.api.seed import (
-    AT,
+    MIGRATED_AT,
     SYMBOL,
     VENUE,
     candle_values,
@@ -23,6 +23,7 @@ from tests.api.seed import (
     insert_unavailable,
     make_database,
 )
+from tests.typing_helpers import untyped
 
 TF = 300_000
 S = 1792643400000
@@ -116,8 +117,8 @@ def test_other_series_never_leak_in(tmp_path: Path) -> None:
         {"timeframe": "15m"},
     ):
         for n in range(8):
-            insert_candle(writer, slot(n), **other)
-            insert_conflict(writer, slot(n), 1, **other)
+            insert_candle(writer, slot(n), **untyped(other))
+            insert_conflict(writer, slot(n), 1, **untyped(other))
         for n in (1, 5):  # slots where the subject series has no unavailable record, so a leak would change a count
             insert_unavailable(writer, slot(n), **other)
     writer.close()
@@ -334,7 +335,7 @@ def test_all_statements_run_in_one_read_transaction(tmp_path: Path) -> None:
     evens = [slot(i) for i in range(0, 21, 2)]
     window = request(slot(0), slot(21))
     pristine = make_database(tmp_path / "pristine.db", candles=evens)
-    injections = range(1, 7)
+    injections = range(1, 8)  # one injection per statement after the first two; the cut-over read is one more
     expected_final = make_database(
         tmp_path / "final.db",
         candles=evens + [slot(2 * k - 1) for k in injections],
@@ -433,7 +434,7 @@ def test_the_cost_is_bounded(tmp_path: Path, stored: int) -> None:
         conn.close()
 
     statements = probe.statements
-    assert len(statements) <= 9
+    assert len(statements) <= 10  # 9 before row readability, plus the one keyed read of the cut-over
     touching = [
         s for s in statements if any(t in s.sql for t in ("candles", "candle_conflicts", "unavailable_candles"))
     ]
@@ -444,13 +445,13 @@ def test_the_cost_is_bounded(tmp_path: Path, stored: int) -> None:
     candle_read = next(s for s in statements if "FROM candles" in s.sql and "ORDER BY" in s.sql)
     assert "LIMIT ?" in candle_read.sql
     assert candle_read.parameters[-1] == 6
-    assert len(statements) == 9  # identical for 10 and 1000 stored candles
+    assert len(statements) == 10  # identical for 10 and 1000 stored candles (9 plus the cut-over read)
 
 
 def _seeded(path: Path, rows: int) -> Path:
     conn = open_writer(path)
     try:
-        migrate(conn, applied_at_ms=AT)
+        migrate(conn, applied_at_ms=MIGRATED_AT)
         conn.execute("BEGIN")
         for n in range(rows):
             insert_candle(conn, slot(n))

@@ -7,9 +7,13 @@ import pytest
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import load_migrations, migrate
 from quasar_market_data.storage.schema import SCHEMA_VERSION, EmptyDatabaseError, SchemaMismatchError, verify_schema
+from tests.readability_seed import register
 
 AT = 1_792_677_000_000
-INSERT_CANDLE = "INSERT INTO candles VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', 1792676700000, '1', '2', '1', '2', '3', NULL, 1)"
+INSERT_CANDLE = (
+    "INSERT INTO candles VALUES ('binance-usdm', 'BTC/USDT:USDT', '5m', 1792676700000, '1', '2', '1', '2', '3', NULL,"
+    f" {AT + 5})"
+)
 
 
 @pytest.fixture
@@ -38,6 +42,7 @@ def test_reader_sees_a_candle_written_after_it_connected(db: Path) -> None:
     reader = open_reader(db)
     try:
         assert reader.execute("SELECT count(*) FROM candles").fetchone() == (0,)
+        register(writer, "candles", AT + 5)
         writer.execute(INSERT_CANDLE)
         assert reader.execute("SELECT open_time_ms FROM candles").fetchall() == [(1792676700000,)]
         with pytest.raises(sqlite3.OperationalError):

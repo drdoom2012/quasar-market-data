@@ -56,6 +56,7 @@ from quasar_market_data.collector.open_interest_reader import SeriesFacts, read_
 from quasar_market_data.collector.open_interest_writer import (
     OpenInterestWriteBusy,
     OpenInterestWriteError,
+    OpenInterestWriteNotStored,
     OpenInterestWriteOutcomeUnknown,
 )
 from quasar_market_data.domain.open_interest import OpenInterest, select_eligible_open_interest
@@ -769,11 +770,13 @@ class _OpenInterestTask:
         self.emit(f"oi-warning symbol-failed boundary={boundary} symbol={symbol} {problem}")
 
     def _write_problem(self, error: OpenInterestWriteError) -> str:
-        """``busy`` and ``outcome-unknown`` are retried; anything else makes the writer unusable and ends the task."""
+        """``busy``, ``not-stored`` and ``outcome-unknown`` are retried; anything else ends the task (writer unusable)."""
         cause = error.cause if isinstance(error, OpenInterestPageError) else error
         if isinstance(cause, OpenInterestWriteBusy):
             self.measurements.record_busy()
             return "busy"
+        if isinstance(cause, OpenInterestWriteNotStored):
+            return "not-stored"  # too old to commit within the readability bound; nothing was written (ADR-0005 P-3)
         if isinstance(cause, OpenInterestWriteOutcomeUnknown):
             return "outcome-unknown"
         raise OpenInterestWriterUnusable(_problem(error)) from error
@@ -802,7 +805,7 @@ class _OpenInterestTask:
 
     async def _write(self, rows: Sequence[OpenInterest]) -> OpenInterestWriteReport:
         try:
-            report = await self.writer.write(rows, ingested_at_ms=self.clock.wall_ms())
+            report = await self.writer.write(rows)
         except OpenInterestPageError as error:
             self.measurements.record_open_interest_write(error.partial, len(rows))
             raise

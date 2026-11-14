@@ -9,7 +9,7 @@ from starlette.testclient import TestClient
 from quasar_market_data.api.app import create_app
 from quasar_market_data.config.settings import Instrument
 from quasar_market_data.storage.connection import open_reader, open_writer
-from tests.api.seed import SAMPLE_RULE, SYMBOL, TIMEFRAME, VENUE, insert_candle, make_database
+from tests.api.seed import AT, SAMPLE_RULE, SYMBOL, TIMEFRAME, VENUE, insert_candle, make_database, register
 from tests.api.test_health_endpoints import BROKEN, assert_error
 
 TF = 300_000
@@ -123,9 +123,10 @@ def _bulk(path: Path, rows: int) -> None:
     make_database(path)
     conn = open_writer(path)
     conn.execute("BEGIN")
+    register(conn, "candles")
     conn.executemany(
         "INSERT INTO candles (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume, turnover,"
-        " ingested_at_ms) VALUES (?, ?, ?, ?, '1', '2', '1', '1', '1', NULL, 0)",
+        f" ingested_at_ms) VALUES (?, ?, ?, ?, '1', '2', '1', '1', '1', NULL, {AT})",
         [(VENUE, SYMBOL, TIMEFRAME, slot(k)) for k in range(rows)],
     )
     conn.execute("COMMIT")

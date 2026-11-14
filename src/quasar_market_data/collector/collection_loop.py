@@ -12,7 +12,7 @@ from typing import Any
 
 from quasar_market_data.collector.binance_klines import KlineParseError
 from quasar_market_data.collector.candle_write_activity import CandleWriteActivity
-from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown, WriteReport
+from quasar_market_data.collector.candle_writer import CandleWriteNotStored, CandleWriteOutcomeUnknown, WriteReport
 from quasar_market_data.collector.clock import Clock, Sleep
 from quasar_market_data.collector.fetch_once import MAX_LIMIT, CandleSink, FetchOnceConfig, fetch_once
 from quasar_market_data.collector.kline_source import KlineSource, SourceError
@@ -102,21 +102,21 @@ class _WriteWatch:
         self._clock = clock
         self.uncertain = False
 
-    async def _write(self, candles: Sequence[ValidatedCandle], ingested_at_ms: int) -> WriteReport:
+    async def _write(self, candles: Sequence[ValidatedCandle]) -> WriteReport:
         try:
-            return await self._inner.write(candles, ingested_at_ms=ingested_at_ms)
+            return await self._inner.write(candles)
         except (CandleWriteOutcomeUnknown, asyncio.CancelledError):
             self.uncertain = True
             raise
 
-    async def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
+    async def write(self, candles: Sequence[ValidatedCandle]) -> WriteReport:
         hooks, clock = self._hooks, self._clock
         if hooks is None or clock is None:
-            return await self._write(candles, ingested_at_ms)
+            return await self._write(candles)
         started = clock.monotonic_ns()
         with hooks.activity.writing():
             try:
-                return await self._write(candles, ingested_at_ms)
+                return await self._write(candles)
             finally:
                 try:
                     hooks.record_duration_ns(clock.monotonic_ns() - started)
@@ -169,7 +169,7 @@ async def collect_symbol(
         try:
             attempt_config = config if limit_for_attempt is None else replace(config, limit=limit_for_attempt())
             report = await fetch_once(source, sink, attempt_config, clock, server_time=server_time)
-        except (SourceError, KlineParseError, CandleWriteOutcomeUnknown) as error:
+        except (SourceError, KlineParseError, CandleWriteOutcomeUnknown, CandleWriteNotStored) as error:
             problem = str(error) or type(error).__name__
             if target_open_ms is None:
                 return result(SymbolOutcome.GAVE_UP)

@@ -123,7 +123,13 @@ def test_funding_rate_is_the_last_key_and_null_when_not_enabled(tmp_path: Path) 
 
     body = ingest(path, GOLDEN_AS_OF, funding_rate=None)
 
-    assert list(body)[-4:] == ["truncated", "universe", "open_interest", "funding_rate"]
+    assert list(body)[-5:] == [
+        "truncated",
+        "universe",
+        "open_interest",
+        "funding_rate",
+        "readability",
+    ]  # readability last (6.2.4)
     assert body["funding_rate"] is None
 
 
@@ -148,7 +154,9 @@ def test_funding_enabled_with_open_interest_disabled_issues_no_open_interest_sta
     path = seed(tmp_path / "m.db", current_series())
     log = traced_log(path)
 
-    assert not any("open_interest" in statement for statement in log)
+    assert not any(
+        "open_interest" in statement for statement in log if "write_transactions" not in statement
+    )  # the readability object names every table (6.2.4)
     body = ingest(path, open_interest=None)
     assert body["open_interest"] is None and body["funding_rate"]["series_count"] == 1
 

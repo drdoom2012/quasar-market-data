@@ -24,7 +24,7 @@ from quasar_market_data.domain.indicators import IndicatorSpec, parse_indicators
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.api.seed import (
-    AT,
+    MIGRATED_AT,
     SAMPLE_RULE,
     SAMPLE_UNIVERSE,
     candle_values,
@@ -70,7 +70,7 @@ def seed_db(
 ) -> Path:
     conn = open_writer(path)
     try:
-        migrate(conn, applied_at_ms=AT)
+        migrate(conn, applied_at_ms=MIGRATED_AT)
         conn.execute("BEGIN")
         for n in present:
             insert_candle(
@@ -535,7 +535,7 @@ def test_flat_range_after_movement_reads_zero_only_when_the_whole_range_is_flat(
     """
     conn = open_writer(tmp_path / "m.db")
     try:
-        migrate(conn, applied_at_ms=AT)
+        migrate(conn, applied_at_ms=MIGRATED_AT)
         conn.execute("BEGIN")
         for n in range(-300, 60):
             insert_candle(conn, slot(n), close=close_at(min(n, -1)))

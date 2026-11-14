@@ -56,22 +56,31 @@ class TimelineGate(GatedConnection):
         if self.armed and sql == "BEGIN IMMEDIATE":
             self.timeline.append(("oi_begin", time.monotonic_ns()))
         cursor = super().execute(sql, *args)
-        if self.armed and sql == "COMMIT":
+        if self.armed and sql == "COMMIT" and not self.commit_confirms():
             self.timeline.append(("oi_commit", time.monotonic_ns()))
+        if self.armed and sql.startswith("INSERT INTO write_confirmations"):
+            # the BEGIN just recorded opened the single-row confirmation of the data transaction (ADR-0005 P-6)
+            last = max(i for i, (name, _) in enumerate(self.timeline) if name == "oi_begin")
+            self.timeline[last] = ("oi_confirm", self.timeline[last][1])
         return cursor
 
 
 class CandleRecorder(sqlite3.Connection):
     timeline: ClassVar[Timeline] = []
     begin_issued = threading.Event()
+    last = ""
+
+    def commit_confirms(self) -> bool:
+        return self.last.startswith("INSERT INTO write_confirmations")  # a confirmation's COMMIT (ADR-0005 P-3)
 
     def execute(self, sql: str, *args: Any) -> sqlite3.Cursor:
         if sql == "BEGIN IMMEDIATE":
             self.timeline.append(("candle_begin_issued", time.monotonic_ns()))
             self.begin_issued.set()
         cursor = super().execute(sql, *args)
-        if sql == "COMMIT":
+        if sql == "COMMIT" and not self.commit_confirms():
             self.timeline.append(("candle_commit", time.monotonic_ns()))
+        self.last = sql
         return cursor
 
 
@@ -110,9 +119,9 @@ def test_candle_write_waits_for_at_most_one_open_interest_transaction(
 
         async def write_candle() -> None:
             with activity.writing():
-                await candle_writer.write([candle()], ingested_at_ms=AT)
+                await candle_writer.write([candle()])
 
-        oi_task = asyncio.ensure_future(oi_writer.write(page(300), ingested_at_ms=AT))
+        oi_task = asyncio.ensure_future(oi_writer.write(page(300)))
         assert await asyncio.to_thread(gate.reached.wait, 10)  # OI transaction 1 holds the lock, COMMIT pending
         candle_task = asyncio.ensure_future(write_candle())
         assert await asyncio.to_thread(CandleRecorder.begin_issued.wait, 10)  # candle BEGIN waits on the lock
@@ -131,6 +140,7 @@ def test_candle_write_waits_for_at_most_one_open_interest_transaction(
     second_begin = [i for i, name in enumerate(events) if name == "oi_begin"][1]
     assert first_commit < candle_commit < second_begin, events
     assert events[:candle_commit].count("oi_begin") == 1, events
+    assert events[:candle_commit].count("oi_confirm") <= 1, events  # at most its confirmation besides (P-6)
     assert count(db, "open_interest") == 300 and count(db, "candles") == 1
 
 
@@ -141,8 +151,8 @@ def test_busy_on_open_interest_never_reaches_the_candle_writer(db: Path) -> None
         candle_writer = await AsyncCandleWriter.open(db)
         holder = open_writer(db)
         holder.execute("BEGIN IMMEDIATE")
-        oi_task = asyncio.ensure_future(oi_writer.write(page(10), ingested_at_ms=AT))
-        candle_task = asyncio.ensure_future(candle_writer.write([candle()], ingested_at_ms=AT))
+        oi_task = asyncio.ensure_future(oi_writer.write(page(10)))
+        candle_task = asyncio.ensure_future(candle_writer.write([candle()]))
         await asyncio.sleep(0.3)
         holder.execute("ROLLBACK")
         holder.close()

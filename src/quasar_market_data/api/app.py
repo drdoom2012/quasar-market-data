@@ -47,8 +47,10 @@ from quasar_market_data.api.errors import (
 from quasar_market_data.api.float_text import float_text
 from quasar_market_data.api.funding_rate_page import FundingRatePage
 from quasar_market_data.api.health_reader import (
+    READABILITY_WINDOW_MS,
     FundingRateFacts,
     OpenInterestFacts,
+    ReadabilityFacts,
     StoredOpenInterestSeries,
     StoredSeries,
 )
@@ -81,6 +83,7 @@ from quasar_market_data.domain.funding_rate_span import Interval
 from quasar_market_data.domain.indicator_series import IndicatorPoint, IndicatorSeries, read_start_ms
 from quasar_market_data.domain.indicators import IndicatorSpec
 from quasar_market_data.domain.open_interest_coverage import OpenInterestRule, open_interest_freshness
+from quasar_market_data.domain.readability import READABLE_BOUND_MS
 from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.domain.timeframe import Timeframe
 from quasar_market_data.domain.timestamps import ensure_timestamp_ms
@@ -205,11 +208,12 @@ def create_app(
         require_no_query(request.scope["query_string"])
         as_of_ms = ensure_timestamp_ms(now_ms(), "as_of_ms")  # a wrong host clock is a 500, not a 503
         if funding_rate is not None:
-            snapshot = await run_in_threadpool(
+            snapshot, readability = await run_in_threadpool(
                 read_ingest_with_funding,
                 db_path,
                 oi_conflicts_after_ms=None if open_interest is None else as_of_ms - CONFLICT_WINDOW_MS,
                 funding_conflicts_after_ms=as_of_ms - CONFLICT_WINDOW_MS,
+                as_of_ms=as_of_ms,
                 open_connection=open_connection,
             )
             return _json(
@@ -223,18 +227,22 @@ def create_app(
                     snapshot.open_interest,
                     funding_rate,
                     snapshot.funding_rate,
+                    readability=readability,
                 ),
             )
         if open_interest is None:
-            stored = await run_in_threadpool(read_ingest, db_path, open_connection=open_connection)
-            return _json(200, _ingest_body(stored, as_of_ms, rule, universe))
-        stored, facts = await run_in_threadpool(
+            stored, readability = await run_in_threadpool(
+                read_ingest, db_path, as_of_ms=as_of_ms, open_connection=open_connection
+            )
+            return _json(200, _ingest_body(stored, as_of_ms, rule, universe, readability=readability))
+        (stored, facts), readability = await run_in_threadpool(
             read_ingest_open_interest,
             db_path,
             conflicts_after_ms=as_of_ms - CONFLICT_WINDOW_MS,
+            as_of_ms=as_of_ms,
             open_connection=open_connection,
         )
-        return _json(200, _ingest_body(stored, as_of_ms, rule, universe, open_interest, facts))
+        return _json(200, _ingest_body(stored, as_of_ms, rule, universe, open_interest, facts, readability=readability))
 
     @app.exception_handler(ApiError)
     async def api_error(request: Request, exc: ApiError) -> Response:
@@ -300,6 +308,8 @@ def _page_body(page: CandlesPage) -> dict[str, object]:
                 "volume": c.volume,
                 "turnover": c.turnover,
                 "conflicted": c.conflicted,
+                "readable_by_ms": c.readable_by_ms,
+                "readable_by_unconfirmed": c.readable_by_unconfirmed,
             }
             for c in page.candles
         ],
@@ -341,6 +351,8 @@ def _open_interest_body(page: OpenInterestPage, as_of_ms: int, rule: OpenInteres
                 "open_interest": row.open_interest,
                 "open_interest_value": row.open_interest_value,
                 "conflicted": row.conflicted,
+                "readable_by_ms": row.readable_by_ms,
+                "readable_by_unconfirmed": row.readable_by_unconfirmed,
             }
             for row in page.rows
         ],
@@ -377,6 +389,8 @@ def _funding_rates_body(page: FundingRatePage, as_of_ms: int) -> dict[str, objec
                 "funding_rate": row.funding_rate,
                 "mark_price": row.mark_price,
                 "conflicted": row.conflicted,
+                "readable_by_ms": row.readable_by_ms,
+                "readable_by_unconfirmed": row.readable_by_unconfirmed,
             }
             for row in page.rows
         ],
@@ -547,6 +561,8 @@ def _ingest_body(
     facts: OpenInterestFacts | None = None,
     funding_rate: FundingRateRule | None = None,
     funding_facts: FundingRateFacts | None = None,
+    *,
+    readability: ReadabilityFacts | None = None,
 ) -> dict[str, object]:
     """The S17 fields over every stored series, then ``universe``, ``open_interest`` and ``funding_rate`` (last key).
 
@@ -581,7 +597,7 @@ def _ingest_body(
         status = "catching_up"
     else:
         status = "current"
-    return {
+    body: dict[str, object] = {
         "as_of_ms": as_of_ms,
         "rule": {"publication_delay_ms": rule.publication_delay_ms, "lag_threshold_ms": rule.lag_threshold_ms},
         "scope": "stored_series",
@@ -620,6 +636,22 @@ def _ingest_body(
         "funding_rate": None
         if funding_rate is None or funding_facts is None
         else _funding_rate_health(funding_facts, as_of_ms, funding_rate),
+    }
+    if readability is not None:  # every production path passes it; it is the last key (contract 6.2.4)
+        body["readability"] = _readability_health(readability)
+    return body
+
+
+def _readability_health(facts: ReadabilityFacts) -> dict[str, object]:
+    """The ``readability`` object of contract 6.2.4: information only, it changes no status."""
+    return {
+        "bound_ms": READABLE_BOUND_MS,
+        "cutover_ms": facts.cutover_ms,
+        "window_ms": READABILITY_WINDOW_MS,
+        "unconfirmed": {
+            table: {"transactions": counts.transactions, "newest_stamp_ms": counts.newest_stamp_ms}
+            for table, counts in facts.unconfirmed
+        },
     }
 
 

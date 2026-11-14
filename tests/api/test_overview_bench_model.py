@@ -251,11 +251,15 @@ def test_the_writer_writes_at_most_100_rows_per_transaction(tmp_path: Path) -> N
         assert written == 500
         blocks: list[int] = []
         inserted = 0
+        previous = None
         for statement in statements:
+            if statement == previous:  # the trace repeats a statement when it enters its trigger program
+                continue
+            previous = statement
             head = statement.lstrip().upper()
             if head.startswith("BEGIN"):
                 inserted = 0
-            elif head.startswith("INSERT"):
+            elif head.startswith("INSERT") and "WRITE_TRANSACTIONS" not in head and "WRITE_CONFIRMATIONS" not in head:
                 inserted += 1
             elif head.startswith("COMMIT"):
                 blocks.append(inserted)

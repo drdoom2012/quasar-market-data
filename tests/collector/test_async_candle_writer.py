@@ -29,7 +29,7 @@ WORKER_PREFIX = "candle-writer"
 def db(tmp_path: Path) -> Path:
     path = tmp_path / "market.db"
     conn = open_writer(path)
-    migrate(conn, applied_at_ms=AT)
+    migrate(conn, applied_at_ms=AT - 10)  # the cut-over lies below the writers' fixed clock AT
     conn.close()
     return path
 
@@ -83,11 +83,11 @@ def spy_on_write(monkeypatch: pytest.MonkeyPatch, hold: Hold | None = None) -> l
     idents: list[int] = []
     real = CandleWriter.write
 
-    def spy(self: CandleWriter, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
+    def spy(self: CandleWriter, candles: Sequence[ValidatedCandle]) -> WriteReport:
         idents.append(threading.get_ident())
         if hold is not None:
             hold.maybe_hold()
-        return real(self, candles, ingested_at_ms=ingested_at_ms)
+        return real(self, candles)
 
     monkeypatch.setattr(CandleWriter, "write", spy)
     return idents
@@ -114,7 +114,7 @@ def test_all_writes_run_on_one_dedicated_thread_off_the_event_loop(db: Path, mon
         writer = await AsyncCandleWriter.open(db)
         try:
             for n in range(3):
-                await writer.write([valid(n)], ingested_at_ms=AT)
+                await writer.write([valid(n)])
         finally:
             await writer.close()
         return threading.get_ident()
@@ -129,11 +129,11 @@ def test_conflict_is_recorded_through_the_async_writer(db: Path) -> None:
     stored, conflicting = valid(0), valid(0, close="100.1")
 
     async def scenario() -> tuple[WriteReport, WriteReport]:
-        writer = await AsyncCandleWriter.open(db)
+        writer = await AsyncCandleWriter.open(db, wall_ms=lambda: AT)  # stamps AT, AT + 1, ...
         try:
-            await writer.write([stored], ingested_at_ms=AT)
-            first = await writer.write([conflicting], ingested_at_ms=AT + 1)
-            return first, await writer.write([conflicting], ingested_at_ms=AT + 2)
+            await writer.write([stored])
+            first = await writer.write([conflicting])
+            return first, await writer.write([conflicting])
         finally:
             await writer.close()
 
@@ -152,7 +152,7 @@ def test_conflict_is_recorded_through_the_async_writer(db: Path) -> None:
 def test_unknown_outcome_reaches_the_async_caller_unchanged(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     unknown = CandleWriteOutcomeUnknown("outcome unknown")
 
-    def raise_unknown(self: CandleWriter, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
+    def raise_unknown(self: CandleWriter, candles: Sequence[ValidatedCandle]) -> WriteReport:
         raise unknown
 
     monkeypatch.setattr(CandleWriter, "write", raise_unknown)
@@ -161,7 +161,7 @@ def test_unknown_outcome_reaches_the_async_caller_unchanged(db: Path, monkeypatc
         writer = await AsyncCandleWriter.open(db)
         try:
             with pytest.raises(CandleWriteOutcomeUnknown) as caught:
-                await writer.write([valid(0)], ingested_at_ms=AT)
+                await writer.write([valid(0)])
             return caught.value
         finally:
             await writer.close()
@@ -173,8 +173,8 @@ def test_concurrent_writes_are_serialized_and_none_is_lost(db: Path) -> None:
     async def scenario() -> list[WriteReport]:
         writer = await AsyncCandleWriter.open(db)
         try:
-            calls = [writer.write([valid(n)], ingested_at_ms=AT) for n in range(20)]
-            calls += [writer.write([valid(0)], ingested_at_ms=AT) for _ in range(5)]
+            calls = [writer.write([valid(n)]) for n in range(20)]
+            calls += [writer.write([valid(0)]) for _ in range(5)]
             return list(await asyncio.gather(*calls))
         finally:
             await writer.close()
@@ -211,7 +211,7 @@ def test_event_loop_stays_responsive_while_a_write_waits(db: Path) -> None:
 
         tick_task = asyncio.create_task(ticker())
         try:
-            report = await writer.write([valid(0)], ingested_at_ms=AT)
+            report = await writer.write([valid(0)])
         finally:
             done = True
             await tick_task
@@ -233,13 +233,13 @@ def test_write_after_close_has_started_is_rejected(db: Path, monkeypatch: pytest
 
     async def scenario() -> WriteReport:
         writer = await AsyncCandleWriter.open(db)
-        held = asyncio.create_task(writer.write([valid(0)], ingested_at_ms=AT))
+        held = asyncio.create_task(writer.write([valid(0)]))
         await wait_started(hold)
         closer = asyncio.create_task(writer.close())
         await asyncio.sleep(0)
         assert state_of(writer) is WriterState.CLOSING
         with pytest.raises(CandleWriteError, match="closing"):
-            await writer.write([valid(1)], ingested_at_ms=AT)
+            await writer.write([valid(1)])
         hold.release.set()
         report = await held
         await closer
@@ -256,7 +256,7 @@ def test_close_waits_for_every_accepted_write(db: Path, monkeypatch: pytest.Monk
 
     async def scenario() -> list[WriteReport]:
         writer = await AsyncCandleWriter.open(db)
-        writes = [asyncio.create_task(writer.write([valid(n)], ingested_at_ms=AT)) for n in range(3)]
+        writes = [asyncio.create_task(writer.write([valid(n)])) for n in range(3)]
         await wait_started(hold)
         closer = asyncio.create_task(writer.close())
         await asyncio.sleep(0.05)
@@ -274,9 +274,9 @@ def test_close_waits_for_every_accepted_write(db: Path, monkeypatch: pytest.Monk
 def test_write_close_race_never_loses_an_accepted_write(db: Path) -> None:
     async def scenario() -> list[Any]:
         writer = await AsyncCandleWriter.open(db)
-        first = asyncio.create_task(writer.write([valid(0)], ingested_at_ms=AT))
+        first = asyncio.create_task(writer.write([valid(0)]))
         closer = asyncio.create_task(writer.close())
-        second = asyncio.create_task(writer.write([valid(1)], ingested_at_ms=AT))
+        second = asyncio.create_task(writer.write([valid(1)]))
         return list(await asyncio.gather(first, closer, second, return_exceptions=True))
 
     first, closed, second = asyncio.run(scenario())
@@ -330,7 +330,7 @@ def test_write_after_closed_raises(db: Path) -> None:
         writer = await AsyncCandleWriter.open(db)
         await writer.close()
         with pytest.raises(CandleWriteError, match="closed"):
-            await writer.write([valid(0)], ingested_at_ms=AT)
+            await writer.write([valid(0)])
 
     asyncio.run(scenario())
 
@@ -344,7 +344,7 @@ def test_cancelled_started_write_still_completes(db: Path, monkeypatch: pytest.M
 
     async def scenario() -> None:
         writer = await AsyncCandleWriter.open(db)
-        task = asyncio.create_task(writer.write([valid(0)], ingested_at_ms=AT))
+        task = asyncio.create_task(writer.write([valid(0)]))
         await wait_started(hold)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -359,7 +359,7 @@ def test_cancelled_started_write_still_completes(db: Path, monkeypatch: pytest.M
     async def rewrite() -> WriteReport:
         writer = await AsyncCandleWriter.open(db)
         try:
-            return await writer.write([valid(0)], ingested_at_ms=AT)
+            return await writer.write([valid(0)])
         finally:
             await writer.close()
 
@@ -374,9 +374,9 @@ def test_cancelled_queued_write_is_withdrawn(db: Path, monkeypatch: pytest.Monke
 
     async def scenario() -> None:
         writer = await AsyncCandleWriter.open(db)
-        first = asyncio.create_task(writer.write([valid(0)], ingested_at_ms=AT))
+        first = asyncio.create_task(writer.write([valid(0)]))
         await wait_started(hold)
-        second = asyncio.create_task(writer.write([valid(1)], ingested_at_ms=AT))
+        second = asyncio.create_task(writer.write([valid(1)]))
         await asyncio.sleep(0.05)
         second.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -396,14 +396,14 @@ def test_writer_stays_usable_after_a_cancelled_write(db: Path, monkeypatch: pyte
 
     async def scenario() -> WriteReport:
         writer = await AsyncCandleWriter.open(db)
-        task = asyncio.create_task(writer.write([valid(0)], ingested_at_ms=AT))
+        task = asyncio.create_task(writer.write([valid(0)]))
         await wait_started(hold)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
         hold.release.set()
         try:
-            return await writer.write([valid(1)], ingested_at_ms=AT)
+            return await writer.write([valid(1)])
         finally:
             await writer.close()
 
@@ -417,7 +417,7 @@ def test_cancelled_close_still_closes(db: Path, monkeypatch: pytest.MonkeyPatch)
 
     async def scenario() -> None:
         writer = await AsyncCandleWriter.open(db)
-        held = asyncio.create_task(writer.write([valid(0)], ingested_at_ms=AT))
+        held = asyncio.create_task(writer.write([valid(0)]))
         await wait_started(hold)
         closer = asyncio.create_task(writer.close())
         await asyncio.sleep(0)
@@ -430,7 +430,7 @@ def test_cancelled_close_still_closes(db: Path, monkeypatch: pytest.MonkeyPatch)
         await writer.close()
         assert state_of(writer) is WriterState.CLOSED
         with pytest.raises(CandleWriteError, match="closed"):
-            await writer.write([valid(1)], ingested_at_ms=AT)
+            await writer.write([valid(1)])
 
     asyncio.run(scenario())
     assert wait_for_no_workers()

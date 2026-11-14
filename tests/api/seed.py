@@ -11,9 +11,11 @@ from quasar_market_data.collector.candle_writer import CandleWriter
 from quasar_market_data.config.settings import Instrument
 from quasar_market_data.domain.timed_coverage import ExpectationRule
 from quasar_market_data.domain.timeframe import Timeframe
+from quasar_market_data.domain.timestamps import MIN_TIMESTAMP_MS
 from quasar_market_data.domain.validation import require_valid
 from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import migrate
+from tests.readability_seed import register as _register
 
 VENUE = "binance-usdm"
 SYMBOL = "BTC/USDT:USDT"
@@ -23,6 +25,15 @@ FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "binance" / "btc
 _TF_MS = 300_000
 SAMPLE_RULE = ExpectationRule(15_000, 60_000)
 SAMPLE_UNIVERSE: tuple[Instrument, ...] = (Instrument(VENUE, SYMBOL, TIMEFRAME),)
+# The seeded databases migrate at the earliest valid instant, so the cut-over (ADR-0005 P-2) lies before every seeded
+# stamp: seeded rows are new-style rows of a registered transaction stamped AT, confirmed unless a test says not.
+MIGRATED_AT = MIN_TIMESTAMP_MS
+CUTOVER = MIGRATED_AT + 1
+
+
+def register(conn: sqlite3.Connection, dataset: str, stamp: int = AT, *, confirmed: bool = True) -> None:
+    """``tests.readability_seed.register`` with the seed stamp ``AT`` as the default."""
+    _register(conn, dataset, stamp, confirmed=confirmed)
 
 
 def candle_values(open_time_ms: int) -> tuple[str, str, str, str, str, str | None]:
@@ -49,6 +60,7 @@ def insert_candle(
     close: str | None = None,
     high: str | None = None,
     low: str | None = None,
+    stamp: int = AT,
 ) -> None:
     values = candle_values(open_time_ms)
     if close is not None:
@@ -56,10 +68,11 @@ def insert_candle(
         derived_high = max(open_, close, key=Decimal)
         derived_low = min(open_, close, key=Decimal)
         values = (open_, high or derived_high, low or derived_low, close, volume, turnover)
+    register(conn, "candles", stamp)
     conn.execute(
         "INSERT INTO candles (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume, turnover,"
         " ingested_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (venue, symbol, timeframe, open_time_ms, *values, AT),
+        (venue, symbol, timeframe, open_time_ms, *values, stamp),
     )
 
 
@@ -71,13 +84,15 @@ def insert_conflict(
     symbol: str = SYMBOL,
     venue: str = VENUE,
     timeframe: str = TIMEFRAME,
+    stamp: int = AT,
 ) -> None:
     """Record a conflicting observation; a different ``variant`` is a different observation."""
     open_, high, low, _close, volume, turnover = candle_values(open_time_ms)
+    register(conn, "candles", stamp)
     conn.execute(
         "INSERT INTO candle_conflicts (venue, symbol, timeframe, open_time_ms, open, high, low, close, volume,"
         " turnover, first_seen_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (venue, symbol, timeframe, open_time_ms, open_, high, low, f"{90000 + variant}.5", volume, turnover, AT),
+        (venue, symbol, timeframe, open_time_ms, open_, high, low, f"{90000 + variant}.5", volume, turnover, stamp),
     )
 
 
@@ -106,13 +121,15 @@ def insert_open_interest(
     period: str = TIMEFRAME,
     open_interest: str | None = None,
     open_interest_value: str | None = None,
+    stamp: int = AT,
 ) -> None:
     """A stored open interest row; ``time_ms`` is the period END."""
     default_oi, default_value = open_interest_values(time_ms)
+    register(conn, "open_interest", stamp)
     conn.execute(
         "INSERT INTO open_interest (venue, symbol, period, time_ms, open_interest, open_interest_value, ingested_at_ms)"
         " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (venue, symbol, period, time_ms, open_interest or default_oi, open_interest_value or default_value, AT),
+        (venue, symbol, period, time_ms, open_interest or default_oi, open_interest_value or default_value, stamp),
     )
 
 
@@ -124,12 +141,14 @@ def insert_open_interest_conflict(
     symbol: str = SYMBOL,
     venue: str = VENUE,
     period: str = TIMEFRAME,
+    stamp: int = AT,
 ) -> None:
     """Record a conflicting observation; a different ``variant`` is a different observation."""
+    register(conn, "open_interest", stamp)
     conn.execute(
         "INSERT INTO open_interest_conflicts (venue, symbol, period, time_ms, open_interest, open_interest_value,"
         " first_seen_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (venue, symbol, period, time_ms, f"{91000 + variant}.5", f"{8_000_000_000 + variant}.5", AT),
+        (venue, symbol, period, time_ms, f"{91000 + variant}.5", f"{8_000_000_000 + variant}.5", stamp),
     )
 
 
@@ -152,14 +171,16 @@ def insert_funding_rate(
     venue: str = VENUE,
     funding_rate: str | None = None,
     mark_price: object = _DEFAULT,
+    stamp: int = AT,
 ) -> None:
     """A stored funding settlement; ``mark_price=None`` stores NULL (Binance sends none before 2023-10-31)."""
     default_rate, default_price = funding_values(funding_time_ms)
     price = default_price if mark_price is _DEFAULT else mark_price
+    register(conn, "funding_rates", stamp)
     conn.execute(
         "INSERT INTO funding_rates (venue, symbol, funding_time_ms, rate_type, funding_rate, mark_price, ingested_at_ms)"
         " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (venue, symbol, funding_time_ms, rate_type, funding_rate or default_rate, price, AT),
+        (venue, symbol, funding_time_ms, rate_type, funding_rate or default_rate, price, stamp),
     )
 
 
@@ -171,12 +192,14 @@ def insert_funding_conflict(
     *,
     symbol: str = SYMBOL,
     venue: str = VENUE,
+    stamp: int = AT,
 ) -> None:
     """Record a conflicting observation; a different ``variant`` is a different observation."""
+    register(conn, "funding_rates", stamp)
     conn.execute(
         "INSERT INTO funding_rate_conflicts (venue, symbol, funding_time_ms, rate_type, funding_rate, mark_price,"
         " first_seen_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (venue, symbol, funding_time_ms, rate_type, f"0.{variant + 1:03d}1", f"81000.{variant + 1}1", AT),
+        (venue, symbol, funding_time_ms, rate_type, f"0.{variant + 1:03d}1", f"81000.{variant + 1}1", stamp),
     )
 
 
@@ -212,7 +235,7 @@ def make_database(
 ) -> Path:
     conn = open_writer(path)
     try:
-        migrate(conn, applied_at_ms=AT)
+        migrate(conn, applied_at_ms=MIGRATED_AT)
         for open_time_ms in candles:
             insert_candle(conn, open_time_ms, symbol=symbol)
         for open_time_ms in unavailable:
@@ -242,9 +265,9 @@ def make_database_from_fixture(path: Path) -> Path:
     candles = [require_valid(candle) for candle in parse_klines(rows, SYMBOL, Timeframe(TIMEFRAME))]
     conn = open_writer(path)
     try:
-        migrate(conn, applied_at_ms=AT)
-        writer = CandleWriter(conn)
-        writer.write(candles, ingested_at_ms=AT)
+        migrate(conn, applied_at_ms=MIGRATED_AT)
+        writer = CandleWriter(conn, wall_ms=lambda: AT)  # one confirmed transaction stamped AT
+        writer.write(candles)
     finally:
         conn.close()
     return path

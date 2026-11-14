@@ -24,6 +24,7 @@ from quasar_market_data.domain.funding_rate_span import Interval, NotAdjacentErr
 from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.collector.faulty_connection import Fault, FaultyConnection, open_faulty_writer
+from tests.readability_seed import register
 
 AT = 1_793_840_000_000
 VENUE = "binance-usdm"
@@ -124,7 +125,7 @@ def test_span_merge_validates_its_arguments() -> None:
 
 def test_merge_creates_the_span_with_its_rows(writer: FundingRateWriter, db: Path) -> None:
     rows = [fr(X + i * HOUR) for i in range(3)]
-    report = writer.write_transaction(rows, ingested_at_ms=AT, merge=merge_of(X, X + 3 * HOUR))
+    report = writer.write_transaction(rows, merge=merge_of(X, X + 3 * HOUR))
     assert report.inserted == 3
     assert (report.span_before, report.span_after) == (None, Interval(X, X + 3 * HOUR))
     assert span_of(db) == (X, X + 3 * HOUR, AT)
@@ -133,7 +134,7 @@ def test_merge_creates_the_span_with_its_rows(writer: FundingRateWriter, db: Pat
 
 def test_merge_of_an_empty_page_is_a_merge_only_transaction(db: Path) -> None:
     conn, w = faulty(db)
-    report = w.write_transaction([], ingested_at_ms=AT, merge=merge_of(X, X + HOUR))
+    report = w.write_transaction([], merge=merge_of(X, X + HOUR))
     assert report.inserted == 0 and report.span_after == Interval(X, X + HOUR)
     assert span_of(db) == (X, X + HOUR, AT)
     assert not any(s.startswith(INSERT_ROW) for s in conn.statements)
@@ -143,7 +144,7 @@ def test_merge_of_an_empty_page_is_a_merge_only_transaction(db: Path) -> None:
 
 def test_empty_rows_without_merge_execute_nothing(db: Path) -> None:
     conn, w = faulty(db)
-    w.write_transaction([], ingested_at_ms=AT)
+    w.write_transaction([])
     assert conn.statements == []
 
 
@@ -175,14 +176,14 @@ def test_empty_rows_without_merge_execute_nothing(db: Path) -> None:
 def test_merge_boundaries(
     writer: FundingRateWriter, db: Path, a: int, e: int, accepted: bool, expected: tuple[int, int] | None
 ) -> None:
-    writer.write_transaction([], ingested_at_ms=AT, merge=merge_of(X, X + 1_000))
+    writer.write_transaction([], merge=merge_of(X, X + 1_000))
     request = merge_of(X + a, X + e, at=AT + 7)
     if not accepted:
         with pytest.raises(FundingSpanNotAdjacentError):
-            writer.write_transaction([], ingested_at_ms=AT + 7, merge=request)
+            writer.write_transaction([], merge=request)
         assert span_of(db) == (X, X + 1_000, AT)
         return
-    report = writer.write_transaction([], ingested_at_ms=AT + 7, merge=request)
+    report = writer.write_transaction([], merge=request)
     assert expected is not None
     assert (report.span_before, report.span_after) == (
         Interval(X, X + 1_000),
@@ -192,22 +193,22 @@ def test_merge_boundaries(
 
 
 def test_refused_merge_rolls_back_the_final_chunk_too(writer: FundingRateWriter, db: Path) -> None:
-    writer.write_transaction([fr(X)], ingested_at_ms=AT, merge=merge_of(X, X + 10))
+    writer.write_transaction([fr(X)], merge=merge_of(X, X + 10))
     with pytest.raises(FundingSpanNotAdjacentError) as error:
-        writer.write_transaction([fr(X + 99), fr(X + 100)], ingested_at_ms=AT + 1, merge=merge_of(X + 99, X + 100))
+        writer.write_transaction([fr(X + 99), fr(X + 100)], merge=merge_of(X + 99, X + 100))
     assert not isinstance(error.value, FundingRateWriteOutcomeUnknown)
     assert times_of(db) == [X]
     assert span_of(db) == (X, X + 10, AT)
-    ok = writer.write_transaction([fr(X + 11)], ingested_at_ms=AT + 2, merge=merge_of(X + 11, X + 12, at=AT + 2))
+    ok = writer.write_transaction([fr(X + 11)], merge=merge_of(X + 11, X + 12, at=AT + 2))
     assert ok.inserted == 1 and span_of(db) == (X, X + 12, AT + 2)
 
 
 def test_a_refused_merge_whose_rollback_fails_makes_the_writer_unusable(db: Path) -> None:
     conn, w = faulty(db)
-    w.write_transaction([], ingested_at_ms=AT, merge=merge_of(X, X + 10))
+    w.write_transaction([], merge=merge_of(X, X + 10))
     conn.faults.append(Fault("ROLLBACK", sqlite3.OperationalError("rollback failed")))
     with pytest.raises(FundingRateWriteError, match="unusable") as error:
-        w.write_transaction([fr(X + 99)], ingested_at_ms=AT, merge=merge_of(X + 99, X + 100))
+        w.write_transaction([fr(X + 99)], merge=merge_of(X + 99, X + 100))
     assert not isinstance(error.value, FundingSpanNotAdjacentError)  # not "re-plan": the writer is dead
     assert isinstance(error.value.__cause__, FundingSpanNotAdjacentError)
     assert w.unusable
@@ -218,7 +219,7 @@ def test_a_refused_merge_whose_rollback_fails_makes_the_writer_unusable(db: Path
     finally:
         other.close()
     with pytest.raises(FundingRateWriteError, match="unusable"):
-        w.write_transaction([], ingested_at_ms=AT)
+        w.write_transaction([])
 
 
 @pytest.mark.parametrize("seed", range(6))
@@ -232,9 +233,7 @@ def test_merge_agrees_with_the_domain_merge_span(db: Path, seed: int) -> None:
             if case % 5 != 0:  # one in five cases starts with no span
                 start = X + rng.randint(0, 50)
                 existing = Interval(start, start + rng.randint(0, 50))
-                w.write_transaction(
-                    [], ingested_at_ms=AT, merge=merge_of(existing.from_ms, existing.through_ms, symbol=symbol)
-                )
+                w.write_transaction([], merge=merge_of(existing.from_ms, existing.through_ms, symbol=symbol))
             anchor = existing or Interval(X + 25, X + 25)
             a = anchor.from_ms + rng.randint(-60, 60)
             e = a + rng.randint(0, 60)
@@ -249,9 +248,9 @@ def test_merge_agrees_with_the_domain_merge_span(db: Path, seed: int) -> None:
                     expected = None
             if expected is None:
                 with pytest.raises(FundingSpanNotAdjacentError):
-                    w.write_transaction([], ingested_at_ms=AT + 1, merge=request)
+                    w.write_transaction([], merge=request)
             else:
-                report = w.write_transaction([], ingested_at_ms=AT + 1, merge=request)
+                report = w.write_transaction([], merge=request)
                 assert report.span_after == expected
                 assert span_of(db, symbol) is not None
     finally:
@@ -259,15 +258,15 @@ def test_merge_agrees_with_the_domain_merge_span(db: Path, seed: int) -> None:
 
 
 def test_merge_verified_at_never_decreases(writer: FundingRateWriter, db: Path) -> None:
-    writer.write_transaction([], ingested_at_ms=AT, merge=merge_of(X, X + 10, at=AT + 100))
-    writer.write_transaction([], ingested_at_ms=AT, merge=merge_of(X + 11, X + 12, at=AT + 5))
+    writer.write_transaction([], merge=merge_of(X, X + 10, at=AT + 100))
+    writer.write_transaction([], merge=merge_of(X + 11, X + 12, at=AT + 5))
     assert span_of(db) == (X, X + 12, AT + 100)
 
 
 def test_merge_rejects_rows_of_another_series(db: Path) -> None:
     conn, w = faulty(db)
     with pytest.raises(ValueError, match="series"):
-        w.write_transaction([fr(X, symbol="ETH/USDT:USDT")], ingested_at_ms=AT, merge=merge_of(X, X + 1))
+        w.write_transaction([fr(X, symbol="ETH/USDT:USDT")], merge=merge_of(X, X + 1))
     assert conn.statements == []
 
 
@@ -278,17 +277,15 @@ def test_full_page_merge_claims_up_to_the_row_before_the_last(writer: FundingRat
         chunk = [fr(t) for t in times[start : start + MAX_ROWS_PER_TRANSACTION]]
         final = start + MAX_ROWS_PER_TRANSACTION >= 1_000
         merge = merge_of(X, last - 1) if final else None
-        report = writer.write_transaction(chunk, ingested_at_ms=AT, merge=merge)
+        report = writer.write_transaction(chunk, merge=merge)
     assert report.span_after == Interval(X, last - 1)
     assert span_of(db) == (X, last - 1, AT)
     assert times_of(db)[-1] == last  # the row at `last` is stored although the span stops before it
 
 
 def test_span_before_and_late_event_detection_data(writer: FundingRateWriter) -> None:
-    writer.write_transaction([fr(X), fr(X + 10)], ingested_at_ms=AT, merge=merge_of(X, X + 20))
-    report = writer.write_transaction(
-        [fr(X + 10), fr(X + 15), fr(X + 25)], ingested_at_ms=AT + 1, merge=merge_of(X, X + 30)
-    )
+    writer.write_transaction([fr(X), fr(X + 10)], merge=merge_of(X, X + 20))
+    report = writer.write_transaction([fr(X + 10), fr(X + 15), fr(X + 25)], merge=merge_of(X, X + 30))
     assert report.span_before == Interval(X, X + 20)
     late = [k for k in report.inserted_keys if k.funding_time_ms <= report.span_before.through_ms]
     assert [k.funding_time_ms for k in late] == [X + 15]
@@ -296,9 +293,9 @@ def test_span_before_and_late_event_detection_data(writer: FundingRateWriter) ->
 
 
 def test_conflicts_do_not_block_span_growth(writer: FundingRateWriter, db: Path) -> None:
-    writer.write_transaction([fr(X)], ingested_at_ms=AT, merge=merge_of(X, X + 10))
+    writer.write_transaction([fr(X)], merge=merge_of(X, X + 10))
     differing = FundingRate(FundingRateKey(VENUE, SYMBOL, X, RateType.REGULAR), "0.0009", "67123.45")
-    report = writer.write_transaction([differing], ingested_at_ms=AT + 1, merge=merge_of(X, X + 20, at=AT + 1))
+    report = writer.write_transaction([differing], merge=merge_of(X, X + 20, at=AT + 1))
     assert len(report.conflicts) == 1
     assert span_of(db) == (X, X + 20, AT + 1)
 
@@ -360,7 +357,7 @@ def send_page(w: FundingRateWriter, at: int = AT) -> None:
     chunks = chunks_of_page()
     for number, chunk in enumerate(chunks):
         merge = merge_of(X, PAGE_END, at=at) if number == len(chunks) - 1 else None
-        w.write_transaction(chunk, ingested_at_ms=at, merge=merge)
+        w.write_transaction(chunk, merge=merge)
 
 
 def clean_dump(tmp_path: Path) -> dict[str, list[tuple[Any, ...]]]:
@@ -381,7 +378,8 @@ FAULT_POINTS = {
     "span_update": (Fault("UPDATE funding_rate_verified", BOOM), 200),
     "span_select_before": (Fault("SELECT from_ms", BOOM, nth=1), 200),
     "span_select_after": (Fault("SELECT from_ms", BOOM, nth=2), 200),
-    "commit_before_execution": (Fault("COMMIT", BOOM, nth=3), 200),
+    # COMMIT #5 is the third data transaction: each data COMMIT is followed by its confirmation's (ADR-0005 P-3)
+    "commit_before_execution": (Fault("COMMIT", BOOM, nth=5), 200),
 }
 
 
@@ -409,7 +407,8 @@ def test_failure_leaves_the_stored_rows_and_never_a_span(db: Path, tmp_path: Pat
 
 def test_commit_that_took_effect_is_all_or_nothing(db: Path, tmp_path: Path) -> None:
     conn, w = faulty(db)
-    conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), nth=3, after_execution=True))
+    # COMMIT #5: the third data transaction (each data COMMIT is followed by its confirmation's, ADR-0005 P-3)
+    conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), nth=5, after_execution=True))
     with pytest.raises(FundingRateWriteOutcomeUnknown):
         send_page(w)
     other = open_reader(db)  # a second connection
@@ -432,7 +431,7 @@ def test_committed_page_whose_report_is_lost_is_a_no_op_on_resend(db: Path, tmp_
     again = FundingRateWriter(open_writer(db))
     for number, chunk in enumerate(chunks_of_page()):
         merge = merge_of(X, PAGE_END) if number == 2 else None
-        report = again.write_transaction(chunk, ingested_at_ms=AT + 1, merge=merge)
+        report = again.write_transaction(chunk, merge=merge)
         assert (report.inserted, report.conflicts) == (0, ())
     assert dump(db) == before == clean_dump(tmp_path)
     w.close()
@@ -480,12 +479,12 @@ def test_a_reader_never_sees_a_span_without_its_rows(db: Path) -> None:
 def test_a_snapshot_pinned_before_the_final_transaction_sees_neither(db: Path) -> None:
     w = FundingRateWriter(open_writer(db))
     chunks = chunks_of_page()
-    w.write_transaction(chunks[0], ingested_at_ms=AT)
-    w.write_transaction(chunks[1], ingested_at_ms=AT)
+    w.write_transaction(chunks[0])
+    w.write_transaction(chunks[1])
     reader = open_reader(db)
     reader.execute("BEGIN")
     assert reader.execute("SELECT count(*) FROM funding_rate_verified").fetchone() == (0,)  # pins the snapshot
-    w.write_transaction(chunks[2], ingested_at_ms=AT, merge=merge_of(X, PAGE_END))
+    w.write_transaction(chunks[2], merge=merge_of(X, PAGE_END))
     assert reader.execute("SELECT count(*) FROM funding_rates").fetchone() == (200,)
     assert reader.execute("SELECT count(*) FROM funding_rate_verified").fetchone() == (0,)
     reader.execute("COMMIT")
@@ -519,7 +518,7 @@ def test_killed_process_inside_the_final_transaction_leaves_neither_rows_nor_spa
             FundingRate(FundingRateKey("binance-usdm", "BTC/USDT:USDT", int(t), RateType.REGULAR), "0.0001", None)
             for t in sys.argv[2:]
         ]
-        writer.write_transaction(rows, ingested_at_ms=1_793_840_000_000,
+        writer.write_transaction(rows,
                                  merge=SpanMerge("binance-usdm", "BTC/USDT:USDT", Interval(int(sys.argv[2]), int(sys.argv[-1]) + 1),
                                                  1_793_840_000_000))
         """
@@ -532,9 +531,7 @@ def test_killed_process_inside_the_final_transaction_leaves_neither_rows_nor_spa
     assert times_of(db) == []
     assert span_of(db) is None
     restarted = FundingRateWriter(open_writer(db))
-    restarted.write_transaction(
-        [fr(int(t)) for t in times], ingested_at_ms=AT, merge=merge_of(int(times[0]), int(times[-1]) + 1)
-    )
+    restarted.write_transaction([fr(int(t)) for t in times], merge=merge_of(int(times[0]), int(times[-1]) + 1))
     restarted.close()
     assert len(times_of(db)) == 5 and span_of(db) is not None
 
@@ -543,7 +540,7 @@ def test_a_non_sqlite_exception_inside_the_transaction_rolls_back_and_releases_t
     conn, w = faulty(db)
     conn.faults.append(Fault("SELECT from_ms", KeyboardInterrupt(), nth=1))
     with pytest.raises(KeyboardInterrupt):
-        w.write_transaction([fr(X)], ingested_at_ms=AT, merge=merge_of(X, X + 10))
+        w.write_transaction([fr(X)], merge=merge_of(X, X + 10))
     assert not conn.in_transaction
     other = open_writer(db, busy_timeout_ms=0)
     try:
@@ -552,7 +549,7 @@ def test_a_non_sqlite_exception_inside_the_transaction_rolls_back_and_releases_t
     finally:
         other.close()
     assert times_of(db) == [] and span_of(db) is None
-    assert w.write_transaction([fr(X)], ingested_at_ms=AT, merge=merge_of(X, X + 10)).inserted == 1
+    assert w.write_transaction([fr(X)], merge=merge_of(X, X + 10)).inserted == 1
 
 
 def test_a_stored_value_the_value_object_refuses_is_a_write_error_not_a_bare_value_error(db: Path) -> None:
@@ -561,11 +558,14 @@ def test_a_stored_value_the_value_object_refuses_is_a_write_error_not_a_bare_val
     w = FundingRateWriter(open_writer(db))
     long_rate = "1" * 97
     raw = open_writer(db)
-    raw.execute("INSERT INTO funding_rates VALUES (?, ?, ?, 'Regular', ?, NULL, ?)", (VENUE, SYMBOL, X, long_rate, AT))
+    register(raw, "funding_rates", AT + 5)  # above the cut-over AT + 1
+    raw.execute(
+        "INSERT INTO funding_rates VALUES (?, ?, ?, 'Regular', ?, NULL, ?)", (VENUE, SYMBOL, X, long_rate, AT + 5)
+    )
     raw.close()
     with pytest.raises(FundingRateWriteError, match="nothing was written"):
-        w.write_transaction([fr(X)], ingested_at_ms=AT)
+        w.write_transaction([fr(X)])
     assert dump(db)["conflicts"] == []
     assert not w.unusable
-    assert w.write_transaction([fr(X + 1)], ingested_at_ms=AT).inserted == 1
+    assert w.write_transaction([fr(X + 1)]).inserted == 1
     w.close()

@@ -68,7 +68,7 @@ def seed(db: Path, open_times: Sequence[int], *, symbol: str = SYMBOL, **values:
         rows = [kline_row(o, TF, **values) for o in sorted(open_times)]
         candles = [require_valid(c) for c in parse_klines(rows, symbol, FIVE_MINUTES)]
         if candles:
-            CandleWriter(conn).write(candles, ingested_at_ms=AT)
+            CandleWriter(conn).write(candles)
     finally:
         conn.close()
 
@@ -81,7 +81,7 @@ def seed_many(db: Path, series: dict[str, Sequence[int]]) -> None:
         for symbol, open_times in series.items():
             rows = [kline_row(o, TF) for o in sorted(open_times)]
             candles += [require_valid(c) for c in parse_klines(rows, symbol, FIVE_MINUTES)]
-        CandleWriter(conn).write(candles, ingested_at_ms=AT)
+        CandleWriter(conn).write(candles)
     finally:
         conn.close()
 
@@ -327,7 +327,7 @@ def test_a_write_report_is_not_evidence(
     seed(db, slots(T - 70 * TF, T - 60 * TF))
 
     class Liar:
-        async def write(self, candles: Sequence[object], *, ingested_at_ms: int) -> WriteReport:
+        async def write(self, candles: Sequence[object]) -> WriteReport:
             return WriteReport(inserted=len(candles), duplicates=0, conflicts=())
 
         async def close(self) -> None:

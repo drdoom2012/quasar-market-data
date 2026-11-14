@@ -239,7 +239,7 @@ def test_a_rejected_response_exits_one_with_nothing_written(db: Path, capsys: py
 
 
 def failing_write(monkeypatch: pytest.MonkeyPatch, error: OpenInterestWriteError) -> None:
-    async def write(self: AsyncOpenInterestWriter, rows: object, *, ingested_at_ms: int) -> OpenInterestWriteReport:
+    async def write(self: AsyncOpenInterestWriter, rows: object) -> OpenInterestWriteReport:
         raise error
 
     monkeypatch.setattr(AsyncOpenInterestWriter, "write", write)
@@ -278,13 +278,11 @@ def test_a_real_page_failing_after_the_first_transaction_leaves_it_stored_and_ex
     real = module.OpenInterestWriter.write_transaction
     calls = {"n": 0}
 
-    def write_transaction(
-        self: module.OpenInterestWriter, rows: Sequence[OpenInterest], *, ingested_at_ms: int
-    ) -> object:
+    def write_transaction(self: module.OpenInterestWriter, rows: Sequence[OpenInterest]) -> object:
         calls["n"] += 1
         if calls["n"] == 2:
             raise OpenInterestWriteBusy("locked")
-        return real(self, rows, ingested_at_ms=ingested_at_ms)
+        return real(self, rows)
 
     monkeypatch.setattr(module.OpenInterestWriter, "write_transaction", write_transaction)
     clock = FakeClock()

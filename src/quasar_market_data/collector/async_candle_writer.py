@@ -17,7 +17,8 @@ cannot know whether its batch was applied. Re-sending it is safe because writes 
 """
 
 import asyncio
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from enum import StrEnum
 from functools import partial
@@ -36,10 +37,10 @@ class WriterState(StrEnum):
     CLOSED = "closed"
 
 
-def _connect(path: Path, busy_timeout_ms: int) -> CandleWriter:
+def _connect(path: Path, busy_timeout_ms: int, wall_ms: Callable[[], int]) -> CandleWriter:
     conn = open_writer(path, busy_timeout_ms=busy_timeout_ms)
     try:
-        return CandleWriter(conn)
+        return CandleWriter(conn, wall_ms=wall_ms)
     except BaseException:
         conn.close()
         raise
@@ -69,9 +70,15 @@ class AsyncCandleWriter:
         self._close_task: asyncio.Task[None] | None = None
 
     @classmethod
-    async def open(cls, path: Path, *, busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS) -> "AsyncCandleWriter":
+    async def open(
+        cls,
+        path: Path,
+        *,
+        busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
+        wall_ms: Callable[[], int] = lambda: time.time_ns() // 1_000_000,
+    ) -> "AsyncCandleWriter":
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=_THREAD_NAME_PREFIX)
-        connecting = executor.submit(_connect, path, busy_timeout_ms)
+        connecting = executor.submit(_connect, path, busy_timeout_ms, wall_ms)
         try:
             writer = await asyncio.wrap_future(connecting)
         except asyncio.CancelledError:
@@ -86,10 +93,10 @@ class AsyncCandleWriter:
     def state(self) -> WriterState:
         return self._state
 
-    async def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> WriteReport:
+    async def write(self, candles: Sequence[ValidatedCandle]) -> WriteReport:
         if self._state is not WriterState.OPEN:
             raise CandleWriteError(f"writer is {self._state.value}")
-        job = partial(self._writer.write, tuple(candles), ingested_at_ms=ingested_at_ms)
+        job = partial(self._writer.write, tuple(candles))
         return await asyncio.get_running_loop().run_in_executor(self._executor, job)
 
     async def close(self) -> None:

@@ -245,8 +245,8 @@ def test_unknown_write_outcome_with_a_real_writer_stores_each_row_once(db: Path)
         def __init__(self, writer: CandleWriter) -> None:
             self.writer = writer
 
-        async def write(self, candles: Sequence[ValidatedCandle], *, ingested_at_ms: int) -> Any:
-            return self.writer.write(candles, ingested_at_ms=ingested_at_ms)
+        async def write(self, candles: Sequence[ValidatedCandle]) -> Any:
+            return self.writer.write(candles)
 
     conn = open_faulty_writer(db, AT)
     conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), after_execution=True))
@@ -335,14 +335,14 @@ def test_write_watch_flags_unknown_outcome_and_cancellation_and_never_clears() -
     async def scenario() -> None:
         unknown = _WriteWatch(ControlledSink(raises=[CandleWriteOutcomeUnknown("x"), None]))
         with pytest.raises(CandleWriteOutcomeUnknown):
-            await unknown.write((), ingested_at_ms=AT)
+            await unknown.write(())
         assert unknown.uncertain is True
-        await unknown.write((), ingested_at_ms=AT)
+        await unknown.write(())
         assert unknown.uncertain is True  # a later returned write does not clear it
 
         blocked = ControlledSink(block=True)
         cancelled = _WriteWatch(blocked)
-        task = asyncio.create_task(cancelled.write((), ingested_at_ms=AT))
+        task = asyncio.create_task(cancelled.write(()))
         await blocked.write_started.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -351,7 +351,7 @@ def test_write_watch_flags_unknown_outcome_and_cancellation_and_never_clears() -
 
         plain = _WriteWatch(ControlledSink(raises=[CandleWriteError("nothing written")]))
         with pytest.raises(CandleWriteError):
-            await plain.write((), ingested_at_ms=AT)
+            await plain.write(())
         assert plain.uncertain is False
 
     asyncio.run(scenario())

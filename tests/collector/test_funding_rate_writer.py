@@ -67,77 +67,77 @@ def db(tmp_path: Path) -> Path:
 @pytest.fixture
 def writer(db: Path) -> Iterator[FundingRateWriter]:
     conn = open_writer(db)
-    migrate(conn, applied_at_ms=AT)
-    w = FundingRateWriter(conn)
+    migrate(conn, applied_at_ms=AT - 10)
+    w = FundingRateWriter(conn, wall_ms=lambda: AT)
     yield w
     if not w.unusable:
         w.close()
 
 
 def faulty(db: Path) -> tuple[FaultyConnection, FundingRateWriter]:
-    conn = open_faulty_writer(db, AT)
-    w = FundingRateWriter(conn)
+    conn = open_faulty_writer(db, AT - 10)
+    w = FundingRateWriter(conn, wall_ms=lambda: AT)
     conn.statements.clear()
     return conn, w
 
 
 def test_rows_are_inserted_once(writer: FundingRateWriter, db: Path) -> None:
     rows = [fr(0), fr(1), fr(2)]
-    report = writer.write_transaction(rows, ingested_at_ms=AT)
+    report = writer.write_transaction(rows)
     assert (report.inserted, report.duplicates, report.conflicts) == (3, 0, ())
-    again = writer.write_transaction(rows, ingested_at_ms=AT + 1)
+    again = writer.write_transaction(rows)
     assert (again.inserted, again.duplicates, again.conflicts) == (0, 3, ())
     assert [row[4] for row in stored(db)] == [AT, AT, AT]
 
 
 def test_negative_rate_and_null_mark_price_round_trip(writer: FundingRateWriter, db: Path) -> None:
-    writer.write_transaction([fr(0, "-0.0001", None), fr(1, "0", "0")], ingested_at_ms=AT)
+    writer.write_transaction([fr(0, "-0.0001", None), fr(1, "0", "0")])
     assert stored(db) == [(T, "Regular", "-0.0001", None, AT), (T + HOUR, "Regular", "0", "0", AT)]
 
 
 def test_differing_rate_is_recorded_not_written_over(writer: FundingRateWriter, db: Path) -> None:
-    writer.write_transaction([fr(0, "0.0001")], ingested_at_ms=AT)
-    report = writer.write_transaction([fr(0, "0.0002")], ingested_at_ms=AT + 5)
+    writer.write_transaction([fr(0, "0.0001")])
+    report = writer.write_transaction([fr(0, "0.0002")])
     assert report.inserted == 0 and report.duplicates == 0
     (conflict,) = report.conflicts
     assert conflict.incoming == fr(0, "0.0002")
     assert conflict.stored == fr(0, "0.0001")
     assert conflict.newly_recorded is True
     assert stored(db) == [(T, "Regular", "0.0001", "67123.45", AT)]
-    assert conflict_rows(db) == [(T, "Regular", "0.0002", "67123.45", AT + 5)]
+    assert conflict_rows(db) == [(T, "Regular", "0.0002", "67123.45", AT + 1)]  # the second transaction's stamp
 
 
 def test_differing_mark_price_is_a_conflict(writer: FundingRateWriter, db: Path) -> None:
-    writer.write_transaction([fr(0, mark="67123.45")], ingested_at_ms=AT)
-    report = writer.write_transaction([fr(0, mark="67123.46")], ingested_at_ms=AT + 5)
+    writer.write_transaction([fr(0, mark="67123.45")])
+    report = writer.write_transaction([fr(0, mark="67123.46")])
     assert [c.newly_recorded for c in report.conflicts] == [True]
-    assert conflict_rows(db) == [(T, "Regular", "0.0001", "67123.46", AT + 5)]
+    assert conflict_rows(db) == [(T, "Regular", "0.0001", "67123.46", AT + 1)]  # the second transaction's stamp
 
 
 @pytest.mark.parametrize(("first", "second"), [(None, "67123.45"), ("67123.45", None)])
 def test_null_versus_price_is_a_conflict_in_both_directions(
     writer: FundingRateWriter, db: Path, first: str | None, second: str | None
 ) -> None:
-    writer.write_transaction([fr(0, mark=first)], ingested_at_ms=AT)
-    report = writer.write_transaction([fr(0, mark=second)], ingested_at_ms=AT + 5)
+    writer.write_transaction([fr(0, mark=first)])
+    report = writer.write_transaction([fr(0, mark=second)])
     (conflict,) = report.conflicts
     assert conflict.stored.mark_price == first and conflict.incoming.mark_price == second
     assert stored(db) == [(T, "Regular", "0.0001", first, AT)]
-    assert conflict_rows(db) == [(T, "Regular", "0.0001", second, AT + 5)]
+    assert conflict_rows(db) == [(T, "Regular", "0.0001", second, AT + 1)]  # the second transaction's stamp
 
 
 def test_same_differing_value_twice_is_one_conflict_row(writer: FundingRateWriter, db: Path) -> None:
-    writer.write_transaction([fr(0, "0.0001")], ingested_at_ms=AT)
-    writer.write_transaction([fr(0, "0.0002")], ingested_at_ms=AT + 5)
-    report = writer.write_transaction([fr(0, "0.0002")], ingested_at_ms=AT + 9)
+    writer.write_transaction([fr(0, "0.0001")])
+    writer.write_transaction([fr(0, "0.0002")])
+    report = writer.write_transaction([fr(0, "0.0002")])
     assert [c.newly_recorded for c in report.conflicts] == [False]
-    assert conflict_rows(db) == [(T, "Regular", "0.0002", "67123.45", AT + 5)]
+    assert conflict_rows(db) == [(T, "Regular", "0.0002", "67123.45", AT + 1)]  # the second transaction's stamp
 
 
 def test_same_differing_null_price_twice_is_one_conflict_row(writer: FundingRateWriter, db: Path) -> None:
-    writer.write_transaction([fr(0, mark="1")], ingested_at_ms=AT)
-    writer.write_transaction([fr(0, mark=None)], ingested_at_ms=AT + 5)
-    report = writer.write_transaction([fr(0, mark=None)], ingested_at_ms=AT + 9)
+    writer.write_transaction([fr(0, mark="1")])
+    writer.write_transaction([fr(0, mark=None)])
+    report = writer.write_transaction([fr(0, mark=None)])
     assert [c.newly_recorded for c in report.conflicts] == [False]
     assert len(conflict_rows(db)) == 1
 
@@ -147,16 +147,16 @@ def test_regular_and_special_of_one_time_never_conflict(
     writer: FundingRateWriter, db: Path, order: tuple[RateType, RateType]
 ) -> None:
     rows = [fr(0, "0.0001", rate_type=order[0]), fr(0, "0.0009", "1", rate_type=order[1])]
-    report = writer.write_transaction(rows, ingested_at_ms=AT)
+    report = writer.write_transaction(rows)
     assert (report.inserted, report.conflicts) == (2, ())
     assert len(stored(db)) == 2 and conflict_rows(db) == []
-    again = writer.write_transaction(rows, ingested_at_ms=AT + 1)
+    again = writer.write_transaction(rows)
     assert (again.inserted, again.duplicates, again.conflicts) == (0, 2, ())
 
 
 def test_inserted_keys_name_exactly_the_new_rows(writer: FundingRateWriter) -> None:
-    writer.write_transaction([fr(0, "0.0001"), fr(1, "0.0001")], ingested_at_ms=AT)
-    report = writer.write_transaction([fr(0, "0.0001"), fr(1, "0.0002"), fr(2, "0.0001")], ingested_at_ms=AT + 1)
+    writer.write_transaction([fr(0, "0.0001"), fr(1, "0.0001")])
+    report = writer.write_transaction([fr(0, "0.0001"), fr(1, "0.0002"), fr(2, "0.0001")])
     assert (report.inserted, report.duplicates, len(report.conflicts)) == (1, 1, 1)
     assert report.inserted_keys == (fr(2).key,)
     assert (report.span_before, report.span_after) == (None, None)
@@ -166,22 +166,22 @@ def test_more_than_100_rows_is_refused_before_any_sql(db: Path) -> None:
     conn, w = faulty(db)
     rows = [fr(i) for i in range(MAX_ROWS_PER_TRANSACTION + 1)]
     with pytest.raises(ValueError, match="100"):
-        w.write_transaction(rows, ingested_at_ms=AT)
+        w.write_transaction(rows)
     assert conn.statements == []
-    assert w.write_transaction(rows[:MAX_ROWS_PER_TRANSACTION], ingested_at_ms=AT).inserted == 100
+    assert w.write_transaction(rows[:MAX_ROWS_PER_TRANSACTION]).inserted == 100
 
 
 def test_rows_must_be_funding_rates(writer: FundingRateWriter, db: Path) -> None:
     candle = Candle(CandleKey("binance-usdm", "BTC/USDT:USDT", Timeframe("5m"), T - 3), "1", "1", "1", "1", "1", None)
     for bad in (candle, object(), 0.0001):
         with pytest.raises(TypeError):
-            writer.write_transaction([fr(0), untyped(bad)], ingested_at_ms=AT)
+            writer.write_transaction([fr(0), untyped(bad)])
     assert stored(db) == []
 
 
 def test_empty_rows_run_no_transaction(db: Path) -> None:
     conn, w = faulty(db)
-    report = w.write_transaction([], ingested_at_ms=AT)
+    report = w.write_transaction([])
     assert (report.inserted, report.duplicates, report.conflicts) == (0, 0, ())
     assert conn.statements == []
 
@@ -191,10 +191,10 @@ def test_failure_mid_transaction_rolls_back(db: Path) -> None:
     conn.faults.append(Fault(INSERT_ROW, sqlite3.OperationalError("injected"), nth=2))
     rows = [fr(0), fr(1), fr(2)]
     with pytest.raises(FundingRateWriteError, match="nothing was written") as error:
-        w.write_transaction(rows, ingested_at_ms=AT)
+        w.write_transaction(rows)
     assert type(error.value) is FundingRateWriteError
     assert stored(db) == []
-    assert w.write_transaction(rows, ingested_at_ms=AT).inserted == 3
+    assert w.write_transaction(rows).inserted == 3
 
 
 def test_commit_that_took_effect_is_outcome_unknown(db: Path) -> None:
@@ -202,26 +202,26 @@ def test_commit_that_took_effect_is_outcome_unknown(db: Path) -> None:
     conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), after_execution=True))
     rows = [fr(0), fr(1)]
     with pytest.raises(FundingRateWriteOutcomeUnknown):
-        w.write_transaction(rows, ingested_at_ms=AT)
-    retry = w.write_transaction(rows, ingested_at_ms=AT + 1)
+        w.write_transaction(rows)
+    retry = w.write_transaction(rows)
     assert (retry.inserted, retry.duplicates, retry.conflicts) == (0, 2, ())
 
 
 def test_busy_is_classified(db: Path) -> None:
     conn = open_writer(db, busy_timeout_ms=50)
-    migrate(conn, applied_at_ms=AT)
-    w = FundingRateWriter(conn)
+    migrate(conn, applied_at_ms=AT - 10)
+    w = FundingRateWriter(conn, wall_ms=lambda: AT)
     holder = open_writer(db)
     holder.execute("BEGIN IMMEDIATE")
     try:
         with pytest.raises(FundingRateWriteBusy):
-            w.write_transaction([fr(0)], ingested_at_ms=AT)
+            w.write_transaction([fr(0)])
     finally:
         holder.execute("ROLLBACK")
         holder.close()
     assert stored(db) == []
     assert conflict_rows(db) == []
-    assert w.write_transaction([fr(0)], ingested_at_ms=AT).inserted == 1
+    assert w.write_transaction([fr(0)]).inserted == 1
     w.close()
 
 
@@ -230,10 +230,10 @@ def test_failed_rollback_closes_the_connection(db: Path) -> None:
     conn.faults.append(Fault(INSERT_ROW, sqlite3.OperationalError("injected")))
     conn.faults.append(Fault("ROLLBACK", sqlite3.OperationalError("rollback failed")))
     with pytest.raises(FundingRateWriteError):
-        w.write_transaction([fr(0)], ingested_at_ms=AT)
+        w.write_transaction([fr(0)])
     assert w.unusable
     with pytest.raises(FundingRateWriteError, match="unusable"):
-        w.write_transaction([fr(0)], ingested_at_ms=AT)
+        w.write_transaction([fr(0)])
     other = open_writer(db, busy_timeout_ms=0)
     try:
         other.execute("BEGIN IMMEDIATE")  # the write lock was released by closing the connection
@@ -246,7 +246,7 @@ def test_constructor_refuses_v2_database_and_bad_connections(tmp_path: Path) -> 
     v2 = open_writer(tmp_path / "v2.db")
     migrate(v2, applied_at_ms=AT, migrations=load_migrations()[:2])
     with pytest.raises(SchemaMismatchError):
-        FundingRateWriter(v2)
+        FundingRateWriter(v2, wall_ms=lambda: AT)
     v2.close()
 
     path = tmp_path / "v3.db"
@@ -256,34 +256,34 @@ def test_constructor_refuses_v2_database_and_bad_connections(tmp_path: Path) -> 
 
     reader = open_reader(path)
     with pytest.raises(FundingRateWriteError, match="read-only"):
-        FundingRateWriter(reader)
+        FundingRateWriter(reader, wall_ms=lambda: AT)
     reader.close()
 
     no_triggers = open_writer(path)
     no_triggers.execute("PRAGMA recursive_triggers=OFF")
     with pytest.raises(FundingRateWriteError, match="recursive_triggers"):
-        FundingRateWriter(no_triggers)
+        FundingRateWriter(no_triggers, wall_ms=lambda: AT)
     no_triggers.close()
 
     implicit = sqlite3.connect(path)
     with pytest.raises(FundingRateWriteError, match="isolation_level"):
-        FundingRateWriter(implicit)
+        FundingRateWriter(implicit, wall_ms=lambda: AT)
     implicit.close()
 
     not_wal = sqlite3.connect(tmp_path / "rollback_journal.db", isolation_level=None)
     not_wal.execute("PRAGMA recursive_triggers=ON")
     migrate(not_wal, applied_at_ms=AT)
     with pytest.raises(FundingRateWriteError, match="WAL"):
-        FundingRateWriter(not_wal)
+        FundingRateWriter(not_wal, wall_ms=lambda: AT)
     not_wal.close()
 
 
 def test_durations_are_measured(db: Path) -> None:
     conn = open_writer(db)
-    migrate(conn, applied_at_ms=AT)
+    migrate(conn, applied_at_ms=AT - 10)
     ticks = iter([100, 130, 380])
-    w = FundingRateWriter(conn, monotonic_ns=lambda: next(ticks))
-    report = w.write_transaction([fr(0)], ingested_at_ms=AT)
+    w = FundingRateWriter(conn, wall_ms=lambda: AT, monotonic_ns=lambda: next(ticks))
+    report = w.write_transaction([fr(0)])
     assert (report.lock_wait_ns, report.duration_ns) == (30, 250)
     w.close()
 
@@ -291,7 +291,7 @@ def test_durations_are_measured(db: Path) -> None:
 def test_closed_writer_refuses(writer: FundingRateWriter) -> None:
     writer.close()
     with pytest.raises(FundingRateWriteError, match="closed"):
-        writer.write_transaction([fr(0)], ingested_at_ms=AT)
+        writer.write_transaction([fr(0)])
 
 
 def busy_error(code: int) -> sqlite3.OperationalError:
@@ -305,14 +305,14 @@ def test_extended_busy_codes_are_busy(db: Path, code: int) -> None:
     conn, w = faulty(db)
     conn.faults.append(Fault("BEGIN IMMEDIATE", busy_error(code)))
     with pytest.raises(FundingRateWriteBusy):
-        w.write_transaction([fr(0)], ingested_at_ms=AT)
+        w.write_transaction([fr(0)])
 
 
 def test_a_non_busy_code_is_not_busy(db: Path) -> None:
     conn, w = faulty(db)
     conn.faults.append(Fault("BEGIN IMMEDIATE", busy_error(1555)))
     with pytest.raises(FundingRateWriteError) as error:
-        w.write_transaction([fr(0)], ingested_at_ms=AT)
+        w.write_transaction([fr(0)])
     assert type(error.value) is FundingRateWriteError
 
 
@@ -320,16 +320,16 @@ def test_busy_commit_that_rolled_back_is_busy(db: Path) -> None:
     conn, w = faulty(db)
     conn.faults.append(Fault("COMMIT", busy_error(5)))
     with pytest.raises(FundingRateWriteBusy):
-        w.write_transaction([fr(0)], ingested_at_ms=AT)
+        w.write_transaction([fr(0)])
     assert stored(db) == []
 
 
 def test_conflict_stored_by_an_unknown_commit_is_reported_as_not_new_on_retry(db: Path) -> None:
     conn, w = faulty(db)
-    w.write_transaction([fr(0, "0.0001")], ingested_at_ms=AT)
+    w.write_transaction([fr(0, "0.0001")])
     conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), after_execution=True))
     with pytest.raises(FundingRateWriteOutcomeUnknown):
-        w.write_transaction([fr(0, "0.0002")], ingested_at_ms=AT + 5)
-    retry = w.write_transaction([fr(0, "0.0002")], ingested_at_ms=AT + 9)
+        w.write_transaction([fr(0, "0.0002")])
+    retry = w.write_transaction([fr(0, "0.0002")])
     assert [c.newly_recorded for c in retry.conflicts] == [False]
-    assert conflict_rows(db) == [(T, "Regular", "0.0002", "67123.45", AT + 5)]
+    assert conflict_rows(db) == [(T, "Regular", "0.0002", "67123.45", AT + 1)]  # the second transaction's stamp

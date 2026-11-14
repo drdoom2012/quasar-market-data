@@ -79,10 +79,10 @@ class RecordingSink:
         self.error = error
         self.writes: list[tuple[tuple[OpenInterest, ...], int]] = []
 
-    async def write(self, rows: Sequence[OpenInterest], *, ingested_at_ms: int) -> Any:
+    async def write(self, rows: Sequence[OpenInterest]) -> Any:
         if self.error is not None:
             raise self.error
-        self.writes.append((tuple(rows), ingested_at_ms))
+        self.writes.append((tuple(rows), 0))  # the real writer stamps; this fake has no clock
         from quasar_market_data.collector.async_open_interest_writer import OpenInterestWriteReport
 
         return OpenInterestWriteReport(len(rows), 0, (), (), (), 0, 0)

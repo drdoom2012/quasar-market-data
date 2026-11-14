@@ -17,7 +17,7 @@ from quasar_market_data.storage.connection import open_reader, open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.api.probe import InterleavingConnection
 from tests.api.seed import (
-    AT,
+    MIGRATED_AT,
     SYMBOL,
     VENUE,
     insert_candle,
@@ -25,6 +25,7 @@ from tests.api.seed import (
     insert_unavailable,
     make_database,
 )
+from tests.typing_helpers import untyped
 
 TF = 300_000
 S = 1792643400000
@@ -114,8 +115,8 @@ def test_other_series_do_not_leak_in(tmp_path: Path) -> None:
     writer = open_writer(path)
     for other in ({"symbol": "ETH/USDT:USDT"}, {"venue": "binance-spot"}, {"timeframe": "15m"}):
         for n in range(8):
-            insert_candle(writer, slot(n), **other)
-            insert_conflict(writer, slot(n), 1, **other)
+            insert_candle(writer, slot(n), **untyped(other))
+            insert_conflict(writer, slot(n), 1, **untyped(other))
         for n in (1, 5):
             insert_unavailable(writer, slot(n), **other)
     writer.close()
@@ -235,7 +236,7 @@ def test_database_errors_are_mapped_like_candles(tmp_path: Path) -> None:
 def _seeded(path: Path, rows: int) -> Path:
     conn = open_writer(path)
     try:
-        migrate(conn, applied_at_ms=AT)
+        migrate(conn, applied_at_ms=MIGRATED_AT)
         conn.execute("BEGIN")
         for n in range(rows):
             insert_candle(conn, slot(n))

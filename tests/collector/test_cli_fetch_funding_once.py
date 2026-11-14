@@ -288,9 +288,7 @@ def test_a_rejected_response_exits_one_with_nothing_written(db: Path, capsys: py
 
 
 def failing_write(monkeypatch: pytest.MonkeyPatch, error: FundingRateWriteError) -> None:
-    async def write(
-        self: AsyncFundingRateWriter, rows: object, *, ingested_at_ms: int, merge: object = None
-    ) -> FundingRateWriteReport:
+    async def write(self: AsyncFundingRateWriter, rows: object, *, merge: object = None) -> FundingRateWriteReport:
         raise error
 
     monkeypatch.setattr(AsyncFundingRateWriter, "write", write)
@@ -339,11 +337,9 @@ def test_the_command_passes_no_merge_to_the_writer(db: Path, monkeypatch: pytest
     seen: list[object] = []
     original = AsyncFundingRateWriter.write
 
-    async def write(
-        self: AsyncFundingRateWriter, rows: object, *, ingested_at_ms: int, merge: object = None
-    ) -> FundingRateWriteReport:
+    async def write(self: AsyncFundingRateWriter, rows: object, *, merge: object = None) -> FundingRateWriteReport:
         seen.append(merge)
-        return await original(self, rows, ingested_at_ms=ingested_at_ms, merge=merge)  # type: ignore[arg-type]
+        return await original(self, rows, merge=merge)  # type: ignore[arg-type]
 
     monkeypatch.setattr(AsyncFundingRateWriter, "write", write)
     clock = FakeClock()

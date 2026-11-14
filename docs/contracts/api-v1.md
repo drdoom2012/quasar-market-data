@@ -190,7 +190,9 @@ GET /v1/candles?venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m&start=17926
       "close": "82768.2",
       "volume": "369.221",
       "turnover": "30587379.8759",
-      "conflicted": false
+      "conflicted": false,
+      "readable_by_ms": 1792677002000,
+      "readable_by_unconfirmed": false
     },
     {
       "open_time_ms": 1792643700000,
@@ -200,7 +202,9 @@ GET /v1/candles?venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m&start=17926
       "close": "82709",
       "volume": "580.95",
       "turnover": "48054366.2802",
-      "conflicted": false
+      "conflicted": false,
+      "readable_by_ms": 1792677002000,
+      "readable_by_unconfirmed": false
     },
     {
       "open_time_ms": 1792644000000,
@@ -210,7 +214,9 @@ GET /v1/candles?venue=binance-usdm&symbol=BTC/USDT:USDT&timeframe=5m&start=17926
       "close": "82744.5",
       "volume": "380.864",
       "turnover": "31506256.9708",
-      "conflicted": false
+      "conflicted": false,
+      "readable_by_ms": 1792677002000,
+      "readable_by_unconfirmed": false
     }
   ],
   "next": 1792644300000,
@@ -643,9 +649,9 @@ Two consequences of the order, both different from candle coverage (section 6.1.
     "newest_time_ms": 1792673400000
   },
   "rows": [
-    { "time_ms": 1792672500000, "open_interest": "95677.779", "open_interest_value": "7446123150.675", "conflicted": false },
-    { "time_ms": 1792672800000, "open_interest": "95690.12", "open_interest_value": "7447031002.4", "conflicted": true },
-    { "time_ms": 1792673400000, "open_interest": "95702.5", "open_interest_value": "7447990111.25", "conflicted": false }
+    { "time_ms": 1792672500000, "open_interest": "95677.779", "open_interest_value": "7446123150.675", "conflicted": false, "readable_by_ms": 1792673024000, "readable_by_unconfirmed": false },
+    { "time_ms": 1792672800000, "open_interest": "95690.12", "open_interest_value": "7447031002.4", "conflicted": true, "readable_by_ms": 1792673324000, "readable_by_unconfirmed": false },
+    { "time_ms": 1792673400000, "open_interest": "95702.5", "open_interest_value": "7447990111.25", "conflicted": false, "readable_by_ms": 1792673924000, "readable_by_unconfirmed": false }
   ],
   "next": null,
   "coverage": {
@@ -861,10 +867,10 @@ Pagination is by time, ascending by `(funding_time_ms, rate_type)` (`Regular` be
     "newest_funding_time_ms": 1792713600650
   },
   "rows": [
-    { "funding_time_ms": 1792656000000, "rate_type": "Regular", "funding_rate": "0.0001", "mark_price": "82709.1", "conflicted": false },
-    { "funding_time_ms": 1792684800000, "rate_type": "Regular", "funding_rate": "-0.00005123", "mark_price": "82744.5", "conflicted": false },
-    { "funding_time_ms": 1792713600000, "rate_type": "Regular", "funding_rate": "0.00011", "mark_price": "82790", "conflicted": true },
-    { "funding_time_ms": 1792713600650, "rate_type": "Special", "funding_rate": "0.0003", "mark_price": "82801", "conflicted": false }
+    { "funding_time_ms": 1792656000000, "rate_type": "Regular", "funding_rate": "0.0001", "mark_price": "82709.1", "conflicted": false, "readable_by_ms": 1792656042000, "readable_by_unconfirmed": false },
+    { "funding_time_ms": 1792684800000, "rate_type": "Regular", "funding_rate": "-0.00005123", "mark_price": "82744.5", "conflicted": false, "readable_by_ms": 1792684842000, "readable_by_unconfirmed": false },
+    { "funding_time_ms": 1792713600000, "rate_type": "Regular", "funding_rate": "0.00011", "mark_price": "82790", "conflicted": true, "readable_by_ms": 1792713642000, "readable_by_unconfirmed": false },
+    { "funding_time_ms": 1792713600650, "rate_type": "Special", "funding_rate": "0.0003", "mark_price": "82801", "conflicted": false, "readable_by_ms": 1792713642000, "readable_by_unconfirmed": false }
   ],
   "next": null,
   "coverage": {

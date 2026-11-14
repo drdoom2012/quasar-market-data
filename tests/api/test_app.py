@@ -72,6 +72,8 @@ def test_the_contract_example_is_what_the_server_returns(tmp_path: Path) -> None
                 "volume": "369.221",
                 "turnover": "30587379.8759",
                 "conflicted": False,
+                "readable_by_ms": 1792677002000,  # one confirmed transaction stamped AT, plus B
+                "readable_by_unconfirmed": False,
             },
             {
                 "open_time_ms": 1792643700000,
@@ -82,6 +84,8 @@ def test_the_contract_example_is_what_the_server_returns(tmp_path: Path) -> None
                 "volume": "580.95",
                 "turnover": "48054366.2802",
                 "conflicted": False,
+                "readable_by_ms": 1792677002000,  # one confirmed transaction stamped AT, plus B
+                "readable_by_unconfirmed": False,
             },
             {
                 "open_time_ms": 1792644000000,
@@ -92,6 +96,8 @@ def test_the_contract_example_is_what_the_server_returns(tmp_path: Path) -> None
                 "volume": "380.864",
                 "turnover": "31506256.9708",
                 "conflicted": False,
+                "readable_by_ms": 1792677002000,  # one confirmed transaction stamped AT, plus B
+                "readable_by_unconfirmed": False,
             },
         ],
         "next": 1792644300000,

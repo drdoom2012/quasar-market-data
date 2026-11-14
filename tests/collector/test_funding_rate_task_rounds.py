@@ -149,7 +149,7 @@ def test_the_start_up_observation_is_taken_only_with_a_behind_series_and_a_far_w
         if behind:  # a stored span that ends three hours ago
             end = B0 - 3 * HOUR
             merge = SpanMerge(VENUE, "BTC/USDT:USDT", Interval(end - HOUR, end), t.wall_ms())
-            await rig.writer.write([], ingested_at_ms=t.wall_ms(), merge=merge)
+            await rig.writer.write([], merge=merge)
         h = await start_task(tmp_path, rig=rig, backfill_days=1, offset_ms=offset)
         await h.run_for(5 * S)
         assert len(rig.exchange.time_calls) == expected

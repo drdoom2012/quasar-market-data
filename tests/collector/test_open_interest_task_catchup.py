@@ -633,7 +633,8 @@ def faulty_connect(made: list[FaultyConnection], *faults: Fault) -> Callable[[Pa
 def test_an_unknown_write_outcome_then_the_next_try_leaves_no_duplicate_and_no_conflict(tmp_path: Path) -> None:
     async def scenario() -> None:
         made: list[FaultyConnection] = []
-        fault = Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), nth=4, after_execution=True)
+        # COMMIT #7 is the fourth data transaction: each data COMMIT is followed by its confirmation's (ADR-0005 P-3)
+        fault = Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), nth=7, after_execution=True)
         rig = await make_rig(tmp_path, symbols=(BTC,), connect=faulty_connect(made, fault))
         await first_window(rig)
         assert (

@@ -334,12 +334,11 @@ def test_a_success_between_failures_clears_the_count_so_four_failures_do_not_sus
     async def scenario(tmp_path: Path) -> None:
         err = ccxt.NetworkError("x")
         rig = await make_rig(tmp_path, symbols=(BTC,), t=t0())
-        await rig.writer.write([], ingested_at_ms=rig.t.wall_ms(), merge=None)
+        await rig.writer.write([], merge=None)
         from quasar_market_data.collector.funding_rate_writer import SpanMerge
 
         await rig.writer.write(
             [],
-            ingested_at_ms=rig.t.wall_ms(),
             merge=SpanMerge(VENUE, BTC, Interval(B0 - 2 * HOUR, B0 - HOUR), rig.t.wall_ms()),
         )
         rig.exchange.errors = [err, err, None, err, err, None]  # two failures, a success, two failures, a success
@@ -359,9 +358,9 @@ class ConflictThenBusy(InMemorySink):
         super().__init__()
         self.failed = False
 
-    async def write(self, rows: Any, *, ingested_at_ms: int, merge: Any = None) -> FundingRateWriteReport:
+    async def write(self, rows: Any, *, merge: Any = None) -> FundingRateWriteReport:
         if self.failed:
-            return await super().write(rows, ingested_at_ms=ingested_at_ms, merge=merge)
+            return await super().write(rows, merge=merge)
         self.failed = True
         key = FundingRateKey(VENUE, BTC, B0 - HOUR + 3, RateType.REGULAR)
         conflict = FundingRateConflict(FundingRate(key, "0.0002", None), FundingRate(key, "0.0001", None), True)
@@ -390,10 +389,10 @@ class GatedSink(InMemorySink):
         self.release = asyncio.Event()
         self.entered = asyncio.Event()
 
-    async def write(self, rows: Any, *, ingested_at_ms: int, merge: Any = None) -> FundingRateWriteReport:
+    async def write(self, rows: Any, *, merge: Any = None) -> FundingRateWriteReport:
         self.entered.set()
         await self.release.wait()
-        report = await super().write(rows, ingested_at_ms=ingested_at_ms, merge=merge)
+        report = await super().write(rows, merge=merge)
         key = FundingRateKey(VENUE, BTC, B0 - HOUR + 3, RateType.REGULAR)
         conflict = FundingRateConflict(FundingRate(key, "0.0002", None), FundingRate(key, "0.0001", None), True)
         return dataclasses.replace(report, conflicts=(conflict,))

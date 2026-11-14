@@ -35,6 +35,7 @@ from quasar_market_data.domain.open_interest_cadence import open_interest_cadenc
 from quasar_market_data.storage.connection import open_writer
 from quasar_market_data.storage.migrate import migrate
 from tests.api.bench_server import BenchError, peak_rss_bytes, reap, start_api
+from tests.readability_seed import register, register_all
 from tools.bench_open_interest_write import INSERT_OPEN_INTEREST, nearest_rank
 from tools.symbol_overview.fetch import Fetch, RawResponse, TransportError, coverage_path, funding_path, http_fetch
 from tools.symbol_overview.model import MAX_BODY_BYTES, Health, InstrumentRow, Invalid, Window
@@ -347,6 +348,8 @@ def writer_tick(conn: sqlite3.Connection, symbols: Sequence[str], candle_open_ms
     for symbol in symbols:
         if in_transaction == 0:
             conn.execute("BEGIN")
+            register(conn, "candles", ingested)
+            register(conn, "open_interest", ingested)
         conn.execute(_INSERT_CANDLE, (VENUE, symbol, candle_open_ms, ingested))
         conn.execute(INSERT_OPEN_INTEREST, (VENUE, symbol, "5m", oi_time_ms, "95000.5", "7000000000.25", ingested))
         rows += 2
@@ -449,7 +452,8 @@ def build_database(
     symbols = [symbol_name(i) for i in range(series)]
     conn = open_writer(path)
     try:
-        migrate(conn, applied_at_ms=now_ms)
+        migrate(conn, applied_at_ms=now_ms - 2)  # the cut-over lies below the seeded stamp now_ms
+        register_all(conn, now_ms)
         for index, symbol in enumerate(symbols):
             holes = set(HOLE_OFFSETS) if index % 7 == 0 else set()
             count = SHORT_HISTORY_SLOTS if index == 1 else oi_rows

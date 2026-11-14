@@ -17,8 +17,10 @@ from quasar_market_data.api.database import read_funding_rates
 from quasar_market_data.api.funding_rate_page import FundingRatePage
 from quasar_market_data.api.params import FundingRatesRequest
 from quasar_market_data.domain.funding_rate_coverage import MAX_FUNDING_WINDOW_MS, FundingRateRule
+from quasar_market_data.domain.readability import READABLE_BOUND_MS
 from quasar_market_data.storage.connection import open_writer
 from tests.api.seed import (
+    AT,
     SAMPLE_RULE,
     SAMPLE_UNIVERSE,
     insert_funding_conflict,
@@ -74,12 +76,21 @@ def example_database(path: Path) -> Path:
     make_database(path)
     conn = open_writer(path)
     try:
-        insert_funding_rate(conn, 1792627200000)  # the oldest row of the series, outside the window
-        insert_funding_rate(conn, 1792656000000, "Regular", funding_rate="0.0001", mark_price="82709.1")
-        insert_funding_rate(conn, 1792684800000, "Regular", funding_rate="-0.00005123", mark_price="82744.5")
-        insert_funding_rate(conn, 1792713600000, "Regular", funding_rate="0.00011", mark_price="82790")
-        insert_funding_rate(conn, 1792713600650, "Special", funding_rate="0.0003", mark_price="82801")
-        insert_funding_conflict(conn, 1792713600000, 1)
+        # each settlement stored 40 s later by a confirmed transaction; the Special row shares the Regular's
+        insert_funding_rate(conn, 1792627200000, stamp=1792627240000)  # the oldest row, outside the window
+        insert_funding_rate(
+            conn, 1792656000000, "Regular", funding_rate="0.0001", mark_price="82709.1", stamp=1792656040000
+        )
+        insert_funding_rate(
+            conn, 1792684800000, "Regular", funding_rate="-0.00005123", mark_price="82744.5", stamp=1792684840000
+        )
+        insert_funding_rate(
+            conn, 1792713600000, "Regular", funding_rate="0.00011", mark_price="82790", stamp=1792713640000
+        )
+        insert_funding_rate(
+            conn, 1792713600650, "Special", funding_rate="0.0003", mark_price="82801", stamp=1792713640000
+        )
+        insert_funding_conflict(conn, 1792713600000, 1, stamp=1792717240000)
         set_funding_span(conn, 1792569600000, 1792727000000, verified_at_ms=1792727040000)
     finally:
         conn.close()
@@ -112,7 +123,15 @@ def test_the_body_states_the_semantics_and_orders_its_keys(tmp_path: Path) -> No
     assert list(body) == ["venue", "symbol", "time_semantics", "start", "end", "series", "rows", "next", "coverage"]
     assert body["time_semantics"] == "settlement"
     assert list(body["series"]) == ["oldest_funding_time_ms", "newest_funding_time_ms"]
-    assert list(body["rows"][0]) == ["funding_time_ms", "rate_type", "funding_rate", "mark_price", "conflicted"]
+    assert list(body["rows"][0]) == [
+        "funding_time_ms",
+        "rate_type",
+        "funding_rate",
+        "mark_price",
+        "conflicted",
+        "readable_by_ms",
+        "readable_by_unconfirmed",
+    ]
     assert list(body["coverage"]) == [
         "as_of_ms",
         "verified_from_ms",
@@ -140,6 +159,8 @@ def test_a_null_mark_price_a_negative_rate_and_off_hour_times_are_returned_as_st
             "funding_rate": "-0.0000123",
             "mark_price": None,
             "conflicted": False,
+            "readable_by_ms": AT + READABLE_BOUND_MS,
+            "readable_by_unconfirmed": False,
         }
     ]
     assert body["series"] == {"oldest_funding_time_ms": ev(1) + 7, "newest_funding_time_ms": ev(1) + 7}

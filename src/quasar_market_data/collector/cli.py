@@ -310,7 +310,7 @@ async def _run(config: FetchOnceConfig, db: Path, open_source: OpenSource, clock
     async with AsyncExitStack() as stack:
         source = await open_source()
         stack.push_async_callback(_close_quietly, "the exchange client", source.close)
-        writer = await AsyncCandleWriter.open(db)
+        writer = await AsyncCandleWriter.open(db, wall_ms=clock.wall_ms)
         stack.push_async_callback(_close_quietly, "the candle writer", writer.close)
         report = await fetch_once(source, writer, config, clock)
         return _print_report(config, report)  # printed before the resources close; the report is complete here
@@ -344,7 +344,7 @@ async def _run_open_interest(
         budget = OpenInterestBudget(DEFAULT_BUDGET_PER_5MIN, clock, sleep)
         source = await open_source(budget, ExtensionPause(clock), clock)
         stack.push_async_callback(_close_quietly, "the exchange client", source.close)
-        writer = await AsyncOpenInterestWriter.open(db, activity=CandleWriteActivity())
+        writer = await AsyncOpenInterestWriter.open(db, activity=CandleWriteActivity(), wall_ms=clock.wall_ms)
         stack.push_async_callback(_close_quietly, "the open interest writer", writer.close)
         report = await fetch_open_interest_once(source, writer, config, clock)
         return _print_open_interest_report(config, report)
@@ -383,7 +383,7 @@ async def _run_funding_rate(
         limiter = FundingRateLimiter(DEFAULT_FUNDING_BUDGET_PER_5MIN, clock, sleep)
         source = await open_source(limiter, ExtensionPause(clock), clock)
         stack.push_async_callback(_close_quietly, "the exchange client", source.close)
-        writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity())
+        writer = await AsyncFundingRateWriter.open(db, activity=CandleWriteActivity(), wall_ms=clock.wall_ms)
         stack.push_async_callback(_close_quietly, "the funding rate writer", writer.close)
         report = await fetch_funding_rate_once(source, writer, config, clock)
         return _print_funding_rate_report(config, report)
@@ -647,7 +647,7 @@ async def _open_interest_main(
         async with AsyncExitStack() as stack:
             source = await oi_run.open_source(budget, pause, clock)
             stack.push_async_callback(_close_quietly, "the open interest client", source.close)
-            writer = await AsyncOpenInterestWriter.open(db, activity=activity)
+            writer = await AsyncOpenInterestWriter.open(db, activity=activity, wall_ms=clock.wall_ms)
             stack.push_async_callback(_close_quietly, "the open interest writer", writer.close)
             await run_open_interest_task(
                 source, writer, db, config, budget, activity, clock, sleep, stop, _emit_open_interest_line, measurements
@@ -676,7 +676,7 @@ async def _funding_rate_main(
         async with AsyncExitStack() as stack:
             source = await funding_run.open_source(limiter, pause, clock)
             stack.push_async_callback(_close_quietly, "the funding rate client", source.close)
-            writer = await AsyncFundingRateWriter.open(db, activity=activity)
+            writer = await AsyncFundingRateWriter.open(db, activity=activity, wall_ms=clock.wall_ms)
             stack.push_async_callback(_close_quietly, "the funding rate writer", writer.close)
             await run_funding_rate_task(
                 source, writer, db, config, limiter, pause, clock, sleep, stop, _emit_funding_line, measurements
@@ -780,7 +780,7 @@ async def _reconcile_and_collect(
     async with AsyncExitStack() as stack:
         source = await open_source()
         stack.push_async_callback(_close_quietly, "the exchange client", source.close)
-        writer = await AsyncCandleWriter.open(db)
+        writer = await AsyncCandleWriter.open(db, wall_ms=clock.wall_ms)
         stack.push_async_callback(close_writer, writer)
         limited = RateLimitedSource(source, RateLimiter(min_interval_ms, clock, sleep))
         backfiller = (
@@ -943,7 +943,7 @@ def _migrate(db: Path, clock: Clock) -> tuple[int, int]:
     conn = open_writer(db)
     try:
         before = applied_version(conn)
-        return before, migrate(conn, applied_at_ms=clock.wall_ms())
+        return before, migrate(conn, applied_at_ms=clock.wall_ms)  # read under the migration's lock (ADR-0005 P-2)
     finally:
         conn.close()
 

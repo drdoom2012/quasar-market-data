@@ -62,7 +62,7 @@ class OpenInterestOnceSource(Protocol):
 class OpenInterestSink(Protocol):
     """``AsyncOpenInterestWriter`` satisfies it."""
 
-    async def write(self, rows: Sequence[OpenInterest], *, ingested_at_ms: int) -> OpenInterestWriteReport: ...
+    async def write(self, rows: Sequence[OpenInterest]) -> OpenInterestWriteReport: ...
 
 
 @dataclass(frozen=True)
@@ -128,5 +128,5 @@ async def fetch_open_interest_once(
     selection = select_eligible_open_interest(rows, config.publication_delay_ms, trust)
     write = None
     if selection.eligible:
-        write = await writer.write(selection.eligible, ingested_at_ms=clock.wall_ms())
+        write = await writer.write(selection.eligible)  # the writer stamps under the lock (ADR-0005 P-3)
     return FetchOpenInterestOnceReport(len(rows), selection, write, start, end)

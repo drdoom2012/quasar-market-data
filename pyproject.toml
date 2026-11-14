@@ -155,6 +155,7 @@ source_modules = [
     "quasar_market_data.collector.open_interest_writer",
     "quasar_market_data.collector.async_open_interest_writer",
     "quasar_market_data.collector.fetch_open_interest_once",
+    "quasar_market_data.collector.readability",
 ]
 forbidden_modules = [
     "quasar_market_data.collector.binance_usdm_funding_rate",
@@ -235,6 +236,7 @@ source_modules = [
     "quasar_market_data.collector.hole_reader",
     "quasar_market_data.collector.reconcile_reader",
     "quasar_market_data.collector.candle_write_activity",
+    "quasar_market_data.collector.readability",
 ]
 forbidden_modules = [
     "quasar_market_data.collector.extension_pause",

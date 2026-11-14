@@ -103,7 +103,18 @@ def factory(
 
 
 def begins(conn: FaultyConnection) -> int:
-    return sum(1 for sql in conn.statements if sql == BEGIN)
+    """Data transactions begun: a ``BEGIN`` not followed by the confirmation of the transaction before it.
+
+    Each committed data transaction is followed, in the same job, by its own single-row confirmation transaction
+    (ADR-0005 P-3, P-6); that one is not a new data transaction.
+    """
+    statements = conn.statements
+    return sum(
+        1
+        for i, sql in enumerate(statements)
+        if sql == BEGIN
+        and not (i + 1 < len(statements) and statements[i + 1].startswith("INSERT INTO write_confirmations"))
+    )
 
 
 async def spin(times: int = 5) -> None:
@@ -121,7 +132,7 @@ def test_page_of_500_is_five_transactions(db: Path) -> None:
     async def scenario() -> None:
         made: list[FaultyConnection] = []
         writer = await AsyncOpenInterestWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
-        report = await writer.write(page(500), ingested_at_ms=AT)
+        report = await writer.write(page(500))
         await writer.close()
         assert report.inserted == 500 and len(report.durations_ns) == 5 and len(report.lock_wait_ns) == 5
         statements = made[0].statements
@@ -144,13 +155,13 @@ def test_failure_inside_the_third_transaction_keeps_two_and_retry_completes(db: 
         writer = await AsyncOpenInterestWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
         made[0].faults.append(Fault(INSERT_ROW, sqlite3.OperationalError("injected"), nth=251))
         with pytest.raises(OpenInterestPageError) as error:
-            await writer.write(page(500), ingested_at_ms=AT)
+            await writer.write(page(500))
         assert error.value.committed_transactions == 2
         assert error.value.partial.inserted == 200
         assert type(error.value.cause) is OpenInterestWriteError
         assert error.value.__cause__ is error.value.cause
         assert stored_count(db) == 200
-        retry = await writer.write(page(500), ingested_at_ms=AT + 1)
+        retry = await writer.write(page(500))
         assert (retry.inserted, retry.duplicates, retry.conflicts) == (300, 200, ())
         await writer.close()
 
@@ -164,7 +175,7 @@ def test_outcome_unknown_is_the_cause(db: Path) -> None:
         writer = await AsyncOpenInterestWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
         made[0].faults.append(Fault("COMMIT", sqlite3.OperationalError("disk I/O error"), after_execution=True))
         with pytest.raises(OpenInterestPageError) as error:
-            await writer.write(page(150), ingested_at_ms=AT)
+            await writer.write(page(150))
         assert isinstance(error.value.cause, OpenInterestWriteOutcomeUnknown)
         assert error.value.committed_transactions == 0
         await writer.close()
@@ -181,14 +192,14 @@ def test_busy_database_fails_only_that_transaction(db: Path) -> None:
         holder.execute(BEGIN)
         try:
             with pytest.raises(OpenInterestPageError) as error:
-                await writer.write(page(10), ingested_at_ms=AT)
+                await writer.write(page(10))
             assert isinstance(error.value.cause, OpenInterestWriteBusy)
             assert error.value.committed_transactions == 0
         finally:
             holder.execute("ROLLBACK")
             holder.close()
         assert stored_count(db) == 0 and conflict_count(db) == 0
-        assert (await writer.write(page(10), ingested_at_ms=AT)).inserted == 10
+        assert (await writer.write(page(10))).inserted == 10
         await writer.close()
 
     asyncio.run(scenario())
@@ -203,7 +214,7 @@ def test_waits_while_candle_write_is_active(db: Path) -> None:
             db, activity=activity, connect=factory(made), monotonic_ns=lambda: next(ticks)
         )
         with activity.writing():
-            task = asyncio.ensure_future(writer.write(page(10), ingested_at_ms=AT))
+            task = asyncio.ensure_future(writer.write(page(10)))
             await spin()
             assert begins(made[0]) == 0 and not task.done()
         report = await task
@@ -220,7 +231,7 @@ def test_reentry_in_the_same_iteration_keeps_waiting(db: Path) -> None:
         writer = await AsyncOpenInterestWriter.open(db, activity=activity, connect=factory(made))
         first = activity.writing()
         first.__enter__()
-        task = asyncio.ensure_future(writer.write(page(10), ingested_at_ms=AT))
+        task = asyncio.ensure_future(writer.write(page(10)))
         await spin()
         first.__exit__(None, None, None)
         second = activity.writing()
@@ -244,7 +255,7 @@ def test_cancel_between_transactions(db: Path) -> None:
         writer = await AsyncOpenInterestWriter.open(db, activity=activity, connect=factory(made, AfterFirstCommit))
         conn = made[0]
         assert isinstance(conn, GatedConnection)
-        task = asyncio.ensure_future(writer.write(page(300), ingested_at_ms=AT))
+        task = asyncio.ensure_future(writer.write(page(300)))
         assert await asyncio.to_thread(conn.reached.wait, 10)
         with activity.writing():
             conn.release.set()
@@ -256,7 +267,7 @@ def test_cancel_between_transactions(db: Path) -> None:
         await spin()
         assert begins(conn) == 1
         assert writer.state is WriterState.OPEN
-        assert (await writer.write(page(1, start=400), ingested_at_ms=AT)).inserted == 1
+        assert (await writer.write(page(1, start=400))).inserted == 1
         await writer.close()
 
     asyncio.run(scenario())
@@ -270,12 +281,12 @@ def test_write_after_cancel_waits_for_the_running_transaction(db: Path) -> None:
         writer = await AsyncOpenInterestWriter.open(db, activity=activity, connect=factory(made, GatedConnection))
         conn = made[0]
         assert isinstance(conn, GatedConnection)
-        cancelled = asyncio.ensure_future(writer.write(page(100), ingested_at_ms=AT))
+        cancelled = asyncio.ensure_future(writer.write(page(100)))
         assert await asyncio.to_thread(conn.reached.wait, 10)  # its COMMIT is blocked on the worker thread
         cancelled.cancel()
         with pytest.raises(asyncio.CancelledError):
             await cancelled
-        follow_up = asyncio.ensure_future(writer.write(page(10, start=200), ingested_at_ms=AT))
+        follow_up = asyncio.ensure_future(writer.write(page(10, start=200)))
         await spin()
         with activity.writing():
             conn.release.set()
@@ -312,7 +323,7 @@ def test_lifecycle(db: Path) -> None:
         states.append(writer.state)
         assert states == [WriterState.OPEN, WriterState.CLOSED]
         with pytest.raises(OpenInterestWriteError, match="closed"):
-            await writer.write(page(1), ingested_at_ms=AT)
+            await writer.write(page(1))
 
     asyncio.run(scenario())
 
@@ -323,7 +334,7 @@ def test_wrong_row_type_is_refused_before_any_transaction(db: Path) -> None:
         writer = await AsyncOpenInterestWriter.open(db, activity=CandleWriteActivity(), connect=factory(made))
         rows: list[Any] = [*page(150), object()]
         with pytest.raises(TypeError):
-            await writer.write(rows, ingested_at_ms=AT)
+            await writer.write(rows)
         assert begins(made[0]) == 0
         await writer.close()
 
@@ -341,7 +352,7 @@ class TwoGates(FaultyConnection):
         self.release = {1: threading.Event(), 2: threading.Event()}
 
     def execute(self, sql: str, *args: Any) -> sqlite3.Cursor:
-        if sql == "COMMIT" and self.armed:
+        if sql == "COMMIT" and self.armed and not self.commit_confirms():
             self.commits += 1
             if self.commits in self.reached:
                 self.reached[self.commits].set()
@@ -364,8 +375,8 @@ def test_two_concurrent_writes_never_queue_a_transaction_past_the_activity_check
         writer = await AsyncOpenInterestWriter.open(db, activity=activity, connect=connect)
         conn = made[0]
         assert isinstance(conn, TwoGates)
-        first = asyncio.ensure_future(writer.write(page(200), ingested_at_ms=AT))
-        second = asyncio.ensure_future(writer.write(page(200, start=300), ingested_at_ms=AT))
+        first = asyncio.ensure_future(writer.write(page(200)))
+        second = asyncio.ensure_future(writer.write(page(200, start=300)))
         assert await asyncio.to_thread(conn.reached[1].wait, 10)
         conn.release[1].set()  # both callers wake; only one may submit, the other must re-check
         assert await asyncio.to_thread(conn.reached[2].wait, 10)
@@ -393,10 +404,10 @@ def test_a_cancelled_waiter_leaves_no_unretrieved_exception(db: Path) -> None:
         conn = made[0]
         assert isinstance(conn, GatedConnection)
         conn.faults.append(Fault("COMMIT", sqlite3.OperationalError("injected COMMIT failure")))
-        first = asyncio.ensure_future(writer.write(page(10), ingested_at_ms=AT))
+        first = asyncio.ensure_future(writer.write(page(10)))
         assert await asyncio.to_thread(conn.reached.wait, 10)
         first.cancel()
-        second = asyncio.ensure_future(writer.write(page(10, start=50), ingested_at_ms=AT))
+        second = asyncio.ensure_future(writer.write(page(10, start=50)))
         await spin()  # second now waits for the first's transaction
         second.cancel()
         for task in (first, second):
@@ -423,7 +434,7 @@ def test_close_in_the_middle_of_a_page_reports_the_committed_part(db: Path) -> N
         )
         conn = made[0]
         assert isinstance(conn, GatedConnection)
-        task = asyncio.ensure_future(writer.write(page(300), ingested_at_ms=AT))
+        task = asyncio.ensure_future(writer.write(page(300)))
         assert await asyncio.to_thread(conn.reached.wait, 10)
         closing = asyncio.ensure_future(writer.close())
         await spin(1)

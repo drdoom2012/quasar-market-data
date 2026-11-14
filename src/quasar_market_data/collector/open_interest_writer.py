@@ -5,6 +5,12 @@ whose values differ is never written over, is reported back and is recorded in `
 (idempotently, in the same transaction). One call is one transaction of at most ``MAX_ROWS_PER_TRANSACTION`` rows
 (P-9 rule 1).
 
+Every committed transaction is registered and stamped by the writer after the write lock is held, and confirmed when
+its ``COMMIT`` ended within the readability bound (``collector/readability.py``, ADR-0005 P-3, P-6). A transaction
+that stores nothing new is rolled back. One that is too old to commit within the bound is rolled back and raises
+``OpenInterestWriteNotStored`` after ``EXTENSION_STAMP_ATTEMPTS`` (one: the caller retries through the async front,
+which yields to candles first).
+
 What it does NOT guarantee: that a row is eligible (``select_eligible_open_interest``); the caller passes only
 eligible rows (OI-4).
 
@@ -20,11 +26,11 @@ so a connection stuck in a transaction cannot keep the write lock and stall cand
 import sqlite3
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
+from quasar_market_data.collector.readability import EXTENSION_STAMP_ATTEMPTS, TransactionStamper
 from quasar_market_data.domain.open_interest import OpenInterest
-from quasar_market_data.domain.timestamps import ensure_timestamp_ms
 from quasar_market_data.storage.connection import StorageError
 from quasar_market_data.storage.schema import verify_schema
 
@@ -59,6 +65,13 @@ class OpenInterestWriteBusy(OpenInterestWriteError):
     """The database was locked longer than the busy timeout; rolled back, nothing was written."""
 
 
+class OpenInterestWriteNotStored(OpenInterestWriteError):
+    """The transaction was too old to commit within the readability bound and was rolled back: nothing was written.
+
+    Certain, like ``OpenInterestWriteBusy``: retry the rows later (ADR-0005 P-3, P-6).
+    """
+
+
 @dataclass(frozen=True)
 class OpenInterestConflict:
     incoming: OpenInterest
@@ -73,6 +86,7 @@ class OpenInterestBatchReport:
     conflicts: tuple[OpenInterestConflict, ...]
     lock_wait_ns: int  # from the start of BEGIN IMMEDIATE until the write lock was held
     duration_ns: int  # from holding the lock until the end of COMMIT: what a candle write can wait for
+    stamp_ms: int | None = field(default=None, compare=False)  # the committed transaction's stamp; None if none
 
 
 def _require_writer_connection(conn: sqlite3.Connection) -> None:
@@ -100,11 +114,23 @@ def _is_busy(error: sqlite3.Error) -> bool:
 class OpenInterestWriter:
     """Owns one writer connection; ``write_transaction`` runs one ``BEGIN IMMEDIATE`` transaction per call."""
 
-    def __init__(self, conn: sqlite3.Connection, *, monotonic_ns: Callable[[], int] = time.monotonic_ns) -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        monotonic_ns: Callable[[], int] = time.monotonic_ns,
+        wall_ms: Callable[[], int] = lambda: time.time_ns() // 1_000_000,
+        stamp_monotonic_ns: Callable[[], int] = time.monotonic_ns,
+        stamp_attempts: int = EXTENSION_STAMP_ATTEMPTS,
+    ) -> None:
         _require_writer_connection(conn)
         verify_schema(conn)
+        if type(stamp_attempts) is not int or stamp_attempts < 1:
+            raise ValueError(f"stamp_attempts must be an int >= 1, got {stamp_attempts!r}")
         self._conn = conn
         self._monotonic_ns = monotonic_ns
+        self._stamper = TransactionStamper(conn, "open_interest", wall_ms=wall_ms, monotonic_ns=stamp_monotonic_ns)
+        self._attempts = stamp_attempts
         self._closed = False
         self._unusable = False
 
@@ -156,12 +182,11 @@ class OpenInterestWriter:
             f"re-sending the same rows is safe{suffix}"
         )
 
-    def write_transaction(self, rows: Sequence[OpenInterest], *, ingested_at_ms: int) -> OpenInterestBatchReport:
+    def write_transaction(self, rows: Sequence[OpenInterest]) -> OpenInterestBatchReport:
         if self._closed:
             raise OpenInterestWriteError("writer is closed")
         if self._unusable:
             raise OpenInterestWriteError("writer is unusable after a failed rollback; open a new one")
-        ensure_timestamp_ms(ingested_at_ms, "ingested_at_ms")
         for index, row in enumerate(rows):
             if type(row) is not OpenInterest:
                 raise TypeError(f"rows[{index}] must be an OpenInterest, got {type(row).__name__}")
@@ -169,31 +194,51 @@ class OpenInterestWriter:
             raise ValueError(f"at most {MAX_ROWS_PER_TRANSACTION} rows per transaction, got {len(rows)}")
         if not rows:
             return OpenInterestBatchReport(0, 0, (), 0, 0)
+        for _ in range(self._attempts):
+            report = self._attempt(rows)
+            if report is not None:
+                return report
+        raise OpenInterestWriteNotStored(
+            f"every one of {self._attempts} attempts was too old to commit within the readability bound and was "
+            "rolled back; nothing was written; retry later"
+        )
 
+    def _attempt(self, rows: Sequence[OpenInterest]) -> OpenInterestBatchReport | None:
+        """One transaction: a report, or ``None`` when it expired before ``COMMIT`` and was rolled back."""
         inserted = duplicates = 0
+        recorded_any = False
         conflicts: list[OpenInterestConflict] = []
         commit_issued = False
         started = self._monotonic_ns()
         try:
             self._conn.execute("BEGIN IMMEDIATE")
             locked = self._monotonic_ns()
+            stamp = self._stamper.register()
             for row in rows:
                 key = row.key
                 slot = (key.venue, key.symbol, key.period.label, key.time_ms)
                 values = (row.open_interest, row.open_interest_value)
-                if self._conn.execute(INSERT_OPEN_INTEREST, (*slot, *values, ingested_at_ms)).rowcount == 1:
+                if self._conn.execute(INSERT_OPEN_INTEREST, (*slot, *values, stamp.stamp_ms)).rowcount == 1:
                     inserted += 1
                     continue
                 stored_values = tuple(self._conn.execute(_SELECT_STORED, slot).fetchone())
                 if stored_values == values:
                     duplicates += 1
                     continue
-                recorded = self._conn.execute(RECORD_CONFLICT, (*slot, *values, ingested_at_ms)).rowcount == 1
+                recorded = self._conn.execute(RECORD_CONFLICT, (*slot, *values, stamp.stamp_ms)).rowcount == 1
+                recorded_any |= recorded
                 conflicts.append(
                     OpenInterestConflict(
                         incoming=row, stored=OpenInterest(key, *stored_values), newly_recorded=recorded
                     )
                 )
+            if inserted == 0 and not recorded_any:
+                self._conn.execute("ROLLBACK")  # nothing new: register nothing (ADR-0005 P-2)
+                finished = self._monotonic_ns()
+                return OpenInterestBatchReport(0, duplicates, tuple(conflicts), locked - started, finished - locked)
+            if self._stamper.expired(stamp):
+                self._conn.execute("ROLLBACK")
+                return None
             commit_issued = True
             self._conn.execute("COMMIT")
             finished = self._monotonic_ns()
@@ -202,4 +247,13 @@ class OpenInterestWriter:
         except BaseException:
             self._roll_back()
             raise
-        return OpenInterestBatchReport(inserted, duplicates, tuple(conflicts), locked - started, finished - locked)
+        self._stamper.committed(stamp, lambda: _describe(rows), self._roll_back)
+        return OpenInterestBatchReport(
+            inserted, duplicates, tuple(conflicts), locked - started, finished - locked, stamp.stamp_ms
+        )
+
+
+def _describe(rows: Sequence[OpenInterest]) -> str:
+    series = sorted({f"{r.key.venue} {r.key.symbol} {r.key.period.label}" for r in rows})
+    times = [r.key.time_ms for r in rows]
+    return f"series={series} time_ms=[{min(times)}, {max(times)}] rows={len(rows)}"

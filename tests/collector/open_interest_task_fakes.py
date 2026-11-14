@@ -167,17 +167,18 @@ class RecordingWriter:
         self.errors: list[BaseException | None] = []
         self.stored: dict[tuple[str, int], int] = {}  # (symbol, time_ms) -> ingested_at_ms of the first write
 
-    async def write(self, rows: Sequence[OpenInterest], *, ingested_at_ms: int) -> OpenInterestWriteReport:
+    async def write(self, rows: Sequence[OpenInterest]) -> OpenInterestWriteReport:
         if self.errors:
             error = self.errors.pop(0)
             if error is not None:
                 raise error
-        self.writes.append((tuple(rows), ingested_at_ms))
+        at = self.t.wall_ms()  # the stamp is the writer's now; the fake records the time of the call
+        self.writes.append((tuple(rows), at))
         new = 0
         for row in rows:
             key = (row.key.symbol, row.key.time_ms)
             if key not in self.stored:
-                self.stored[key] = ingested_at_ms
+                self.stored[key] = at
                 new += 1
         return OpenInterestWriteReport(new, len(rows) - new, (), (1,), (1_000_000,), 0, 0)
 
@@ -205,7 +206,7 @@ def prefill(
         for symbol in symbols:
             rows = [OpenInterest(OpenInterestKey(VENUE, symbol, P5, slot), *values(slot)) for slot in slots]
             for start in range(0, len(rows), 100):
-                writer.write_transaction(rows[start : start + 100], ingested_at_ms=at_ms)
+                writer.write_transaction(rows[start : start + 100])
     finally:
         writer.close()
 
