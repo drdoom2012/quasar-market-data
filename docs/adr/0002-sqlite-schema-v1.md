@@ -1,6 +1,6 @@
 # ADR-0002: SQLite schema v1
 
-- **Status:** Accepted (approved by the user on 2026-10-22: Proposals P-1 to P-9 as written, and Q1 to Q5 as recommended)
+- **Status:** Accepted (approved by the user on 2026-10-22: Proposals P-1 to P-9 as written, and Q1 to Q5 as recommended). Amended on 2026-11-14 with the user's approval (ADR-0005): the meaning of `ingested_at_ms` in P-2 and the migration parameter in P-8; see *Amendments* at the end.
 - **Date:** 2026-10-22
 - **Scope:** the persistent schema of the Collector/API boundary for Binance USDT-M 5m OHLCV (`turnover` included), conflict records, permanently unavailable candles, and the migration mechanism.
 - **Spec:** `docs/superpowers/specs/2026-10-20-market-data-v1-design.md` (D1, D4, §6.3, §6.4, §11 items 1, 3, 4, 7)
@@ -62,7 +62,7 @@ CREATE TABLE candles (
 ```
 
 - The natural key is the table key (`WITHOUT ROWID`), so the identity is exactly the domain identity and range queries by `open_time_ms` for one series use the primary key. **No secondary index is needed in v1.**
-- `ingested_at_ms` is the wall-clock time the Collector committed the row. It is diagnostic (settling analysis per ADR-0001 P-6, ingestion lag); no logic depends on it and it is excluded from the "identical duplicate" comparison. The caller supplies it; the domain still reads no clock.
+- `ingested_at_ms` is the stamp of the row's write transaction, taken by the writer after the write lock is held (amended 2026-11-14, ADR-0005 P-3). It is the base of the row's `readable_by_ms` in the API (ADR-0005 P-4), so since schema 4 it is no longer diagnostic. It stays excluded from the "identical duplicate" comparison. The domain still reads no clock. *Before the amendment this bullet said "the wall-clock time the Collector committed the row", "diagnostic, no logic depends on it" and "the caller supplies it": the code read the clock before the write, so the value was a lower bound with no limit on the time to commit.*
 - There is no `is_closed` column: only eligible, validated candles are ever inserted (INV-007, INV-008), so presence in the table is the claim.
 - Only the five value columns and `turnover` of ADR-0001 P-2 are stored. Trades count and taker volumes are not (not in v1 scope).
 
@@ -168,6 +168,7 @@ CREATE TABLE schema_migrations (
 - Migrations are forward-only SQL, numbered from 1; version 1 creates everything in this ADR. There are no down-migrations.
 - Each migration runs in one transaction together with its `schema_migrations` row, so it applies completely or not at all.
 - Before doing anything the runner verifies the checksum of every already-applied migration against the shipped file. A mismatch, a gap in versions, or a database version **newer** than the code knows is a startup error (fail closed).
+- **Migration parameter** (amended 2026-11-14, ADR-0005 P-2): the runner reads `applied_at_ms` after `BEGIN IMMEDIATE` and binds it as the named parameter `:applied_at_ms`, which migration 4 uses for the cut-over instant. The SQL stays static and checksummed.
 - **Only the Collector migrates.** The API never alters the database: at startup and in readiness it verifies `application_id` and that the applied version equals the version it was built for, and otherwise reports not ready.
 - File layout, the runner's Python API and how the migrations are packaged are left to the S6 plan. Because both processes need SQLite access, S6 will probably need a shared storage package outside `domain`, `collector` and `api`; that adds a layer to the import-linter contracts and is a plan-level decision for the S6 plan, not decided here.
 
@@ -199,3 +200,16 @@ Throwaway probe, run 2026-10-22 on SQLite 3.53.1 via Python 3.12 (`sqlite3` stdl
 3. **Q3 — No conflict resolution in v1.** A conflicted slot stays conflicted, and indicators keep refusing it, until a later ADR defines an audited operator action.
 4. **Q4 — `synchronous=FULL`** on the writer connection (P-1).
 5. **Q5 — Database-level immutability** (P-4) with the mandatory `recursive_triggers=ON` pragma on every writer connection.
+
+## Amendments
+
+- **Amendment A-1** (2026-11-14, approved by the user together with ADR-0005):
+  - **P-2:** `ingested_at_ms` is the stamp of the row's write transaction, taken by the writer under the write lock,
+    and the base of `readable_by_ms`. It is no longer diagnostic. The original wording described a commit time that
+    the code never took.
+  - **P-8:** the runner binds `:applied_at_ms`, read after `BEGIN IMMEDIATE`.
+  - **P-9:** schema version 4 (`004_readability.sql`) adds `readability_cutover`, `write_transactions` and
+    `write_confirmations`, insert-only. It also adds a registration trigger on `candles`, `candle_conflicts` and the
+    four extension tables. A row or a conflict record without a registered transaction is refused (ADR-0005 P-2).
+  - Unchanged: the identity, the immutability of P-4, the conflict rules of P-5 to P-7, and the identical-duplicate
+    comparison.

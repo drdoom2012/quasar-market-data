@@ -117,6 +117,7 @@ The precise database schema is **not yet approved**; document it in a contract/A
 
 - SQLite WAL on a persistent **local** volume; avoid network-shared filesystems for WAL.
 - Collector owns schema/collection-state writes; API uses read-only connections.
+- The Collector also owns the row-readability records (cut-over, write transactions, confirmations; schema version 4, ADR-0005); every stored row must belong to a registered write transaction.
 - Explicit transactions, unique candle identity and deterministic conflict handling.
 - Versioned migrations; no silent destructive schema changes.
 - Short-lived read transactions so API traffic does not cause unchecked WAL growth.

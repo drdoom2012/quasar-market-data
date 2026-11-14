@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (approved by the user on 2026-11-03: revision 4 as written, including the proposals for the open
   decisions O-1 to O-6); **amended by A-4 on 2026-11-04** (the backfill depth is at most 30 days, the 90-day chunks are
-  removed; see the revision history). Revisions 2 to 4 answer the user's reviews (listed at the end). FR-1 to FR-5 are implemented. The API response
+  removed; see the revision history). **Amended by A-5 on 2026-11-14** (ADR-0005, row readability: one stamp per transaction taken by the writer, a single-row confirmation after each commit, schema version 4; see the revision history). Revisions 2 to 4 answer the user's reviews (listed at the end). FR-1 to FR-5 are implemented. The API response
   schema is contract section 6.7 of `docs/contracts/api-v1.md`, approved by the user on 2026-11-04 (decisions FA1 to FA10) and
   implemented by FR-5; where it differs from P-13 and P-15 it supersedes them: `behind` is inclusive at
   `publication_delay_ms + 2 h`, a defaulted `end` is `max(as_of, start)` capped at 365 days (like an explicit window longer than that, which is a `400`), `limit` is 2 to 1000, the cursor is
@@ -189,6 +189,8 @@ Rules [P]:
 
 ### P-6 Schema version 3
 
+*Amended by A-5 (2026-11-14): `ingested_at_ms` is the stamp of the row's write transaction, taken by the writer under the lock, and schema version 4 adds a registration trigger on both tables of this section (ADR-0005 P-2, P-3).*
+
 One new migration, `003_funding_rate.sql`, following ADR-0002 exactly (STRICT, natural key, `WITHOUT ROWID`,
 immutability triggers, conflicts table). The value check is a **signed** variant of the existing `<decimal-shape>`
 (`-` allowed as the first character, `-0` and a bare `-` refused); the non-negative one of migrations 001 and 002 is
@@ -370,6 +372,8 @@ alternative is an append-only table with one row per merge, 1 to 24 rows per sym
   mark it (it cannot tell it apart without another table); that is a known limit.
 
 ### P-9 Isolation, rate limiting and coordination
+
+*Amended by A-5 (2026-11-14): a candle write waits for at most one funding transaction plus its single-row confirmation (ADR-0005 P-6).*
 
 All of ADR-0003 P-9 applies unchanged in kind: funding runs as its own asyncio task started after the candle loop's
 first round and post-check; any exception ends only that task; it uses its **own CCXT client**, its own request
@@ -973,3 +977,18 @@ were throwaway in the session scratchpad and are not in the repository.
   4. the contract (section 6.7.8, the example of `rule`) and the README / reference text name the new range;
   5. nothing else changes: the verified span, the rounds, catch-up, the API's `window_state` and `complete`, the
      365-day maximum of a **read** window (contract 6.7.2), the limiter, the capacity and the schema.
+- **Amendment A-5** (2026-11-14, approved by the user together with ADR-0005, row readability):
+  1. **Stamp.** One stamp per page (the funding page execution and `fetch_funding_rate_once.py:155`) is replaced by
+     one stamp per transaction. The writer takes it after `BEGIN IMMEDIATE`, and the caller no longer passes
+     `ingested_at_ms`. The rows of a split page therefore no longer share a stamp taken before the first transaction
+     (ADR-0005 P-3).
+  2. **Not stored.** A transaction older than `B − M` at `COMMIT` is rolled back and restamped. After the retry limit
+     the writer raises a new "not stored" error, which the task treats as a failed page and retries as today. It is
+     never fatal.
+  3. **P-9 isolation.** After each committed data transaction the writer takes the lock a second time for a
+     single-row confirmation. A candle write therefore waits for at most one funding transaction **plus its
+     confirmation**, not one transaction. RB-4 measures the pair (ADR-0005 P-6).
+  4. **P-6 schema.** `funding_rates` and `funding_rate_conflicts` gain the registration trigger of schema version 4
+     (ADR-0005 P-2). The deployment follows P-14, schema 3 → 4.
+  5. **Unchanged:** the identity, the eligibility, the verified span and its `verified_at_ms` (still read by the caller), the scheduler, the budget, the endpoints. The
+     contract gains `readable_by_ms` and `readable_by_unconfirmed` per row (contract §4.1, §6.7.4).
