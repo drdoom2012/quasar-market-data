@@ -193,7 +193,20 @@ def create_app(
     async def instruments(request: Request) -> Response:
         require_no_query(request.scope["query_string"])
         found = await run_in_threadpool(read_instruments, db_path, universe, open_connection=open_connection)
-        return _json(200, {"instruments": [_instrument_body(item) for item in found]})
+        # ADR-0003 A-6: the period comes from the file read at start (rule and symbols), with no database read
+        period = None if open_interest is None else open_interest.period.label
+        return _json(
+            200,
+            {
+                "instruments": [
+                    _instrument_body(
+                        item,
+                        period if (item.instrument.venue, item.instrument.symbol) in open_interest_symbols else None,
+                    )
+                    for item in found
+                ]
+            },
+        )
 
     @app.get("/health")
     async def liveness(request: Request) -> Response:
@@ -867,10 +880,12 @@ def _open_interest_collected(
     }
 
 
-def _instrument_body(item: InstrumentNewest) -> dict[str, object]:
+def _instrument_body(item: InstrumentNewest, open_interest_period: str | None) -> dict[str, object]:
+    """One entry of ``/v1/instruments``; ``open_interest_period`` (A-6) is the last key, ``None`` when not collected."""
     return {
         "venue": item.instrument.venue,
         "symbol": item.instrument.symbol,
         "timeframe": item.instrument.timeframe,
         "newest_open_time_ms": item.newest_open_time_ms,
+        "open_interest_period": open_interest_period,
     }
