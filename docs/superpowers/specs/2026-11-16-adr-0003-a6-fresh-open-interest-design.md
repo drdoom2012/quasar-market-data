@@ -271,7 +271,7 @@ the next round. R1 therefore needs `p ≤ 396 s` on the first path, which always
 | Reserve exhausted, the unretried symbol's next request succeeds | its row comes from the next round (overlap `[B − 10 min, B]`): `e + 500 s + p'` | met while `p' ≤ 98 s` |
 | Exhausted, and the next request also fails | `e + 800 s + p` | **missed**, fail closed (`series_stale`) |
 | Limiter contention: backfill saturated, previous round on schedule **and on pace** (A-6 rule below) | our k-th start waits at most until the previous round's k-th start leaves the window: `p' ≤ 60 s + 5 s` | met (≤ `e + 567 s`) |
-| Previous round late (> 5 s) or slow (span above the pace limit) | the backfill gate counts that round in full and keeps `round_cost` free, so there is no contention; a late start adds its own delay | met up to a late start of about 50 s (38 s with a full reserve of fast retries); the observed 30 s stall fits, the 80.6 s start after a restart misses |
+| Previous round late (> 5 s) or slow (span above the pace limit) | the backfill gate counts that round in full and starts no page, so the round competes only with the previous round's own starts, which began 300 s earlier; a late start adds its own delay. Corner case: two consecutive fully retried rounds (252 + 252 > 400) can still make the second wait, as the late-round exception already can | met up to a late start of about 50 s (38 s with a full reserve of fast retries); the observed 30 s stall fits, the 80.6 s start after a restart misses |
 | The round's server-time call fails (round `untrusted`, nothing stored) | rows come from the next round | early rows met (`e + 550 s`); late rows missed |
 | A `429` pause (≥ 300 s, shared with funding) | at least one round lost | **missed** for the pause; fail closed |
 | An open interest write waiting for candle writes while it holds its slot (`async_open_interest_writer.py`, P-9) | bounded only by the round deadline (e.g. candle backfill after a restart) | **not bounded** by A-6; missed when the wait is long |
@@ -389,11 +389,14 @@ exception now also covers slow rounds.
   take no ticket; a write `busy` error takes one; the `oi-round` line reports `retry_reserve_exhausted=10`.
 - Pacing (the budget counted in the source): with the backfill share saturated and the previous round on schedule
   and on pace, the next round's starts wait at most 5 s in the limiter; with the previous round slow (span above
-  `pace_limit_ms(n)`), the backfill leaves `round_cost` free and the next round's starts never wait; a slow round
+  `pace_limit_ms(n)`), the backfill gate starts no page, the round competes only with the previous round's own starts
+  (which began 300 s earlier) and its starts never wait; a slow round
   followed by a healthy network does not make the round after it slow (no propagation); `pace_limit_ms(200) =
   60 000`, `pace_limit_ms(131) = 39 600`.
-- Measurement line: the hourly open interest measurement line carries per-request duration p50/p99/max for
-  successes and failures (D-6).
+- Measurement line: the hourly open interest measurement line ends with `request_ok_p50_ms`, `request_ok_p99_ms`, `request_ok_max_ms`, `request_failed_p50_ms`, `request_failed_p99_ms` and `request_failed_max_ms` (D-6): the CCXT history call alone,
+  timed in the adapter after the in-flight slot, the budget grant and the pause check; `ok=false` for an exchange or
+  transport error of the call (a `429` answer included), a content-check failure timed as a success, a pause, a
+  refusal and a cancellation not counted.
 - Config: `symbols` missing, `""`, `"ALL"`, `[]`, `[1]`, a duplicate, a symbol not in the venue → config errors naming
   the key; `"all"` and a list accepted; checked also with `enabled = false`; the cadence error uses the list's `S`.
 - Agreement: the Collector and the API derive the same `c` and `expected_after_ms` from a file with a list.

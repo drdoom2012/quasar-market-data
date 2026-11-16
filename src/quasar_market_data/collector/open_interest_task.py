@@ -605,7 +605,9 @@ class _OpenInterestTask:
         config = self.config
         symbol = page.symbol
         try:
-            response = await self._fetch_hist(symbol, page.start_ms, page.end_ms, trust)
+            response = await self.source.fetch_open_interest_hist(
+                symbol, page.start_ms, page.end_ms, as_of_ms=trust.lower_bound_ms
+            )
             rows = parse_open_interest_hist(
                 response,
                 market_id=self.source.market_id(symbol),
@@ -811,7 +813,7 @@ class _OpenInterestTask:
 
     async def _collect(self, symbol: str, start: int, end: int, trust: TrustedTime, state: _RoundState) -> None:
         config = self.config
-        response = await self._fetch_hist(symbol, start, end, trust)
+        response = await self.source.fetch_open_interest_hist(symbol, start, end, as_of_ms=trust.lower_bound_ms)
         rows = parse_open_interest_hist(
             response,
             market_id=self.source.market_id(symbol),
@@ -830,20 +832,6 @@ class _OpenInterestTask:
         state.duplicates += report.duplicates
         state.conflicts += len(report.conflicts)
         self._report_conflicts(report)
-
-    async def _fetch_hist(self, symbol: str, start: int, end: int, trust: TrustedTime) -> Sequence[object]:
-        """One history request, its duration measured on the monotonic clock (ADR-0003 A-6, decision D-6).
-
-        Any exception from the call is a failed request and is re-raised unchanged; a cancellation is not measured.
-        """
-        started_ns = self.clock.monotonic_ns()
-        try:
-            response = await self.source.fetch_open_interest_hist(symbol, start, end, as_of_ms=trust.lower_bound_ms)
-        except Exception:
-            self.measurements.record_request(self.clock.monotonic_ns() - started_ns, ok=False)
-            raise
-        self.measurements.record_request(self.clock.monotonic_ns() - started_ns, ok=True)
-        return response
 
     async def _write(self, rows: Sequence[OpenInterest]) -> OpenInterestWriteReport:
         try:

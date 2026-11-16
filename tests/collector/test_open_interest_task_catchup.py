@@ -896,27 +896,3 @@ def test_a_slow_round_does_not_propagate(tmp_path: Path) -> None:
         await rig.stop_and_wait()
 
     run(scenario)
-
-
-def test_request_durations_of_rounds_and_pages_are_measured(tmp_path: Path) -> None:
-    async def scenario() -> None:
-        rig = await make_rig(tmp_path, symbols=(BTC,))
-        rig.source.round_delay_ms = ROUND_DELAY_MS
-        rig.source.hist_delay_ms = 300  # every catch-up page
-        rig.source.errors = [SourceError("first round attempt fails")]  # the round's first request; its retry succeeds
-        rig.source.page_script = [True]  # the first page fails: the series backs off for this window
-        rig.start()
-        for _ in range(20):
-            await rig.t.settle()
-            if rig.lines_with("oi-catchup"):
-                break
-            await rig.t.advance(500)
-        catchup = rig.lines_with("oi-catchup")[0]
-        assert field(catchup, "pages") == "0" and field(catchup, "failures") == "1"
-        line = rig.measurements.line(1_000)
-        assert line is not None
-        assert "request-ok-ms=480.0/480.0/480.0" in line.split()  # the round's retry
-        assert "request-failed-ms=300.0/480.0/480.0" in line.split()  # the failed page and the failed first attempt
-        await rig.stop_and_wait()
-
-    run(scenario)

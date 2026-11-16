@@ -434,7 +434,9 @@ the backfill. Revision 2 removes the dependence on "absent yet" retries:
   span (`_last_round_span`, from the round's start to its end) exceeds the **pace limit**
   `pace_limit_ms(n) = ceil(n / MAX_IN_FLIGHT) × 600 ms` (`MAX_IN_FLIGHT = 2`): 60 s at `n = 200`, 39.6 s at
   `n = 131`, against the measured maximum of 30.8 s. This extends the existing exception for a late previous round to
-  a slow one. After a late or slow round the next idle window can get no backfill; the allocation above
+  a slow one. After a late or slow round the next idle window starts no page (a slow round of 207 starts plus
+  `round_cost` 252 exceeds 400, so the gate cannot keep `round_cost` free; the next round competes only with the
+  previous round's own starts, which began 300 s earlier); the allocation above
   (`b − round_cost(S, c)` ≥ `b − steady(b)`) is unchanged and is delivered after every on-schedule, on-pace round, as
   it is today after every on-schedule round.
 
@@ -479,7 +481,7 @@ second.
 | Reserve exhausted, the unretried symbol's next request succeeds | its row comes from the next round (overlap `[B − 10 min, B]`): `e + 500 s + p'` | met while `p' ≤ 98 s` |
 | Exhausted, and the next request also fails | `e + 800 s + p` | **missed**, fail closed (`series_stale`) |
 | Limiter contention: backfill saturated, previous round on schedule **and on pace** (pace rule above) | our k-th start waits at most until the previous round's k-th start leaves the window: `p' ≤ 60 s + 5 s` | met (≤ `e + 567 s`) |
-| Previous round late (> 5 s) or slow (span above the pace limit) | the backfill gate counts that round in full and keeps `round_cost` free, so there is no contention; a late start adds its own delay | met up to a late start of about 50 s (38 s with a full reserve of fast retries); the observed 30 s stall fits, the 80.6 s start after a restart misses |
+| Previous round late (> 5 s) or slow (span above the pace limit) | the backfill gate counts that round in full and starts no page, so the round competes only with the previous round's own starts, which began 300 s earlier; a late start adds its own delay. Corner case: two consecutive fully retried rounds (252 + 252 > 400) can still make the second wait, as the late-round exception already can | met up to a late start of about 50 s (38 s with a full reserve of fast retries); the observed 30 s stall fits, the 80.6 s start after a restart misses |
 | The round's server-time call fails (round `untrusted`, nothing stored) | rows come from the next round | early rows met (`e + 550 s`); late rows missed |
 | A `429` pause (≥ 300 s, shared with funding) | at least one round lost | **missed** for the pause; fail closed |
 | An open interest write waiting for candle writes while it holds its slot (P-9) | bounded only by the round deadline (for example candle backfill after a restart) | **not bounded** by A-6; missed when the wait is long |
@@ -498,7 +500,7 @@ Even with an unlimited budget, 522 symbols in one round would store a late-publi
 runs the real task and the real budget with a fake source, at `S = 200`, `b = 400`: each line of the table has a test
 asserting its bound or, for a "missed" line, that the row is absent before the stated time. It is a measurement of the
 code on a model of the network, not of Binance. (2) After deployment a soak measurement from production,
-`readable_by_ms − time_ms` per row over 24 h and the per-request durations of the hourly measurement line (README), is
+`readable_by_ms − time_ms` per row over 24 h and the history call durations of the hourly measurement line (`request_ok_*_ms`, `request_failed_*_ms`, README), is
 recorded here as evidence E-7 (**measured**). It is not a release gate: no latency is guaranteed.
 
 ### P-11 API
@@ -712,8 +714,8 @@ Each slice adds its tests first. Live tests stay under `make live`, never in `ma
 | Rate limiting (A-6) | exhaustive over every integer `b` in `100..400` and every `S` from 1 to the largest accepted plus 1: `c` is minimal for `round_cost(S, c) ≤ steady(b)`; `1 ≤ c ≤ 12` and `CadenceError` exactly above the closed-form largest `S`; the new `c` never exceeds the one of the pre-A-6 rule (kept in the test as the oracle); the backfill share ≥ `b − steady(b)` ≥ 25; `round_cost` plus share equals `b`; `c` is non-decreasing in `S` and non-increasing in `b`. Stays in the default suite | A-6 Task 1 |
 | Rate limiting (A-6) | atomic reserve: 200 symbol coroutines fail at the same instant on the fake clock with a source that yields between the limiter grant and the answer → exactly 50 tickets taken, at most 50 retry requests reach the source, 150 symbols end `retry_reserve_exhausted`; `try_take_retry` returns `True` 50 times then `False`, never decrements, is not a coroutine function, a ticket of a retry cancelled at the deadline stays taken, a new round starts at 0 | A-6 Task 3 |
 | Rate limiting (A-6) | with `n = 200` and 60 injected request errors exactly 50 retries start and 10 symbols end `retry_reserve_exhausted`; with 10 errors all 10 are retried; a `429` pause, a refusal and an absent row take no ticket; a write `busy` error takes one; the `oi-round` line reports `retry_reserve_exhausted=10` | A-6 Task 3 |
-| Pacing (A-6) | with the budget counted in the source and the backfill share saturated: after an on-schedule, on-pace previous round the next round's starts wait at most 5 s; after a slow one (span above `pace_limit_ms(n)`) the backfill leaves `round_cost` free and the next round's starts never wait; a slow round followed by a healthy network does not make the round after it slow; `pace_limit_ms(200) = 60 000`, `pace_limit_ms(131) = 39 600` | A-6 Task 4 |
-| Contention (A-6) | the hourly measurement line carries the per-request duration p50/p99/max for successes and for failures (decision D-6) | A-6 Task 4 |
+| Pacing (A-6) | with the budget counted in the source and the backfill share saturated: after an on-schedule, on-pace previous round the next round's starts wait at most 5 s; after a slow one (span above `pace_limit_ms(n)`) the backfill gate starts no page, the next round competes only with the previous round's own starts (which began 300 s earlier) and its starts never wait; a slow round followed by a healthy network does not make the round after it slow; `pace_limit_ms(200) = 60 000`, `pace_limit_ms(131) = 39 600` | A-6 Task 4 |
+| Contention (A-6) | the hourly measurement line carries `request_ok_p50_ms`, `request_ok_p99_ms`, `request_ok_max_ms`, `request_failed_p50_ms`, `request_failed_p99_ms` and `request_failed_max_ms`: the CCXT history call alone, timed in the adapter after the slot, budget and pause waits (decision D-6) | A-6 Task 4 |
 | Late publication (A-6) | latency simulation on the fake clock at `S = 200`, `b = 400`: each line of the table under P-10 "R1 latency" has a test asserting its bound, or for a "missed" line that the row is absent before the stated time; the late path is exercised for the last symbol in sorted order | A-6 Task 5 |
 | Configuration (A-6) | `symbols` missing, `""`, `"ALL"`, `[]`, `[1]`, a duplicate, a symbol not in the venue, a symbol in another case → config errors naming the key; `"all"` and a list accepted; checked also with `enabled = false`; the cadence error uses the list's `S` | A-6 Task 2 |
 | Rate limiting (A-6) | the Collector and the API derive the same `c` and `expected_after_ms` from a file with a list | A-6 Task 6 |
@@ -905,7 +907,7 @@ were throwaway in the session scratchpad and are not in the repository.
   `symbols = "all" | [...]`; **D-2** revised by the user, the retired-series masking is resolved before the first
   production release, additively, by the `collected` object; **D-3** approved, 200 symbols by 24 h quote volume;
   **D-4** approved, `R = 50`; **D-5** the overview tool reads the API field `open_interest_period`, not the file;
-  **D-6** no change of the CCXT request timeout, per-request durations are measured in the hourly measurement line
+  **D-6** no change of the CCXT request timeout, the durations of the CCXT history calls (`request_ok_*_ms`, `request_failed_*_ms`, without slot, budget or pause waits) are measured in the hourly measurement line
   and the timeout is revisited after the soak; **D-7** the pace rule is adopted.
   1. **Shared retry reserve.** The per-symbol reserve `n` is replaced by `min(50, n)` per round, handed out as atomic
      tickets; a symbol without a ticket ends `retry_reserve_exhausted` and waits for its next request. `c` is never

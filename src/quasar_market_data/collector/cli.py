@@ -65,6 +65,7 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
+from typing import Protocol
 
 from quasar_market_data.collector.async_candle_writer import AsyncCandleWriter
 from quasar_market_data.collector.async_funding_rate_writer import AsyncFundingRateWriter, FundingRatePageError
@@ -78,6 +79,7 @@ from quasar_market_data.collector.binance_usdm_funding_rate import BinanceUsdmFu
 from quasar_market_data.collector.binance_usdm_open_interest import (
     DEFAULT_BUDGET_PER_5MIN,
     BinanceUsdmOpenInterestSource,
+    HistRequestObserver,
 )
 from quasar_market_data.collector.candle_write_activity import CandleWriteActivity
 from quasar_market_data.collector.candle_writer import CandleWriteOutcomeUnknown
@@ -157,9 +159,25 @@ EXIT_INTERRUPTED = 130
 POST_CHECK_GRACE_MS = 2_000  # how long shutdown waits for a running post-check before interrupting it
 
 type OpenSource = Callable[[], Awaitable[KlineSource]]
-type OpenInterestOpenSource = Callable[
-    [OpenInterestBudget, ExtensionPause, Clock], Awaitable[OpenInterestOnceSource]
-]  # BinanceUsdmOpenInterestSource.open in production: its own client, the caller's budget and pause
+
+
+class OpenInterestOpenSource(Protocol):
+    """``BinanceUsdmOpenInterestSource.open`` in production: its own client, the caller's budget and pause.
+
+    ``on_hist_request`` receives the duration of every CCXT history call (``run`` passes the measurement line's
+    ``record_request``; ``fetch-oi-once`` passes nothing).
+    """
+
+    def __call__(
+        self,
+        budget: OpenInterestBudget,
+        pause: ExtensionPause,
+        clock: Clock,
+        /,
+        *,
+        on_hist_request: HistRequestObserver | None = None,
+    ) -> Awaitable[OpenInterestOnceSource]: ...
+
 
 type FundingRateOpenSource = Callable[
     [FundingRateLimiter, ExtensionPause, Clock], Awaitable[FundingRateOnceSource]
@@ -645,7 +663,7 @@ async def _open_interest_main(
         config = oi_run.config
         budget = OpenInterestBudget(config.budget_per_5min, clock, sleep)
         async with AsyncExitStack() as stack:
-            source = await oi_run.open_source(budget, pause, clock)
+            source = await oi_run.open_source(budget, pause, clock, on_hist_request=measurements.record_request)
             stack.push_async_callback(_close_quietly, "the open interest client", source.close)
             writer = await AsyncOpenInterestWriter.open(db, activity=activity, wall_ms=clock.wall_ms)
             stack.push_async_callback(_close_quietly, "the open interest writer", writer.close)

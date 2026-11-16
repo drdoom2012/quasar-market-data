@@ -36,18 +36,26 @@ requests in flight that header may belong to the other response; the pause never
 on the time request counts too: it is the same IP limit. ``BinanceUsdmSource.fetch_server_time`` wraps CCXT errors
 in ``SourceError``, so the original is read from ``__cause__``. ``-1130`` is a ``BadRequest`` and an ordinary
 ``SourceError``.
+
+Request durations (ADR-0003 A-6, decision D-6). An optional ``on_hist_request`` observer, given to ``open``, receives
+the duration of every history call on the monotonic clock: only the CCXT call ``fapiDataGetOpenInterestHist`` itself,
+started after the slot, the budget grant and the second pause check, so no slot, budget or pause wait is in it.
+``ok=False`` is a CCXT or ``SourceError`` raised by that call (a ``429``/``418`` answer included: the exchange answered
+with an error); ``ok=True`` is any answer, also one that then fails the content check below (the exchange answered).
+A pause raised before the call, a refused request (validation, nothing sent) and a cancellation report nothing. Time
+requests are not observed.
 """
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Final
+from typing import Any, Final, Protocol
 from urllib.parse import urlsplit
 
 import ccxt
 import ccxt.async_support as ccxt_async
 
 from quasar_market_data.collector.binance_usdm import BinanceUsdmSource, usdm_market_id
-from quasar_market_data.collector.clock import Clock
+from quasar_market_data.collector.clock import Clock, SystemClock
 from quasar_market_data.collector.extension_pause import ExtensionPause, ExtensionPaused, ExtensionStopped
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
@@ -67,8 +75,15 @@ __all__ = [
     "BinanceUsdmOpenInterestSource",
     "ExtensionPaused",
     "ExtensionStopped",
+    "HistRequestObserver",
     "OpenInterestRequestRefused",
 ]
+
+
+class HistRequestObserver(Protocol):
+    """Receives the duration of one history call; ``ok`` is false when the call raised an exchange or transport error."""
+
+    def __call__(self, duration_ns: int, *, ok: bool) -> None: ...
 
 
 class OpenInterestRequestRefused(SourceError):
@@ -114,12 +129,20 @@ def _retry_after_ms(headers: object) -> int:
 
 class BinanceUsdmOpenInterestSource:
     def __init__(
-        self, client: Any, inner: BinanceUsdmSource, budget: OpenInterestBudget, pause: ExtensionPause
+        self,
+        client: Any,
+        inner: BinanceUsdmSource,
+        budget: OpenInterestBudget,
+        pause: ExtensionPause,
+        clock: Clock,
+        on_hist_request: HistRequestObserver | None = None,
     ) -> None:
         self._client = client
         self._inner = inner
         self._budget = budget
         self._pause = pause
+        self._clock = clock
+        self._on_hist_request = on_hist_request
         self._in_flight = asyncio.Semaphore(MAX_IN_FLIGHT)
 
     @classmethod
@@ -129,7 +152,10 @@ class BinanceUsdmOpenInterestSource:
         pause: ExtensionPause,
         clock: Clock | None = None,
         exchange: Any | None = None,
+        *,
+        on_hist_request: HistRequestObserver | None = None,
     ) -> "BinanceUsdmOpenInterestSource":
+        clock = SystemClock() if clock is None else clock
         client = ccxt_async.binanceusdm() if exchange is None else exchange  # a new instance: never shared
         try:
             _require_fapi_data_url(client)
@@ -137,7 +163,7 @@ class BinanceUsdmOpenInterestSource:
             await client.close()
             raise
         inner = await BinanceUsdmSource.open(client, clock)  # checks fapiPublic, loads markets, closes on failure
-        return cls(client, inner, budget, pause)
+        return cls(client, inner, budget, pause, clock, on_hist_request)
 
     def _stop_for(self, error: BaseException, what: str) -> SourceError | None:
         """The pause or ban a 429/418 answer means (recorded in the pause), else ``None``."""
@@ -154,15 +180,20 @@ class BinanceUsdmOpenInterestSource:
         self._pause.record_rate_limited(retry_after)
         return self._pause.paused()
 
-    async def _request[T](self, what: str, call: Callable[[], Awaitable[T]]) -> T:
+    async def _request[T](
+        self, what: str, call: Callable[[], Awaitable[T]], observer: HistRequestObserver | None = None
+    ) -> T:
         self._pause.check()
         async with self._in_flight:
             await self._budget.acquire()
             self._pause.check()  # the start is counted, but a call that waited sends nothing into a pause
             generation = self._pause.generation
+            started_ns = self._clock.monotonic_ns()  # after every wait: the observer times the call alone
             try:
                 result = await call()
             except (ccxt.BaseError, SourceError) as error:
+                if observer is not None:
+                    observer(self._clock.monotonic_ns() - started_ns, ok=False)
                 original = error if isinstance(error, ccxt.BaseError) else error.__cause__
                 stop = None if original is None else self._stop_for(original, what)
                 if stop is not None:
@@ -172,6 +203,8 @@ class BinanceUsdmOpenInterestSource:
                         self._pause.record_success(generation)  # the answer arrived; the adapter rejected its content
                     raise
                 raise SourceError(f"{what} failed: {error}") from error
+            if observer is not None:
+                observer(self._clock.monotonic_ns() - started_ns, ok=True)
             self._pause.record_success(generation)
             return result
 
@@ -198,7 +231,9 @@ class BinanceUsdmOpenInterestSource:
             "limit": limit,
         }
         response = await self._request(
-            f"open interest request for {symbol!r}", lambda: self._client.fapiDataGetOpenInterestHist(params)
+            f"open interest request for {symbol!r}",
+            lambda: self._client.fapiDataGetOpenInterestHist(params),
+            self._on_hist_request,
         )
         if type(response) is not list:
             raise SourceError(f"open interest response must be a list, got {type(response).__name__}")

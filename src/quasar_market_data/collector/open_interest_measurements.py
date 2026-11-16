@@ -4,7 +4,9 @@
 had to yield to a candle write, the duration of every open interest transaction (and, apart, of the transactions of
 exactly 100 rows, the figure amendment A-1 reads: p99 <= 50 ms), the number of busy failures, the duration of every
 candle write (measured around ``_WriteWatch.write``) and, successes and failures apart, the duration of every history
-request of the rounds and the catch-up pages (ADR-0003 A-6, decision D-6). ``line`` renders the window as one ``oi-measurement`` line with
+call of the rounds and the catch-up pages (ADR-0003 A-6, decision D-6). The adapter reports those through
+``record_request``: the CCXT history call only, without the in-flight slot, budget or pause waits in front of it
+(``binance_usdm_open_interest``). ``line`` renders the window as one ``oi-measurement`` line with
 p50, p99 and max by nearest rank; ``reset`` starts the next window. Everything runs on the event loop, no locking.
 """
 
@@ -35,12 +37,12 @@ def _series(prefix: str, values: Sequence[int], percentiles: tuple[int, ...]) ->
     return fields
 
 
-def _durations(name: str, values: Sequence[int]) -> str:
-    """One ``name=p50/p99/max`` field in milliseconds, ``na/na/na`` without a sample."""
+def _durations(prefix: str, values: Sequence[int]) -> list[str]:
+    """``<prefix>_p50_ms``, ``<prefix>_p99_ms`` and ``<prefix>_max_ms``; ``na`` without a sample, like the others."""
     ordered = sorted(values)
-    if not ordered:
-        return f"{name}=na/na/na"
-    return f"{name}={_ms(_rank(ordered, 50))}/{_ms(_rank(ordered, 99))}/{_ms(ordered[-1])}"
+    fields = [f"{prefix}_p{percent}_ms={_ms(_rank(ordered, percent)) if ordered else 'na'}" for percent in (50, 99)]
+    fields.append(f"{prefix}_max_ms={_ms(ordered[-1]) if ordered else 'na'}")
+    return fields
 
 
 class OpenInterestMeasurements:
@@ -70,7 +72,7 @@ class OpenInterestMeasurements:
         self._yield_wait_ns += report.yield_wait_ns
 
     def record_request(self, duration_ns: int, *, ok: bool) -> None:
-        """One history request (a round's or a catch-up page's); ``ok`` is false when the call raised."""
+        """One CCXT history call (a round's or a catch-up page's); ``ok`` is false for an exchange or transport error."""
         (self._requests_ok if ok else self._requests_failed).append(duration_ns)
 
     def record_busy(self) -> None:
@@ -93,6 +95,6 @@ class OpenInterestMeasurements:
         fields += _series("oi100", self._full_transactions, (99,))
         fields.append(f"busy={self._busy}")
         fields += _series("candle", self._candle_writes, (50, 99))
-        fields.append(_durations("request-ok-ms", self._requests_ok))
-        fields.append(_durations("request-failed-ms", self._requests_failed))
+        fields += _durations("request_ok", self._requests_ok)
+        fields += _durations("request_failed", self._requests_failed)
         return " ".join(fields)
