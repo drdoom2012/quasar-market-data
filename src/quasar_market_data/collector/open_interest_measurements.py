@@ -2,8 +2,9 @@
 
 ``OpenInterestMeasurements`` collects, over one reporting window: how often and how long an open interest transaction
 had to yield to a candle write, the duration of every open interest transaction (and, apart, of the transactions of
-exactly 100 rows, the figure amendment A-1 reads: p99 <= 50 ms), the number of busy failures, and the duration of every
-candle write (measured around ``_WriteWatch.write``). ``line`` renders the window as one ``oi-measurement`` line with
+exactly 100 rows, the figure amendment A-1 reads: p99 <= 50 ms), the number of busy failures, the duration of every
+candle write (measured around ``_WriteWatch.write``) and, successes and failures apart, the duration of every history
+request of the rounds and the catch-up pages (ADR-0003 A-6, decision D-6). ``line`` renders the window as one ``oi-measurement`` line with
 p50, p99 and max by nearest rank; ``reset`` starts the next window. Everything runs on the event loop, no locking.
 """
 
@@ -34,6 +35,14 @@ def _series(prefix: str, values: Sequence[int], percentiles: tuple[int, ...]) ->
     return fields
 
 
+def _durations(name: str, values: Sequence[int]) -> str:
+    """One ``name=p50/p99/max`` field in milliseconds, ``na/na/na`` without a sample."""
+    ordered = sorted(values)
+    if not ordered:
+        return f"{name}=na/na/na"
+    return f"{name}={_ms(_rank(ordered, 50))}/{_ms(_rank(ordered, 99))}/{_ms(ordered[-1])}"
+
+
 class OpenInterestMeasurements:
     def __init__(self) -> None:
         self.reset()
@@ -42,6 +51,8 @@ class OpenInterestMeasurements:
         self._transactions: list[int] = []
         self._full_transactions: list[int] = []
         self._candle_writes: list[int] = []
+        self._requests_ok: list[int] = []
+        self._requests_failed: list[int] = []
         self._yields = 0
         self._yield_wait_ns = 0
         self._busy = 0
@@ -58,12 +69,23 @@ class OpenInterestMeasurements:
         self._yields += report.yields
         self._yield_wait_ns += report.yield_wait_ns
 
+    def record_request(self, duration_ns: int, *, ok: bool) -> None:
+        """One history request (a round's or a catch-up page's); ``ok`` is false when the call raised."""
+        (self._requests_ok if ok else self._requests_failed).append(duration_ns)
+
     def record_busy(self) -> None:
         self._busy += 1
 
     def line(self, window_ms: int) -> str | None:
         """One ``oi-measurement`` line for the window, or ``None`` when nothing happened in it."""
-        if not (self._transactions or self._candle_writes or self._yields or self._busy):
+        if not (
+            self._transactions
+            or self._candle_writes
+            or self._yields
+            or self._busy
+            or self._requests_ok
+            or self._requests_failed
+        ):
             return None
         fields = [f"oi-measurement window_s={window_ms // 1000}", f"yields={self._yields}"]
         fields.append(f"yield_wait_ms={_ms(self._yield_wait_ns)}")
@@ -71,4 +93,6 @@ class OpenInterestMeasurements:
         fields += _series("oi100", self._full_transactions, (99,))
         fields.append(f"busy={self._busy}")
         fields += _series("candle", self._candle_writes, (50, 99))
+        fields.append(_durations("request-ok-ms", self._requests_ok))
+        fields.append(_durations("request-failed-ms", self._requests_failed))
         return " ".join(fields)

@@ -65,6 +65,7 @@ from quasar_market_data.domain.open_interest import OpenInterest, select_eligibl
 from quasar_market_data.domain.open_interest_cadence import (
     backfill_share,
     open_interest_cadence,
+    pace_limit_ms,
     retry_reserve,
     round_cost,
     symbols_for_round,
@@ -285,6 +286,7 @@ class _OpenInterestTask:
         self._last_round_span: tuple[int, int] | None = (
             None  # monotonic ns of the previous round's first and last instant
         )
+        self._last_round_size = 0  # the previous round's symbol count, for its pace limit
         self.holes: dict[str, list[int]] = {}
         self._scanned_newest: dict[str, int] = {}
         self.tries = OpenInterestTryBook(config.period)
@@ -384,13 +386,18 @@ class _OpenInterestTask:
     def _previous_round_if_on_schedule(self, wake_ns: int) -> tuple[int, int] | None:
         """The previous round's span when its starts will have expired, one by one, as the next round makes its own.
 
-        That holds when the previous round began about 300 s before this wake (it ran on schedule). A round that ran
-        late, for instance the first one after a start, is still in the window when the next round begins, so it counts.
+        That holds when the previous round began about 300 s before this wake (it ran on schedule) and ran on pace: its
+        span is at most ``pace_limit_ms(n)``. A round that ran late, for instance the first one after a start, is still
+        in the window when the next round begins, so it counts. So does a slow round (timeouts, slow failures): with the
+        backfill saturated, the next round's starts would wait for its starts to expire one by one and copy its pace on a
+        healthy network, and the round after that would copy it again (ADR-0003 P-10, A-6 decision D-7).
         """
         span = self._last_round_span
-        if span is not None and span[0] + WINDOW_MS * _NS_PER_MS <= wake_ns + ON_SCHEDULE_TOLERANCE_MS * _NS_PER_MS:
-            return span
-        return None
+        if span is None or self._last_round_size < 1:
+            return None
+        on_schedule = span[0] + WINDOW_MS * _NS_PER_MS <= wake_ns + ON_SCHEDULE_TOLERANCE_MS * _NS_PER_MS
+        on_pace = span[1] - span[0] <= pace_limit_ms(self._last_round_size) * _NS_PER_MS
+        return span if on_schedule and on_pace else None
 
     def _grantable_now(self) -> bool:
         return self.budget.committed_at(self.clock.monotonic_ns()) + 1 <= self.config.budget_per_5min
@@ -598,9 +605,7 @@ class _OpenInterestTask:
         config = self.config
         symbol = page.symbol
         try:
-            response = await self.source.fetch_open_interest_hist(
-                symbol, page.start_ms, page.end_ms, as_of_ms=trust.lower_bound_ms
-            )
+            response = await self._fetch_hist(symbol, page.start_ms, page.end_ms, trust)
             rows = parse_open_interest_hist(
                 response,
                 market_id=self.source.market_id(symbol),
@@ -660,6 +665,7 @@ class _OpenInterestTask:
         span_start = self.clock.monotonic_ns()
         status, _ = await self._run_until(self._round_work(boundary, state, deadline_ns), deadline_ns)
         self._last_round_span = (span_start, self.clock.monotonic_ns())
+        self._last_round_size = len(symbols)
         if status != "done":
             self._close_unfinished(boundary, state, status)
         return OpenInterestRoundReport(
@@ -805,7 +811,7 @@ class _OpenInterestTask:
 
     async def _collect(self, symbol: str, start: int, end: int, trust: TrustedTime, state: _RoundState) -> None:
         config = self.config
-        response = await self.source.fetch_open_interest_hist(symbol, start, end, as_of_ms=trust.lower_bound_ms)
+        response = await self._fetch_hist(symbol, start, end, trust)
         rows = parse_open_interest_hist(
             response,
             market_id=self.source.market_id(symbol),
@@ -824,6 +830,20 @@ class _OpenInterestTask:
         state.duplicates += report.duplicates
         state.conflicts += len(report.conflicts)
         self._report_conflicts(report)
+
+    async def _fetch_hist(self, symbol: str, start: int, end: int, trust: TrustedTime) -> Sequence[object]:
+        """One history request, its duration measured on the monotonic clock (ADR-0003 A-6, decision D-6).
+
+        Any exception from the call is a failed request and is re-raised unchanged; a cancellation is not measured.
+        """
+        started_ns = self.clock.monotonic_ns()
+        try:
+            response = await self.source.fetch_open_interest_hist(symbol, start, end, as_of_ms=trust.lower_bound_ms)
+        except Exception:
+            self.measurements.record_request(self.clock.monotonic_ns() - started_ns, ok=False)
+            raise
+        self.measurements.record_request(self.clock.monotonic_ns() - started_ns, ok=True)
+        return response
 
     async def _write(self, rows: Sequence[OpenInterest]) -> OpenInterestWriteReport:
         try:

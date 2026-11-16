@@ -30,6 +30,7 @@ from tests.collector.open_interest_task_fakes import (
     make_rig,
     prefill,
     stored_times,
+    symbols_of,
     table_rows,
 )
 
@@ -767,6 +768,155 @@ def test_rounds_past_their_deadline_are_skipped_counted_and_logged(tmp_path: Pat
         assert int(field(rig.lines_with("oi-round")[1], "skipped_rounds")) >= 2
         warning = rig.lines_with("oi-warning rounds-skipped")[0]
         assert "skipped=" in warning
+        await rig.stop_and_wait()
+
+    run(scenario)
+
+
+# ---- the pace rule of the backfill gate (ADR-0003 P-10, A-6 decision D-7; INV-151) ------------------------------------
+
+ROUND_DELAY_MS = 480  # a successful round request holds its slot this long (the measured 4.2 symbols/s at 2 slots)
+PACE_LIMIT_200_MS = 60_000  # pace_limit_ms(200)
+SECOND = 1_000 * NS_PER_MS
+
+
+async def paced_rig(tmp_path: Path) -> Rig:
+    """200 symbols at b = 400: c = 1, round cost 252, share 148; every start counts in the real budget."""
+    rig = await make_rig(tmp_path, symbols=symbols_of(200), count_budget_in_source=True, backfill_days=7)
+    assert rig.config.cadence == 1 and rig.config.round_cost == 252
+    rig.source.round_delay_ms = ROUND_DELAY_MS  # the empty database is all holes: 5 pages per series, 1 000 in all
+    rig.align_to_next_wake()
+    return rig
+
+
+async def run_cycle(rig: Rig, rounds: int) -> int:
+    """At a wake: run the round and the idle window after it; return the wake (monotonic ns)."""
+    wake_ns = rig.t.monotonic_ns()
+    for _ in range(250):
+        await rig.t.settle()
+        if len(rig.lines_with("oi-round")) >= rounds and len(rig.lines_with("oi-catchup")) >= rounds:
+            return wake_ns
+        await rig.t.advance(1_000)
+    raise AssertionError(f"cycle {rounds} did not end: {rig.lines_with('oi-round')} {rig.lines_with('oi-catchup')}")
+
+
+def round_starts(rig: Rig, wake_ns: int) -> list[int]:
+    """Offsets (ns) from ``wake_ns`` of the history requests of the round that woke there."""
+    return sorted(
+        c.at_ns - wake_ns
+        for c in rig.source.hist_calls
+        if c.end_ms - c.start_ms == 2 * STEP and wake_ns <= c.at_ns < wake_ns + 300 * SECOND
+    )
+
+
+def round_span(rig: Rig, wake_ns: int) -> int:
+    """From the wake to the end of the round's last request, in ns."""
+    return round_starts(rig, wake_ns)[-1] + ROUND_DELAY_MS * NS_PER_MS
+
+
+def counted_at(rig: Rig, at_ns: int) -> int:
+    """Budget starts still in the window at ``at_ns`` (a start at ``s`` counts while ``at_ns < s + 300 s``)."""
+    starts = rig.source.time_calls + [c.at_ns for c in rig.source.hist_calls]
+    return sum(1 for start in starts if start < at_ns < start + 300 * SECOND)
+
+
+def saturated(line: str) -> bool:
+    """The window made pages and stopped only because the budget or its share allowed no more."""
+    return int(field(line, "pages")) > 0 and field(line, "end") in ("budget", "share")
+
+
+def round_budget_starts(rig: Rig, wake_ns: int) -> list[int]:
+    """Every budget start (history and time) of the round that woke at ``wake_ns``, up to its last request."""
+    last = wake_ns + round_starts(rig, wake_ns)[-1]
+    starts = rig.source.time_calls + [c.at_ns for c in rig.source.hist_calls if c.end_ms - c.start_ms == 2 * STEP]
+    return [start for start in starts if wake_ns <= start <= last]
+
+
+async def slow_second_round(rig: Rig) -> tuple[int, int]:
+    """A healthy first round and a saturated window, then a second round with 6 failures of 10 s each."""
+    rig.start()
+    wake0 = await run_cycle(rig, 1)
+    assert saturated(rig.lines_with("oi-catchup")[0])
+    rig.source.fail_symbols = set(symbols_of(200)[:6])
+    rig.source.fail_delay_ms = 10_000
+    await rig.advance_to_next_wake()
+    wake1 = await run_cycle(rig, 2)
+    rig.source.fail_symbols = set()  # a healthy network from here on
+    assert round_span(rig, wake1) > PACE_LIMIT_200_MS * NS_PER_MS  # began on schedule, but slower than the pace limit
+    return wake0, wake1
+
+
+def test_an_on_pace_previous_round_delays_the_next_by_at_most_5_s(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        rig = await paced_rig(tmp_path)
+        rig.start()
+        wake0 = await run_cycle(rig, 1)
+        assert saturated(rig.lines_with("oi-catchup")[0])  # the backfill took all the gate allowed
+        await rig.advance_to_next_wake()
+        wake1 = await run_cycle(rig, 2)
+        assert round_span(rig, wake0) <= PACE_LIMIT_200_MS * NS_PER_MS  # the previous round was on pace
+        assert counted_at(rig, wake1) + 201 > 400  # not vacuous: the round's starts had to wait for expiries
+        natural = round_starts(rig, wake0)[-1]  # the first round met an empty budget
+        assert round_starts(rig, wake1)[-1] <= natural + 5 * SECOND
+        await rig.stop_and_wait()
+
+    run(scenario)
+
+
+def test_a_slow_previous_round_is_counted_in_full(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        rig = await paced_rig(tmp_path)
+        wake0, wake1 = await slow_second_round(rig)
+        window = rig.lines_with("oi-catchup")[1]
+        assert field(window, "pages") == "0" and field(window, "end") == "budget"
+        await rig.advance_to_next_wake()
+        wake2 = await run_cycle(rig, 3)
+        slow = round_budget_starts(rig, wake1)
+        assert len(slow) == 1 + 200 + 6  # the time call, every symbol and the six retries
+        # the window added nothing but its own time call to what the slow round left in the budget at the next wake
+        assert counted_at(rig, wake2) == sum(1 for start in slow if wake2 < start + 300 * SECOND) + 1
+        assert round_starts(rig, wake2) == round_starts(rig, wake0)  # no start waited: the pace of an empty budget
+        await rig.stop_and_wait()
+
+    run(scenario)
+
+
+def test_a_slow_round_does_not_propagate(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        rig = await paced_rig(tmp_path)
+        await slow_second_round(rig)
+        await rig.advance_to_next_wake()
+        wake2 = await run_cycle(rig, 3)
+        await rig.advance_to_next_wake()
+        wake3 = await run_cycle(rig, 4)
+        spans_s = [round_span(rig, wake) / SECOND for wake in (wake2, wake3)]
+        assert all(span <= PACE_LIMIT_200_MS / 1_000 for span in spans_s), spans_s
+        assert saturated(rig.lines_with("oi-catchup")[2])  # the window before the last round filled the backfill
+        assert counted_at(rig, wake3) + 201 > 400  # so the last round really met contention
+        await rig.stop_and_wait()
+
+    run(scenario)
+
+
+def test_request_durations_of_rounds_and_pages_are_measured(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        rig = await make_rig(tmp_path, symbols=(BTC,))
+        rig.source.round_delay_ms = ROUND_DELAY_MS
+        rig.source.hist_delay_ms = 300  # every catch-up page
+        rig.source.errors = [SourceError("first round attempt fails")]  # the round's first request; its retry succeeds
+        rig.source.page_script = [True]  # the first page fails: the series backs off for this window
+        rig.start()
+        for _ in range(20):
+            await rig.t.settle()
+            if rig.lines_with("oi-catchup"):
+                break
+            await rig.t.advance(500)
+        catchup = rig.lines_with("oi-catchup")[0]
+        assert field(catchup, "pages") == "0" and field(catchup, "failures") == "1"
+        line = rig.measurements.line(1_000)
+        assert line is not None
+        assert "request-ok-ms=480.0/480.0/480.0" in line.split()  # the round's retry
+        assert "request-failed-ms=300.0/480.0/480.0" in line.split()  # the failed page and the failed first attempt
         await rig.stop_and_wait()
 
     run(scenario)
