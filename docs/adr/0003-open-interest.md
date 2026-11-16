@@ -282,8 +282,9 @@ window, no usage header [P].
 **Budget.** The open interest limiter is a sliding-window counter of request **starts** over the last 300 s,
 with a ceiling of `b = budget_per_5min` from the configuration (P-13) [P]. The same limiter covers open interest's
 `/fapi/v1/time` calls. Allowed values: **`100 ≤ b ≤ 400`** (400 is 40 % of the documented 1 000). Any other
-value is a config error at start. (The floor of 100 is a proposal: it keeps today's 10 symbols at `c = 1` and the
-backfill share at 25 or more per 5 min.)
+value is a config error at start. (The floor of 100 was proposed when the configuration had 10 symbols: it kept them
+at `c = 1` and the backfill share at 25 or more per 5 min. After A-6, `b = 100` keeps up to 36 symbols at `c = 1`; the
+shipped files list 200 at `b = 400`.)
 
 **Cadence `c`: each symbol is asked every `c` periods, not every period** [P]. Stored data stays at 5m granularity:
 one request returns every 5m row of its range, and the range is far below the 500-row limit (below). `c` is not
@@ -494,12 +495,13 @@ second.
 
 *Simulated (fake clock)* values come from `tests/collector/test_open_interest_latency.py` (A-6 Task 5): the real
 task and budget on a model of the network (a success holds its slot 0.48 s, a fast failure 0.5 s and a slow one 10 s,
-each the whole slot time), not a measurement of Binance. The ideal lines are met with **zero margin** in the simulation (`e + 250.0 s`,
-`e + 550.0 s`): on the model both slots finish together. The simulation reads the stamp of the recording writer; the
-real writer keeps stamps unique (`max(wall, last + 1)`), which adds 1 ms per stamp that falls in the same millisecond
-as the previous one (`e + 250.001 s` and `e + 550.001 s` with the real writer on the same model). A late start of 50 s is also met with zero margin
-(`e + 600.0 s`). A threshold the correction moved is pinned by a pair of tests, one at it and one above it
-(`F = 10` / `11` at `f = 10 s`, the deadline edge `F = 49` / `50`, a late start of 50 s / 51 s).
+each the whole slot time), not a measurement of Binance. The ideal lines are met with **zero margin** in the
+simulation (`e + 250.0 s`, `e + 550.0 s`): on the model both slots finish together. The simulation reads the stamp of
+the recording writer; the real writer keeps stamps unique (`max(wall, last + 1)`), which adds 1 ms per stamp that
+falls in the same millisecond as the previous one (`e + 250.001 s` and `e + 550.001 s` with the real writer on the
+same model). A late start of 50 s is also met with zero margin (`e + 600.0 s`). A threshold the correction moved is
+pinned by a pair of tests, one at it and one above it (`F = 10` / `11` at `f = 10 s`, the deadline edge `F = 49` /
+`50`, a late start of 50 s / 51 s).
 
 For the shipped subset (`S = 200`): `c = 1`, `p ≈ 48 s`. Rows published within 200 s (about 98 % in the measurement)
 are stored by about `e + 250 s`; late-published rows by about `e + 550 s`, 50 s inside R1. A round that starts 30 s
@@ -637,8 +639,8 @@ the key.
 
 *Shipped subset (A-6, decision D-3).* The shipped files list the **200 symbols with the largest 24 h quote volume**,
 chosen once from the public Binance ticker (no credentials) and written into both files, never derived at run time
-(`S = 200` gives `c = 1` at `b = 400`, P-10). The list and the snapshot time are recorded in the revision history
-when the files are written.
+(`S = 200` gives `c = 1` at `b = 400`, P-10). The list itself is the `symbols` array of the files; the revision
+history (A-6, item 2) records the snapshot time and the rule.
 
 *Symbols that leave the list.* Their stored series stay (data is never deleted). They are no longer requested and the
 backfill plans no holes for them (P-12); `GET /v1/open-interest` and its `/coverage` keep answering `200` for them,
@@ -942,11 +944,17 @@ were throwaway in the session scratchpad and are not in the repository.
   5. **API (additive).** `/health/ingest` `open_interest` gains `collected` (the listed series only) and
      `/v1/instruments` gains `open_interest_period`; the value of `behind[].configured` follows the list. With
      `symbols = "all"` the outer health fields equal those of a build before A-6 reading the same file without the key
-     wherever the cadence `c` is unchanged (`ceil(S / c) ≤ 50`); `c`, `rule.expected_after_ms` and the states derived from
-     them follow the new formula otherwise (for example `c` goes from 4 to 3 at the 522 venue symbols of the shipped
-     files at 400) (contract 6.4.2, 6.5.7, 6.5.8).
+     wherever the cadence `c` is unchanged (for example when `ceil(S / c) ≤ 50`; `c` can also be unchanged with more
+     than 50 symbols per round, for example `S = 200` at `b = 200`); `c`, `rule.expected_after_ms` and the states
+     derived from them follow the new formula otherwise (for example `c` goes from 4 to 3 at the 522 venue symbols of
+     the shipped files at 400) (contract 6.4.2, 6.5.7, 6.5.8).
   6. **Unchanged:** the schema (no migration), the row identity, the eligibility, the slot states, `readable_by_ms`,
      the endpoints and their fields, the candle path, funding rate, `ExtensionPause`, the budget range `[100, 400]`,
      and `fetch-oi-once` (it takes `--symbol` and never reads the list). New invariants INV-146 to INV-151.
-  7. **Release.** With the first open interest release, together with funding rate, so production never holds retired
-     series. Both processes read the same file (the existing `sha256` check).
+  7. **Release.** With the next open interest release, together with funding rate. Both processes read the same
+     file (the existing `sha256` check); the new file must be in place before either restarts, because both exit with
+     code 2 on an `[open_interest]` table without `symbols` (README, "Deployment (S21)"). No schema change, no
+     migration. A deployment that already collected open interest for every venue symbol (v0.2.0 ships the table
+     enabled without `symbols`: 522 symbols) keeps those series: after A-6 the 322 unlisted ones are retired, the outer
+     `open_interest` fields count them (`status` stays `behind`), and consumers that need the listed universe read
+     `collected`.

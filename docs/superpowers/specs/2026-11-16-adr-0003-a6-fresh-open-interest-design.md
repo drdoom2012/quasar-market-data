@@ -1,6 +1,15 @@
-# ADR-0003 Amendment A-6 (proposal): shared retry reserve and an open interest symbol list
+# ADR-0003 Amendment A-6: shared retry reserve and an open interest symbol list
 
-- **Status:** proposal, revision 3. Revision 2 applied an independent review. Revision 3 (2026-11-16) applies the
+- **Status:** approved and **implemented** on branch `feat/oi-a6-fresh-open-interest` (ADR-0003 A-6, invariants
+  INV-146 to INV-151). Corrections made during execution, each recorded where it applies: an absent
+  `open_interest_period` key (an API older than A-6) means "unknown, judged as before" in the overview tool, only an
+  explicit `null` means not collected (2.5); "with `symbols = "all"` the values equal a pre-A-6 build" holds only where
+  the cadence `c` is unchanged (2.4); request durations time the CCXT history call alone, in the adapter, without slot,
+  budget or pause waits (D-6), in the fields `request_ok_p50_ms`, `request_ok_p99_ms`, `request_ok_max_ms`,
+  `request_failed_p50_ms`, `request_failed_p99_ms` and `request_failed_max_ms`; the failure duration `f` is the total
+  slot time of a failed request; the retry model is corrected (retries queue behind every first attempt) and the
+  tables carry the simulated values (2.6); the pace rule says the window after a late or slow round "starts no page".
+  The history of the proposal follows. Revision 3. Revision 2 applied an independent review. Revision 3 (2026-11-16) applies the
   user's decisions: D-1, D-3, D-4 and D-5 approved as proposed; D-2 revised (retired-series masking resolved before the
   first production release, additively, section 2.4); latency validated under reserve exhaustion and limiter
   contention, measured and estimated figures separated (section 2.6); an additive API field for the open interest
@@ -9,9 +18,8 @@
   configuration and the existing schema stay. Revision 4 (2026-11-16) applies an independent review of revision 3 and
   of the plan. Failure duration is now in the latency model, and slow failures, not the reserve, decide R1 under
   errors. A new pace rule (D-7) stops a slow round's pace from propagating through the limiter. The missing cases
-  (untrusted time, `429`, writer wait) are listed. The user decided D-5 (API field), D-6 (no timeout change, measure) and
-D-7 (adopt) on 2026-11-16; no decision is pending. Nothing is implemented;
-  the implementation plan is
+  (untrusted time, `429`, writer wait) are listed. The user decided D-5 (API field), D-6 (no timeout change, measure)
+  and D-7 (adopt) on 2026-11-16; no decision is pending. The implementation plan is
   `docs/superpowers/plans/2026-11-16-adr-0003-a6-fresh-open-interest.md`.
 - **Date:** 2026-11-16.
 - **Trigger:** change request `docs/requests/2026-11-16-quasar-fresh-open-interest.md` from Sentaris Engine (R1: cadence
@@ -177,7 +185,8 @@ plans holes only for listed symbols (P-12 "per configured series"), and:
   `behind`. That is the existing contract rule for retired series (6.5.8), the same as for candles; at this scale it
   defeats the purpose of the object.
 - **Resolution (D-2, revised by the user): an additive `collected` object** inside `/health/ingest`
-  `open_interest`, shipped in A-6, so the first production release already has it. Every existing field keeps its
+  `open_interest`, shipped in A-6, in the release that introduces the list, so no release has the list without it
+  (whether or not v0.2.0, which collects every venue symbol, was deployed: section 6). Every existing field keeps its
   meaning (`scope: "stored_series"`, the counts, `status`, `behind`). With `symbols = "all"` an A-6 build gives the
   same values for them as a pre-A-6 build reading the same file without the key (a pre-A-6 build refuses the key),
   **only where the cadence `c` is the same under both formulas** (every round has at most 50 symbols, or the new
@@ -284,12 +293,13 @@ the next round. R1 therefore needs `p ≤ 396 s` on the first path, which always
 
 *Simulated (fake clock)* values come from `tests/collector/test_open_interest_latency.py` (A-6 Task 5): the real
 task and budget on a model of the network (a success holds its slot 0.48 s, a fast failure 0.5 s and a slow one 10 s,
-each the whole slot time), not a measurement of Binance. The ideal lines are met with **zero margin** in the simulation (`e + 250.0 s`,
-`e + 550.0 s`): on the model both slots finish together. The simulation reads the stamp of the recording writer; the
-real writer keeps stamps unique (`max(wall, last + 1)`), which adds 1 ms per stamp that falls in the same millisecond
-as the previous one (`e + 250.001 s` and `e + 550.001 s` with the real writer on the same model). A late start of 50 s is also met with zero margin
-(`e + 600.0 s`). A threshold the correction moved is pinned by a pair of tests, one at it and one above it
-(`F = 10` / `11` at `f = 10 s`, the deadline edge `F = 49` / `50`, a late start of 50 s / 51 s).
+each the whole slot time), not a measurement of Binance. The ideal lines are met with **zero margin** in the
+simulation (`e + 250.0 s`, `e + 550.0 s`): on the model both slots finish together. The simulation reads the stamp of
+the recording writer; the real writer keeps stamps unique (`max(wall, last + 1)`), which adds 1 ms per stamp that
+falls in the same millisecond as the previous one (`e + 250.001 s` and `e + 550.001 s` with the real writer on the
+same model). A late start of 50 s is also met with zero margin (`e + 600.0 s`). A threshold the correction moved is
+pinned by a pair of tests, one at it and one above it (`F = 10` / `11` at `f = 10 s`, the deadline edge `F = 49` /
+`50`, a late start of 50 s / 51 s).
 
 Health side effect: `expected_after_ms + lag_threshold_ms = 560 s`. A late-path row readable after `e + 560 s` (for
 example `e + 562 s` with retries) shows its series as `stale` in `/health/ingest` for those seconds. That is a
@@ -374,7 +384,7 @@ met / missed pair). The late path is exercised for the
 | D-3 | Shipped subset | **approved (2026-11-16):** 200 symbols, chosen once by 24 h quote volume at authoring time (public ticker, no credentials), written into both files, never derived at run time |
 | D-4 | `R` | **approved (2026-11-16):** `R = 50` |
 | D-5 | Overview tool | **approved (2026-11-16)** as "read the file", then **changed by the user (2026-11-16)** to the API field of 2.7 (2.5) |
-| D-6 | An explicit request timeout for the open interest client (today CCXT's default 10 s; 2.6 shows that slow failures, not the reserve, decide R1 under errors) | **approved (2026-11-16):** no change in A-6. A shorter timeout also applies to 500-row backfill pages, whose duration is not measured, and three failed pages suspend a series' catch-up until restart (P-12). Revisit after the soak measurement, which A-6 extends with per-request duration (p50/p99/max for success and failure) in the hourly open interest measurement line |
+| D-6 | An explicit request timeout for the open interest client (today CCXT's default 10 s; 2.6 shows that slow failures, not the reserve, decide R1 under errors) | **approved (2026-11-16):** no change in A-6. A shorter timeout also applies to 500-row backfill pages, and three failed pages suspend a series' catch-up until restart (P-12). Revisit after the soak measurement, which A-6 extends with per-request duration in the hourly open interest measurement line: `request_ok_p50_ms`, `request_ok_p99_ms`, `request_ok_max_ms`, `request_failed_p50_ms`, `request_failed_p99_ms` and `request_failed_max_ms`, which time the CCXT history call only (rounds and backfill pages alike, no slot, budget or pause wait) |
 | D-7 | The pace rule of 2.6 (count a slow previous round in full) | **approved (2026-11-16):** adopt; it extends today's late-round exception, keeps the P-10 allocation, and stops a slow round's pace from propagating through a catch-up |
 
 ## 5. Tests and invariants
@@ -451,8 +461,12 @@ met / missed pair). The late path is exercised for the
   both processes at start (exit code 2). Both shipped files add the key.
 - README: the `[open_interest]` example gains `symbols`; the `oi-round` line gains the reserve count; the overview
   section describes "not collected".
-- Release: with the first open interest release (together with funding rate), so production never holds retired
-  series (2.4).
+- Release: with the next open interest release (together with funding rate). The new file must be in place before
+  either process restarts (both exit with code 2 on `[open_interest]` without `symbols`). A deployment that already
+  collected open interest for all 522 venue symbols (v0.2.0 ships the table enabled without `symbols`) keeps their
+  stored series: after A-6 the 322 unlisted ones are retired, the outer `open_interest` fields count them (`status`
+  stays `behind`), and consumers that need the listed universe read `collected` (2.4). This holds whether or not
+  v0.2.0 was deployed.
 
 ## 7. Answer to the request's questions (draft, for the reply to Sentaris)
 
