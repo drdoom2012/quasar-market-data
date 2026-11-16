@@ -31,6 +31,7 @@ def slot(n: int) -> int:
 def client_for(path: Path, **kwargs: Any) -> TestClient:
     kwargs.setdefault("rule", SAMPLE_RULE)
     kwargs.setdefault("universe", SAMPLE_UNIVERSE)
+    kwargs.setdefault("open_interest_symbols", frozenset())  # open interest is off
     return TestClient(create_app(path, **kwargs), raise_server_exceptions=False)
 
 
@@ -342,7 +343,7 @@ def test_response_is_compact_utf8_json(db: Path) -> None:
 
 
 def test_the_allow_header_of_another_route_is_echoed_whatever_its_case(db: Path) -> None:
-    app = create_app(db, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE)
+    app = create_app(db, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE, open_interest_symbols=frozenset())
 
     @app.get("/two-methods")
     async def two_methods() -> None:

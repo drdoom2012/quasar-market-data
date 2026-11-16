@@ -24,6 +24,7 @@ def slot(n: int) -> int:
 
 
 def client_for(path: Path, universe: Sequence[Instrument], **kwargs: Any) -> TestClient:
+    kwargs.setdefault("open_interest_symbols", frozenset())  # open interest is off
     return TestClient(create_app(path, rule=SAMPLE_RULE, universe=universe, **kwargs), raise_server_exceptions=False)
 
 

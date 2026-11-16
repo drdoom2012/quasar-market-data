@@ -1,0 +1,280 @@
+{
+  "as_of_ms": 1792943630000,
+  "rule": {
+    "cadence": 1,
+    "expected_after_ms": 500000,
+    "lag_threshold_ms": 60000
+  },
+  "scope": "stored_series",
+  "status": "degraded",
+  "series_count": 40,
+  "current": 10,
+  "due": 5,
+  "stale": 24,
+  "unjudged_series": 1,
+  "conflicted_series": 2,
+  "behind": [
+    {
+      "venue": "binance-usdm",
+      "symbol": "P002/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792939200000,
+      "lag_slots": 13,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P006/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792939200000,
+      "lag_slots": 13,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P012/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792939200000,
+      "lag_slots": 13,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P016/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792939200000,
+      "lag_slots": 13,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P028/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792939200000,
+      "lag_slots": 13,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P035/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792939200000,
+      "lag_slots": 13,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P008/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792940700000,
+      "lag_slots": 8,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P017/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792940700000,
+      "lag_slots": 8,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P021/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792940700000,
+      "lag_slots": 8,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P031/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792940700000,
+      "lag_slots": 8,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P005/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792941600000,
+      "lag_slots": 5,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P010/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792941600000,
+      "lag_slots": 5,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P014/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792941600000,
+      "lag_slots": 5,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P015/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792941600000,
+      "lag_slots": 5,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P019/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792941600000,
+      "lag_slots": 5,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P022/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792941600000,
+      "lag_slots": 5,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P024/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792941600000,
+      "lag_slots": 5,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P026/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792941600000,
+      "lag_slots": 5,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P034/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792942200000,
+      "lag_slots": 3,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P037/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792942200000,
+      "lag_slots": 3,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P003/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792942500000,
+      "lag_slots": 2,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P023/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792942500000,
+      "lag_slots": 2,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P032/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792942500000,
+      "lag_slots": 2,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P033/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792942500000,
+      "lag_slots": 2,
+      "state": "stale",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P004/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792942800000,
+      "lag_slots": 1,
+      "state": "due",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P007/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792942800000,
+      "lag_slots": 1,
+      "state": "due",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P018/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792942800000,
+      "lag_slots": 1,
+      "state": "due",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P025/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792942800000,
+      "lag_slots": 1,
+      "state": "due",
+      "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "P027/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792942800000,
+      "lag_slots": 1,
+      "state": "due",
+      "configured": true
+    }
+  ],
+  "truncated": false
+}

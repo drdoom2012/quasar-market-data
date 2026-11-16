@@ -9,7 +9,8 @@ path is ``404 not_found`` and a trailing slash is a different path. SQLite runs 
 import json
 import logging
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 from uuid import uuid4
@@ -108,12 +109,14 @@ def create_app(
     *,
     rule: ExpectationRule,
     universe: Sequence[Instrument],
+    open_interest_symbols: frozenset[tuple[str, str]],
     open_interest: OpenInterestRule | None = None,
     funding_rate: FundingRateRule | None = None,
     open_connection: ConnectionFactory = open_reader,
     now_ms: Callable[[], int] = system_now_ms,
 ) -> FastAPI:
     universe = tuple(sorted(universe))  # the configured instruments, held for the endpoints that report them
+    open_interest_symbols = frozenset(open_interest_symbols)  # ADR-0003 A-6: required, empty when not enabled
     rule = checked_rule(rule.publication_delay_ms, rule.lag_threshold_ms)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, redirect_slashes=False)
 
@@ -223,6 +226,7 @@ def create_app(
                     as_of_ms,
                     rule,
                     universe,
+                    open_interest_symbols,
                     open_interest,
                     snapshot.open_interest,
                     funding_rate,
@@ -234,7 +238,9 @@ def create_app(
             stored, readability = await run_in_threadpool(
                 read_ingest, db_path, as_of_ms=as_of_ms, open_connection=open_connection
             )
-            return _json(200, _ingest_body(stored, as_of_ms, rule, universe, readability=readability))
+            return _json(
+                200, _ingest_body(stored, as_of_ms, rule, universe, open_interest_symbols, readability=readability)
+            )
         (stored, facts), readability = await run_in_threadpool(
             read_ingest_open_interest,
             db_path,
@@ -242,7 +248,12 @@ def create_app(
             as_of_ms=as_of_ms,
             open_connection=open_connection,
         )
-        return _json(200, _ingest_body(stored, as_of_ms, rule, universe, open_interest, facts, readability=readability))
+        return _json(
+            200,
+            _ingest_body(
+                stored, as_of_ms, rule, universe, open_interest_symbols, open_interest, facts, readability=readability
+            ),
+        )
 
     @app.exception_handler(ApiError)
     async def api_error(request: Request, exc: ApiError) -> Response:
@@ -557,6 +568,7 @@ def _ingest_body(
     as_of_ms: int,
     rule: ExpectationRule,
     universe: Sequence[Instrument],
+    open_interest_symbols: frozenset[tuple[str, str]],
     open_interest: OpenInterestRule | None = None,
     facts: OpenInterestFacts | None = None,
     funding_rate: FundingRateRule | None = None,
@@ -632,7 +644,7 @@ def _ingest_body(
         },
         "open_interest": None
         if open_interest is None or facts is None
-        else _open_interest_health(facts, as_of_ms, open_interest, universe),
+        else _open_interest_health(facts, as_of_ms, open_interest, open_interest_symbols),
         "funding_rate": None
         if funding_rate is None or funding_facts is None
         else _funding_rate_health(funding_facts, as_of_ms, funding_rate),
@@ -699,34 +711,60 @@ def _funding_rate_health(facts: FundingRateFacts, as_of_ms: int, rule: FundingRa
     }
 
 
-def _open_interest_health(
-    facts: OpenInterestFacts, as_of_ms: int, rule: OpenInterestRule, universe: Sequence[Instrument]
-) -> dict[str, object]:
-    """The ``open_interest`` object of contract 6.5.8; a series it cannot judge is counted, never a ``500`` (OA9)."""
-    configured = {(item.venue, item.symbol) for item in universe}
+@dataclass(frozen=True)
+class _JudgedOpenInterest:
+    """One stored series judged once per answer; ``state`` is ``None`` when it cannot be judged (OA9)."""
+
+    series: StoredOpenInterestSeries
+    state: Freshness | None
+    lag_slots: int
+
+
+@dataclass(frozen=True)
+class _OpenInterestTally:
+    status: str
+    series_count: int
+    current: int
+    due: int
+    stale: int
+    unjudged_series: int
+    conflicted_series: int
+    non_current: tuple[_JudgedOpenInterest, ...]  # in the ``behind`` order, complete
+
+
+def _judge_open_interest(facts: OpenInterestFacts, as_of_ms: int, rule: OpenInterestRule) -> list[_JudgedOpenInterest]:
     step = rule.period.milliseconds
-    counts = dict.fromkeys(Freshness, 0)
-    unjudged = 0
-    non_current: list[tuple[StoredOpenInterestSeries, Freshness, int]] = []
+    judged: list[_JudgedOpenInterest] = []
     for series in facts.series:
         if series.period != rule.period.label or series.newest_time_ms % step:
-            unjudged += 1
+            judged.append(_JudgedOpenInterest(series, None, 0))
             continue
-        judged = open_interest_freshness(series.newest_time_ms, as_of_ms, rule)
-        counts[judged.state] += 1
-        if judged.state is not Freshness.CURRENT:
-            non_current.append((series, judged.state, judged.lag_slots))
-    non_current.sort(
+        freshness = open_interest_freshness(series.newest_time_ms, as_of_ms, rule)
+        judged.append(_JudgedOpenInterest(series, freshness.state, freshness.lag_slots))
+    return judged
+
+
+def _tally_open_interest(judged: Sequence[_JudgedOpenInterest], conflicted_series: int) -> _OpenInterestTally:
+    """The counts, the ``status`` precedence and the ``behind`` order of 6.5.8, shared by the outer object and
+    ``collected`` so that the two cannot diverge (ADR-0003 A-6)."""
+    counts = dict.fromkeys(Freshness, 0)
+    unjudged = 0
+    for item in judged:
+        if item.state is None:
+            unjudged += 1
+        else:
+            counts[item.state] += 1
+    non_current = sorted(
+        (item for item in judged if item.state is not None and item.state is not Freshness.CURRENT),
         key=lambda item: (
-            item[1] is not Freshness.STALE,
-            -item[2],
-            item[0].venue,
-            item[0].symbol,
-            item[0].period,
-        )
+            item.state is not Freshness.STALE,
+            -item.lag_slots,
+            item.series.venue,
+            item.series.symbol,
+            item.series.period,
+        ),
     )
-    conflicted_series = len(facts.conflicted)
-    if not facts.series:
+    if not judged:
         status = "no_series"
     elif conflicted_series or unjudged:
         status = "degraded"
@@ -736,6 +774,58 @@ def _open_interest_health(
         status = "catching_up"
     else:
         status = "current"
+    return _OpenInterestTally(
+        status=status,
+        series_count=len(judged),
+        current=counts[Freshness.CURRENT],
+        due=counts[Freshness.DUE],
+        stale=counts[Freshness.STALE],
+        unjudged_series=unjudged,
+        conflicted_series=conflicted_series,
+        non_current=tuple(non_current),
+    )
+
+
+def _open_interest_tally_fields(
+    tally: _OpenInterestTally, open_interest_symbols: Collection[tuple[str, str]]
+) -> dict[str, object]:
+    """``status`` through ``truncated``, in the contract's key order."""
+    return {
+        "status": tally.status,
+        "series_count": tally.series_count,
+        "current": tally.current,
+        "due": tally.due,
+        "stale": tally.stale,
+        "unjudged_series": tally.unjudged_series,
+        "conflicted_series": tally.conflicted_series,
+        "behind": [
+            {
+                "venue": item.series.venue,
+                "symbol": item.series.symbol,
+                "period": item.series.period,
+                "newest_time_ms": item.series.newest_time_ms,
+                "lag_slots": item.lag_slots,
+                "state": item.state.value if item.state is not None else None,
+                "configured": (item.series.venue, item.series.symbol) in open_interest_symbols,
+            }
+            for item in tally.non_current[:HEALTH_BEHIND_MAX]
+        ],
+        "truncated": len(tally.non_current) > HEALTH_BEHIND_MAX,
+    }
+
+
+def _open_interest_health(
+    facts: OpenInterestFacts,
+    as_of_ms: int,
+    rule: OpenInterestRule,
+    open_interest_symbols: frozenset[tuple[str, str]],
+) -> dict[str, object]:
+    """The ``open_interest`` object of contract 6.5.8; a series it cannot judge is counted, never a ``500`` (OA9).
+
+    ``configured`` is membership of ``(venue, symbol)`` in the open interest symbols of the file, with no period
+    check: a series of another period is unjudged and never reaches ``behind`` (ADR-0003 A-6, spec section 3).
+    """
+    judged = _judge_open_interest(facts, as_of_ms, rule)
     return {
         "as_of_ms": as_of_ms,
         "rule": {
@@ -744,26 +834,36 @@ def _open_interest_health(
             "lag_threshold_ms": rule.lag_threshold_ms,
         },
         "scope": "stored_series",
-        "status": status,
-        "series_count": len(facts.series),
-        "current": counts[Freshness.CURRENT],
-        "due": counts[Freshness.DUE],
-        "stale": counts[Freshness.STALE],
-        "unjudged_series": unjudged,
-        "conflicted_series": conflicted_series,
-        "behind": [
-            {
-                "venue": series.venue,
-                "symbol": series.symbol,
-                "period": series.period,
-                "newest_time_ms": series.newest_time_ms,
-                "lag_slots": lag_slots,
-                "state": state.value,
-                "configured": (series.venue, series.symbol) in configured,
-            }
-            for series, state, lag_slots in non_current[:HEALTH_BEHIND_MAX]
-        ],
-        "truncated": len(non_current) > HEALTH_BEHIND_MAX,
+        **_open_interest_tally_fields(_tally_open_interest(judged, len(facts.conflicted)), open_interest_symbols),
+        "collected": _open_interest_collected(judged, facts, rule, open_interest_symbols),  # the last key (A-6)
+    }
+
+
+def _open_interest_collected(
+    judged: Sequence[_JudgedOpenInterest],
+    facts: OpenInterestFacts,
+    rule: OpenInterestRule,
+    open_interest_symbols: frozenset[tuple[str, str]],
+) -> dict[str, object]:
+    """The ``collected`` object of 6.5.8: the same judgment over the series ``(venue, symbol, configured period)``
+    of the open interest symbols of the file, from the same facts (no second read)."""
+    period = rule.period.label
+    listed = [
+        item
+        for item in judged
+        if item.series.period == period and (item.series.venue, item.series.symbol) in open_interest_symbols
+    ]
+    conflicted = sum(
+        1
+        for venue, symbol, series_period in facts.conflicted
+        if series_period == period and (venue, symbol) in open_interest_symbols
+    )
+    stored = {(item.series.venue, item.series.symbol) for item in listed}
+    return {
+        "scope": "open_interest_symbols",
+        "symbol_count": len(open_interest_symbols),
+        "never_stored": len(open_interest_symbols - stored),
+        **_open_interest_tally_fields(_tally_open_interest(listed, conflicted), open_interest_symbols),
     }
 
 

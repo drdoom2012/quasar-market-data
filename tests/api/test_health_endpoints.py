@@ -34,6 +34,7 @@ def x_of(newest: int) -> int:
 def client_for(path: Path, now: int | Callable[[], int] = 0, **kwargs: Any) -> TestClient:
     kwargs.setdefault("rule", SAMPLE_RULE)
     kwargs.setdefault("universe", SAMPLE_UNIVERSE)
+    kwargs.setdefault("open_interest_symbols", frozenset())  # open interest is off unless a test enables it
     now_ms = now if callable(now) else (lambda: now)
     return TestClient(create_app(path, now_ms=now_ms, **kwargs), raise_server_exceptions=False)
 

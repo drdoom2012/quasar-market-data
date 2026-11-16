@@ -48,6 +48,7 @@ def client_for(path: Path, now: int | Callable[[], int] = NOW, **kwargs: Any) ->
     kwargs.setdefault("rule", SAMPLE_RULE)
     kwargs.setdefault("universe", SAMPLE_UNIVERSE)
     kwargs.setdefault("funding_rate", RULE)
+    kwargs.setdefault("open_interest_symbols", frozenset())  # open interest is off
     now_ms = now if callable(now) else (lambda: now)
     return TestClient(create_app(path, now_ms=now_ms, **kwargs), raise_server_exceptions=False)
 

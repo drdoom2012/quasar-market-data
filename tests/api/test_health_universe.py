@@ -75,7 +75,9 @@ MISSING_60 = tuple(inst(f"M{i:03d}/USDT:USDT") for i in range(60))
 
 def client(path: Path, universe: Sequence[Instrument], as_of: int = AS_OF, **kwargs: Any) -> TestClient:
     return TestClient(
-        create_app(path, rule=SAMPLE_RULE, universe=universe, now_ms=lambda: as_of, **kwargs),
+        create_app(
+            path, rule=SAMPLE_RULE, universe=universe, open_interest_symbols=frozenset(), now_ms=lambda: as_of, **kwargs
+        ),
         raise_server_exceptions=False,
     )
 

@@ -148,6 +148,7 @@ def test_the_api_package_has_no_violations() -> None:
 
 FUNDING_RULE = FundingRateRule(publication_delay_ms=30_000, backfill_days=1)
 OI_RULE = OpenInterestRule(cadence=1, expected_after_ms=500_000, lag_threshold_ms=60_000, period=Timeframe("5m"))
+OI_SYMBOLS = frozenset((item.venue, item.symbol) for item in SAMPLE_UNIVERSE)  # symbols = "all"
 OI_Q = f"venue=binance-usdm&symbol=BTC/USDT:USDT&period=5m&start={S}"
 
 
@@ -193,6 +194,7 @@ def test_every_statement_the_api_issues_is_read_only(tmp_path: Path) -> None:
                 path,
                 rule=SAMPLE_RULE,
                 universe=SAMPLE_UNIVERSE,
+                open_interest_symbols=OI_SYMBOLS,
                 open_interest=OI_RULE,
                 funding_rate=FUNDING_RULE,
                 open_connection=traced,
@@ -225,7 +227,12 @@ def test_the_main_database_file_is_unchanged_by_requests(tmp_path: Path) -> None
     _exercise(
         TestClient(
             create_app(
-                path, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE, open_interest=OI_RULE, funding_rate=FUNDING_RULE
+                path,
+                rule=SAMPLE_RULE,
+                universe=SAMPLE_UNIVERSE,
+                open_interest_symbols=OI_SYMBOLS,
+                open_interest=OI_RULE,
+                funding_rate=FUNDING_RULE,
             ),
             raise_server_exceptions=False,
         )
@@ -255,7 +262,8 @@ def test_a_write_through_the_apps_default_connection_fails(tmp_path: Path, monke
     monkeypatch.setattr("quasar_market_data.api.database.read_candles_page", writes)
 
     response = TestClient(
-        create_app(path, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE), raise_server_exceptions=False
+        create_app(path, rule=SAMPLE_RULE, universe=SAMPLE_UNIVERSE, open_interest_symbols=frozenset()),
+        raise_server_exceptions=False,
     ).get(f"/v1/candles?{Q}")
 
     assert attempts

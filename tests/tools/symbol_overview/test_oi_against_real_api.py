@@ -50,7 +50,16 @@ def universe() -> list[Instrument]:
 
 @contextmanager
 def serve(db_path: Path, *, open_interest: OpenInterestRule | None) -> Iterator[str]:
-    app = create_app(db_path, rule=SAMPLE_RULE, universe=universe(), now_ms=lambda: AT, open_interest=open_interest)
+    app = create_app(
+        db_path,
+        rule=SAMPLE_RULE,
+        universe=universe(),
+        open_interest_symbols=frozenset()
+        if open_interest is None
+        else frozenset((item.venue, item.symbol) for item in universe()),  # symbols = "all"
+        now_ms=lambda: AT,
+        open_interest=open_interest,
+    )
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()

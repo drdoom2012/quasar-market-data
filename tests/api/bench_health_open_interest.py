@@ -101,6 +101,9 @@ def handler_ms(
         path,
         rule=SAMPLE_RULE,
         universe=universe,
+        open_interest_symbols=frozenset((item.venue, item.symbol) for item in universe)  # symbols = "all"
+        if open_interest is not None
+        else frozenset(),
         open_interest=open_interest,
         funding_rate=funding_rate,
         now_ms=lambda: now,
@@ -129,6 +132,7 @@ def main() -> int:
                 db,
                 rule=SAMPLE_RULE,
                 universe=(),
+                open_interest_symbols=frozenset(),  # as the pre-A-6 bench: configured from an empty universe
                 open_interest=RULE,
                 funding_rate=FUNDING_RULE,
                 now_ms=lambda: BASE_MS + (ROWS + 2) * TF_MS,

@@ -292,7 +292,11 @@ def run(
         query = f"venue={VENUE}&symbol={symbol_name(0)}&timeframe=5m&start={start}&end={end}&indicators={indicators}"
         request = parse_indicators_request(query.encode("ascii"))
         read_start = min(read_start_ms(start, spec.warmup_slots, TF_MS) for spec in request.indicators)
-        client = TestClient(create_app(db, now_ms=lambda: as_of_ms, rule=rule, universe=SAMPLE_UNIVERSE))
+        client = TestClient(
+            create_app(
+                db, now_ms=lambda: as_of_ms, rule=rule, universe=SAMPLE_UNIVERSE, open_interest_symbols=frozenset()
+            )
+        )
 
         times: dict[str, list[float]] = {phase: [] for phase in PHASES}
         body_bytes = 0

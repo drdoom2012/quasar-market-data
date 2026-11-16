@@ -250,6 +250,37 @@ def test_serve_passes_the_open_interest_rule_of_the_file_to_the_app(
     assert seen == [expected]
 
 
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [
+        (None, frozenset()),
+        (OPEN_INTEREST_TABLE.format(enabled="false"), frozenset()),
+        (OPEN_INTEREST_TABLE.format(enabled="true"), frozenset({("binance-usdm", "ETH/USDT:USDT")})),
+    ],
+)
+def test_serve_passes_the_open_interest_symbols_of_the_file_to_the_app(
+    tmp_path: Path, run_calls: RunCalls, monkeypatch: pytest.MonkeyPatch, table: str | None, expected: object
+) -> None:
+    """ADR-0003 A-6: the listed symbols, not the venue's; an empty set when open interest is not enabled."""
+    cfg = write_config(tmp_path, database_path="m.db")
+    if table is not None:
+        cfg.write_text(
+            cfg.read_text(encoding="utf-8") + table.replace('symbols = "all"', 'symbols = ["ETH/USDT:USDT"]'),
+            encoding="utf-8",
+        )
+    seen: list[Any] = []
+
+    def recorder(db_path: Path, **kwargs: Any) -> str:
+        seen.append(kwargs["open_interest_symbols"])
+        return "app"
+
+    monkeypatch.setattr(cli, "create_app", recorder)
+
+    assert cli.main(["serve", str(cfg)]) == 0
+
+    assert seen == [expected]
+
+
 FUNDING_RATE_TABLE = (
     "\n[funding_rate]\nenabled = {enabled}\npublication_delay_ms = 45000\nround_offset_ms = 60000\n"
     "budget_per_5min = 150\nbackfill_days = 20\nrecheck_ms = 86400000\n"
