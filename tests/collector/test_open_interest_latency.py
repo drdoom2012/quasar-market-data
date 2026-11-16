@@ -4,13 +4,15 @@ Every test is a simulation on a fake clock: a measurement of the code on a model
 runs the real ``OpenInterestTask`` with the real ``OpenInterestBudget`` (every start counted in the source) at
 ``S = 200``, ``b = 400`` (``c = 1``, ``n = 200``, reserve 50, round cost 252, backfill share 148),
 ``round_offset_ms = 200 000``. A successful round request holds its slot 480 ms (``round_delay_ms``); a failing one
-holds it 480 ms plus ``fail_delay_ms``. The writer is the recording fake of the round tests: its stamp is the fake wall
+holds it 480 ms plus ``fail_delay_ms``: a fast failure 500 ms in all (the spec's ``f ~ 0.5 s`` is the whole slot time),
+a slow one 10.48 s (CCXT's 10 s timeout after the 480 ms the fake always takes). A retry queues behind every first
+attempt of the round, so only first-attempt failures delay the last symbol. The writer is the recording fake of the round tests: its stamp is the fake wall
 clock at the write. "Readable" is that stamp plus ``READABLE_BOUND_MS``. ``e`` is the period end of the measured row;
 R1 asks for it readable by ``e + 600 s``.
 
 Unless a test needs holes, the database holds every slot of the 1-day horizon up to ``e - 5 min``, so the backfill has
-nothing to do in the first idle window (an ideal steady state; the recording writer stores nothing in the database). The late path publishes the last symbol in sorted order between
-``e + 260 s`` and ``e + 490 s``: after its own request in the round of ``e``, before the next round.
+nothing to do in the first idle window (an ideal steady state; the recording writer stores nothing in the database).
+The late path publishes the last symbol in sorted order between ``e + 260 s`` and ``e + 490 s``: after its own request in the round of ``e``, before the next round.
 """
 
 import asyncio
@@ -33,7 +35,7 @@ SYMBOLS = symbols_of(200)
 LAST = SYMBOLS[-1]  # the last symbol in sorted order: its request is the round's last
 OFFSET_MS = 200_000
 ROUND_DELAY_MS = 480  # a successful round request: the measured 4.2 symbols/s at 2 slots
-FAST_FAIL_MS = 500
+FAST_FAIL_MS = 20  # with the 480 ms of every round request: f ~ 0.5 s of slot time (A-6 ruling 10)
 SLOW_FAIL_MS = 10_000  # CCXT's default timeout (D-6: no timeout set in A-6)
 LATE_PUBLICATION_S = 300  # inside [e + 260 s, e + 490 s]
 START_WALL = ManualTime().wall_ms()
@@ -167,23 +169,120 @@ def test_ideal_late_readable_by_550_s(tmp_path: Path, steady_db: Path) -> None:
 # ---- request failures -------------------------------------------------------------------------------------------
 
 
-def test_five_slow_failures_keep_the_late_path_by_600_s(tmp_path: Path, steady_db: Path) -> None:
-    """F = 5 slow failures (10 s) in the round that serves the late path: met (p' ~ 97 s), readable by e + 600 s.
+@pytest.mark.parametrize("failures", [60, 200])
+def test_fast_failures_any_count_readable_by_265_and_565_s(tmp_path: Path, steady_db: Path, failures: int) -> None:
+    """F fast failures (f ~ 0.5 s), reserve exhausted or not: every row a round stores, retries included, is readable
+    by e + 265 s on the early path; the late-published last symbol by e + 565 s.
+
+    The first F symbols in sorted order fail their first attempt in both rounds. With F = 200 the last symbol fails
+    too and gets no ticket in either round, so its late row is not stored by the next round (the exhausted lines).
 
     Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
     """
 
     async def scenario() -> None:
         rig = await shipped_rig(tmp_path, steady_db)
+        rig.source.fail_symbols = set(SYMBOLS[:failures])
+        rig.source.fail_delay_ms = FAST_FAIL_MS
         publish_last_late(rig)
         rig.start()
         await until_rounds(rig, 1)
-        rig.source.fail_symbols = set(SYMBOLS[:5])
-        rig.source.fail_delay_ms = SLOW_FAIL_MS
+        early = latest_readable_s(rig)
+        report(f"F = {failures} fast, early (latest stored row)", early)
+        assert early <= 265
         await until_rounds(rig, 2)
-        value = readable_s(rig, LAST)
-        report("F = 5 slow, late", value)
+        late = readable_s(rig, LAST)
+        report(f"F = {failures} fast, late (last symbol)", late)
+        if failures < len(SYMBOLS):
+            assert late is not None and late <= 565
+        else:
+            assert late is None
+            assert any(LAST in line for line in rig.lines_with("oi-warning symbol-not-retried"))
+        await finish(rig)
+
+    run(scenario)
+
+
+async def slow_failures_on_the_late_path(tmp_path: Path, steady: Path, failures: int) -> float | None:
+    """A healthy round of e, then F slow first-attempt failures in the round that serves the late path."""
+    rig = await shipped_rig(tmp_path, steady)
+    publish_last_late(rig)
+    rig.start()
+    await until_rounds(rig, 1)
+    rig.source.fail_symbols = set(SYMBOLS[:failures])
+    rig.source.fail_delay_ms = SLOW_FAIL_MS
+    await until_rounds(rig, 2)
+    value = readable_s(rig, LAST)
+    report(f"F = {failures} slow, late", value)
+    await finish(rig)
+    return value
+
+
+def test_five_slow_failures_keep_the_late_path_by_600_s(tmp_path: Path, steady_db: Path) -> None:
+    """F = 5 slow failures (10 s) in the round that serves the late path: met (p' ~ 72 s estimated), by e + 600 s.
+
+    Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
+    """
+
+    async def scenario() -> None:
+        value = await slow_failures_on_the_late_path(tmp_path, steady_db, 5)
         assert value is not None and value <= 600
+
+    run(scenario)
+
+
+def test_ten_slow_failures_keep_the_late_path_at_the_edge_by_600_s(tmp_path: Path, steady_db: Path) -> None:
+    """F = 10 slow failures (10 s): the threshold, met at the edge (p' ~ 96 s estimated), readable by e + 600 s.
+
+    Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
+    """
+
+    async def scenario() -> None:
+        value = await slow_failures_on_the_late_path(tmp_path, steady_db, 10)
+        assert value is not None and value <= 600
+
+    run(scenario)
+
+
+def test_eleven_slow_failures_miss_the_late_path(tmp_path: Path, steady_db: Path) -> None:
+    """F = 11 slow failures (10 s), one above the threshold: missed (p' ~ 100 s estimated), readable after e + 600 s.
+
+    Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
+    """
+
+    async def scenario() -> None:
+        value = await slow_failures_on_the_late_path(tmp_path, steady_db, 11)
+        assert value is not None and 600 < value <= 660
+
+    run(scenario)
+
+
+@pytest.mark.parametrize(("failures", "deadline_first"), [(47, False), (48, True)])
+def test_slow_failures_before_the_last_symbol_reach_the_deadline_from_48(
+    tmp_path: Path, steady_db: Path, failures: int, deadline_first: bool
+) -> None:
+    """The edge of the deadline line, f = 10 s: with 47 slow first-attempt failures the last symbol's first attempt
+    still ends inside the round deadline (285 s after the wake); with 48 it does not and the symbol ends ``deadline``.
+
+    Estimated with f = 10 s: up to F = 49 inside. The fake holds a slow failure 10.48 s, which moves the edge to 48.
+
+    Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
+    """
+
+    async def scenario() -> None:
+        rig = await shipped_rig(tmp_path, steady_db)
+        rig.source.fail_symbols = set(SYMBOLS[:failures])
+        rig.source.fail_delay_ms = SLOW_FAIL_MS
+        rig.start()
+        await until_rounds(rig, 1)
+        value = readable_s(rig, LAST)
+        report(f"F = {failures} slow, early, round of e", value)
+        warning = rig.lines_with("oi-warning round-deadline")
+        assert len(warning) == 1  # the retries reach the deadline in both cases
+        if deadline_first:
+            assert value is None and f"{LAST}:" in warning[0]
+        else:
+            assert value is not None and value <= 200 + 285 + 2 and f"{LAST}:" not in warning[0]
         await finish(rig)
 
     run(scenario)
@@ -306,6 +405,23 @@ def test_saturated_backfill_after_an_on_pace_round_readable_by_567_s(tmp_path: P
     run(scenario)
 
 
+async def late_round_on_the_late_path(tmp_path: Path, steady: Path, late_s: int) -> float | None:
+    """A healthy round of e, then the round that serves the late path woken ``late_s`` late."""
+    rig = await shipped_rig(tmp_path, steady)
+    publish_last_late(rig)
+    rig.start()
+    await until_rounds(rig, 1)
+    wake = E + STEP + OFFSET_MS
+    await rig.t.advance(wake - 1_000 - rig.t.wall_ms())  # the idle window is over, the task sleeps until the wake
+    await rig.t.advance(1_000 + late_s * 1_000, late=True)  # the wake-up comes late_s late
+    await until_rounds(rig, 2)
+    assert f"late_ms={late_s * 1_000}" in rig.lines_with("oi-round")[1]
+    value = readable_s(rig, LAST)
+    report(f"round {late_s} s late, late path", value)
+    await finish(rig)
+    return value
+
+
 def test_storing_round_starting_30_s_late_readable_by_600_s(tmp_path: Path, steady_db: Path) -> None:
     """The round that serves the late path starts 30 s late (the observed host stall): p ~ 78 s, readable by e + 600 s.
 
@@ -313,19 +429,23 @@ def test_storing_round_starting_30_s_late_readable_by_600_s(tmp_path: Path, stea
     """
 
     async def scenario() -> None:
-        rig = await shipped_rig(tmp_path, steady_db)
-        publish_last_late(rig)
-        rig.start()
-        await until_rounds(rig, 1)
-        wake = E + STEP + OFFSET_MS
-        await rig.t.advance(wake - 1_000 - rig.t.wall_ms())  # the idle window is over, the task sleeps until the wake
-        await rig.t.advance(31_000, late=True)  # the wake-up comes 30 s late
-        await until_rounds(rig, 2)
-        assert "late_ms=30000" in rig.lines_with("oi-round")[1]
-        value = readable_s(rig, LAST)
-        report("round 30 s late, late path", value)
+        value = await late_round_on_the_late_path(tmp_path, steady_db, 30)
         assert value is not None and value <= 600
-        await finish(rig)
+
+    run(scenario)
+
+
+@pytest.mark.parametrize(("late_s", "met"), [(50, True), (51, False)])
+def test_late_start_limit_is_50_s(tmp_path: Path, steady_db: Path, late_s: int, met: bool) -> None:
+    """The edge of the late-start line: a round 50 s late still stores the late row by e + 600 s, 51 s late misses.
+
+    Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
+    """
+
+    async def scenario() -> None:
+        value = await late_round_on_the_late_path(tmp_path, steady_db, late_s)
+        assert value is not None
+        assert (value <= 600) is met
 
     run(scenario)
 

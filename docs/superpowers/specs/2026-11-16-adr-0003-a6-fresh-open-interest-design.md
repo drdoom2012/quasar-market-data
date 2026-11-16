@@ -250,10 +250,16 @@ share 148. R1 bound: row of period end `e` readable by `e + 600 s`. "Readable" i
 successful request holds an in-flight slot for 0.48 s (the measured 4.2 symbols/s at 2 slots); a failed request holds
 it for `f`. Every attempt, retry included, runs inside the round's semaphore. The adapter sets no CCXT timeout, so a
 timed-out request holds its slot for CCXT's default `f = 10 s` (`ccxt.async_support.binanceusdm().timeout = 10000`).
-A connection refusal or an HTTP error answer is fast (`f ≈ 0.5 s`). With `F` failing first attempts, `r = min(F, 50)`
-retries, all slow in the worst case, the last symbol's position is about
+A connection refusal or an HTTP error answer is fast (`f ≈ 0.5 s`). With `F` failing first attempts and
+`r = min(F, 50)` retries, a retry waits `RETRY_DELAY_MS` and then queues behind every first attempt of the round
+(all `n` first attempts queue on the semaphore when the round starts, and it serves them in order), so only the
+failing first attempts delay the last symbol. Its position is about
 
-`p(F, f) ≈ ((n − F) × 0.48 s + (F + r) × f) / 2`, capped by the round deadline (285 s after the wake).
+`p(F, f) ≈ ((n − F) × 0.48 s + F × f) / 2`, capped by the round deadline (285 s after the wake).
+
+The retries run after it, still within the deadline: a row stored by a successful retry is at about
+`p(F, f) + r × 0.48 s / 2`. (Correction of 2026-11-16, found by the simulation: the first estimate counted the
+`r` retries before the last symbol, `((n − F) × 0.48 s + (F + r) × f) / 2`.)
 
 There are two paths. A row published **before** its symbol's request in round `B` is readable by `e + 200 s + p + 2 s`.
 A row published **after** it (≈ 1.8 % measured) is readable by `e + 500 s + p' + 2 s`, where `p'` is the position in
@@ -262,19 +268,28 @@ the next round. R1 therefore needs `p ≤ 396 s` on the first path, which always
 
 | Scenario | Stored-and-readable by | R1 |
 |---|---|---|
-| Ideal, published before the request (`p ≤ 48 s`) | ≤ `e + 250 s` | met |
-| Ideal, published after the request | ≤ `e + 550 s` | met |
-| `F` fast failures (`f ≈ 0.5 s`), any `F ≤ 200`, reserve exhausted or not | `p ≤ 63 s`: ≤ `e + 265 s` / `e + 565 s` | met |
-| Slow failures in the round that serves the late path, `f = 10 s` (default timeout) | met while `F ≤ 5` (`p' ≈ 97 s`); `F = 10` gives `p' ≈ 146 s`, `e + 648 s` | **missed** for late-published rows of symbols after the failures in sorted order; early rows met |
-| Same with `f = 3 s` (only if D-6 sets a timeout) | met while `F ≤ 18` | missed above |
-| Slow failures, `F ≥ 60` at `f = 10 s` | the round reaches its deadline; unfinished symbols end `deadline`, their rows come from the next round (`e + 500 s + p'`) | early rows met if the next round is healthy; late rows missed |
-| Reserve exhausted, the unretried symbol's next request succeeds | its row comes from the next round (overlap `[B − 10 min, B]`): `e + 500 s + p'` | met while `p' ≤ 98 s` |
-| Exhausted, and the next request also fails | `e + 800 s + p` | **missed**, fail closed (`series_stale`) |
-| Limiter contention: backfill saturated, previous round on schedule **and on pace** (A-6 rule below) | our k-th start waits at most until the previous round's k-th start leaves the window: `p' ≤ 60 s + 5 s` | met (≤ `e + 567 s`) |
-| Previous round late (> 5 s) or slow (span above the pace limit) | the backfill gate counts that round in full and starts no page, so the round competes only with the previous round's own starts, which began 300 s earlier; a late start adds its own delay. Corner case: two consecutive fully retried rounds (252 + 252 > 400) can still make the second wait, as the late-round exception already can | met up to a late start of about 50 s (38 s with a full reserve of fast retries); the observed 30 s stall fits, the 80.6 s start after a restart misses |
-| The round's server-time call fails (round `untrusted`, nothing stored) | rows come from the next round | early rows met (`e + 550 s`); late rows missed |
+| Ideal, published before the request (`p ≤ 48 s`) | ≤ `e + 250 s`; *simulated (fake clock)*: `e + 250.0 s` | met (zero margin in the simulation) |
+| Ideal, published after the request | ≤ `e + 550 s`; *simulated (fake clock)*: `e + 550.0 s` | met (zero margin in the simulation) |
+| `F` fast failures (`f ≈ 0.5 s` of slot time), any `F ≤ 200`, reserve exhausted or not | last symbol `p ≤ 50 s`, every row the round stores (retries included) `p ≤ 63 s`: ≤ `e + 265 s` / `e + 565 s`; *simulated (fake clock)*: `F = 60` latest stored row `e + 262.6 s`, last symbol's late row `e + 550.6 s`; `F = 200` latest stored row `e + 264.0 s` (the last symbol, without a ticket, falls under the exhausted lines) | met |
+| Slow failures in the round that serves the late path, `f = 10 s` (default timeout) | `p' ≈ 48 s + F × 4.76 s`: met while `F ≤ 10` (`p' ≈ 96 s`, `e + 598 s`); `F = 11` gives `p' ≈ 100 s`, `e + 602 s`; *simulated (fake clock)* (a slow failure holds its slot 10.48 s in the fake): `F = 5` `e + 575.2 s`, `F = 10` `e + 600.0 s`, `F = 11` `e + 605.2 s` | met while `F ≤ 10`, at the edge for `F = 10` (simulated `e + 600.0 s`); **missed** from `F = 11` for late-published rows of symbols after the failures in sorted order; early rows met |
+| Same with `f = 3 s` (only if a timeout were set; D-6 sets none) | `p' ≈ 48 s + F × 1.26 s`: met while `F ≤ 39` (`p' ≈ 97 s`); not simulated | missed above |
+| Slow failures, `F ≥ 50` at `f = 10 s` | the last symbol's first attempt ends after the round deadline (`p ≈ 48 s + F × 4.76 s > 285 s`); unfinished symbols end `deadline`, their rows come from the next round (`e + 500 s + p'`). Below that, the retries can still reach the deadline after the last symbol; their rows also come from the next round. *simulated (fake clock)*: the edge is at `F = 48` (`F = 47`: last symbol readable by `e + 485.2 s`; `F = 48`: `deadline`), two lower than estimated because a slow failure holds 10.48 s in the fake; `F = 60`: the unfinished last symbol's early row `e + 550.0 s` from the next round | early rows met if the next round is healthy; late rows missed |
+| Reserve exhausted, the unretried symbol's next request succeeds | its row comes from the next round (overlap `[B − 10 min, B]`): `e + 500 s + p'`; *simulated (fake clock)*: `e + 550.0 s` | met while `p' ≤ 98 s` |
+| Exhausted, and the next request also fails | `e + 800 s + p`; *simulated (fake clock)*: `e + 850.0 s` | **missed**, fail closed (`series_stale`) |
+| Limiter contention: backfill saturated, previous round on schedule **and on pace** (A-6 rule below) | our k-th start waits at most until the previous round's k-th start leaves the window: `p' ≤ 60 s + 5 s`; *simulated (fake clock)*: `e + 550.0 s` (no start waited: the previous round's k-th start leaves the window as our k-th is due) | met (≤ `e + 567 s`) |
+| Previous round late (> 5 s) or slow (span above the pace limit) | the backfill gate counts that round in full and starts no page, so the round competes only with the previous round's own starts, which began 300 s earlier; a late start adds its own delay. Corner case: two consecutive fully retried rounds (252 + 252 > 400) can still make the second wait, as the late-round exception already can. A late start `L` gives `p' ≈ L + 48 s`; retries run after the last symbol and do not shorten the limit, fast first-attempt failures before it shorten it by at most 2 s. *simulated (fake clock)*: 30 s late `e + 580.0 s`, 50 s late `e + 600.0 s`, 51 s late `e + 601.0 s` | met up to a late start of 50 s; the observed 30 s stall fits, the 80.6 s start after a restart misses |
+| The round's server-time call fails (round `untrusted`, nothing stored) | rows come from the next round; *simulated (fake clock)*: early rows `e + 550.0 s` | early rows met (`e + 550 s`); late rows missed |
 | A `429` pause (≥ 300 s, shared with funding) | at least one round lost | **missed** for the pause; fail closed |
 | An open interest write waiting for candle writes while it holds its slot (`async_open_interest_writer.py`, P-9) | bounded only by the round deadline (e.g. candle backfill after a restart) | **not bounded** by A-6; missed when the wait is long |
+
+*Simulated (fake clock)* values come from `tests/collector/test_open_interest_latency.py` (A-6 Task 5): the real
+task and budget on a model of the network (a success holds its slot 0.48 s, a fast failure 0.5 s in all, a slow one
+10.48 s), not a measurement of Binance. The ideal lines are met with **zero margin** in the simulation (`e + 250.0 s`,
+`e + 550.0 s`): on the model both slots finish together. The simulation reads the stamp of the recording writer; the
+real writer keeps stamps unique (`max(wall, last + 1)`), which adds 1 ms per stamp that falls in the same millisecond
+as the previous one (`e + 250.001 s` and `e + 550.001 s` with the real writer on the same model). A threshold the
+correction moved is pinned by a pair of tests, one at it and one above it (`F = 10` / `11` at `f = 10 s`, the
+deadline edge `F = 47` / `48`, a late start of 50 s / 51 s).
 
 Health side effect: `expected_after_ms + lag_threshold_ms = 560 s`. A late-path row readable after `e + 560 s` (for
 example `e + 562 s` with retries) shows its series as `stale` in `/health/ingest` for those seconds. That is a
@@ -298,9 +313,10 @@ exception now also covers slow rounds.
 
 1. A deterministic simulation test on the fake clock (`tests/collector/test_open_interest_latency.py`). It runs the
    real `OpenInterestTask` and the real `OpenInterestBudget` (the rig counts the budget in the source), with a fake
-   source: 0.48 s per success, a separate duration per failure (0.5 s and 10 s), per-symbol failure scripts and
+   source: 0.48 s per success, a separate duration per failure (0.5 s and 10 s of slot time; 10.48 s in the fake for the slow one), per-symbol failure scripts and
    scripted publication times, at `S = 200`, `b = 400`. Each line of the table above gets a test asserting its bound
-   (or, for a "missed" line, that the row is absent before the stated time). The late path is exercised for the
+   (or, for a "missed" line, that the row is readable only after `e + 600 s`; a threshold is pinned by a
+met / missed pair). The late path is exercised for the
    **last** symbol in sorted order, with publication between `e + 260 s` and `e + 490 s`. It is a measurement of the
    code on a model of the network, labelled as such.
 2. After deployment, a soak measurement from production: `readable_by_ms − time_ms` per row over 24 h. It gives the
@@ -383,7 +399,7 @@ exception now also covers slow rounds.
   counter: `try_take_retry` returns `True` 50 times, then `False`, and never decrements; a new round starts at 0; a
   ticket taken by a retry cancelled at the deadline stays taken; `try_take_retry` is not a coroutine function
   (`inspect.iscoroutinefunction` is false), which pins that no `await` can enter it.
-- Latency simulation (2.6, verification 1): each line of the table, with its bound or its "absent before" assertion.
+- Latency simulation (2.6, verification 1): each line of the table, with its bound or, for a "missed" line, readable only after `e + 600 s`; a met / missed pair at each threshold.
 - Retry reserve: with `n = 200` and 60 injected request errors on chosen symbols, exactly 50 retries start and 10
   symbols end `retry_reserve_exhausted`; with 10 errors all 10 are retried; a `429` pause, a refusal and an absent row
   take no ticket; a write `busy` error takes one; the `oi-round` line reports `retry_reserve_exhausted=10`.
