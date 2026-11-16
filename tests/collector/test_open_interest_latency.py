@@ -4,15 +4,16 @@ Every test is a simulation on a fake clock: a measurement of the code on a model
 runs the real ``OpenInterestTask`` with the real ``OpenInterestBudget`` (every start counted in the source) at
 ``S = 200``, ``b = 400`` (``c = 1``, ``n = 200``, reserve 50, round cost 252, backfill share 148),
 ``round_offset_ms = 200 000``. A successful round request holds its slot 480 ms (``round_delay_ms``); a failing one
-holds it 480 ms plus ``fail_delay_ms``: a fast failure 500 ms in all (the spec's ``f ~ 0.5 s`` is the whole slot time),
-a slow one 10.48 s (CCXT's 10 s timeout after the 480 ms the fake always takes). A retry queues behind every first
-attempt of the round, so only first-attempt failures delay the last symbol. The writer is the recording fake of the round tests: its stamp is the fake wall
-clock at the write. "Readable" is that stamp plus ``READABLE_BOUND_MS``. ``e`` is the period end of the measured row;
+holds it 480 ms plus ``fail_delay_ms``, and the spec's ``f`` is that whole slot time: a fast failure 500 ms
+(``f ~ 0.5 s``), a slow one 10 s (``f = 10 s``, CCXT's default timeout). A retry queues behind every first attempt of
+the round, so only first-attempt failures delay the last symbol. The writer is the recording fake of the round tests:
+its stamp is the fake wall clock at the write. "Readable" is that stamp plus ``READABLE_BOUND_MS``. ``e`` is the period end of the measured row;
 R1 asks for it readable by ``e + 600 s``.
 
 Unless a test needs holes, the database holds every slot of the 1-day horizon up to ``e - 5 min``, so the backfill has
 nothing to do in the first idle window (an ideal steady state; the recording writer stores nothing in the database).
-The late path publishes the last symbol in sorted order between ``e + 260 s`` and ``e + 490 s``: after its own request in the round of ``e``, before the next round.
+The late path publishes the last symbol in sorted order between ``e + 260 s`` and ``e + 490 s``: after its own request
+in the round of ``e``, before the next round.
 """
 
 import asyncio
@@ -36,7 +37,7 @@ LAST = SYMBOLS[-1]  # the last symbol in sorted order: its request is the round'
 OFFSET_MS = 200_000
 ROUND_DELAY_MS = 480  # a successful round request: the measured 4.2 symbols/s at 2 slots
 FAST_FAIL_MS = 20  # with the 480 ms of every round request: f ~ 0.5 s of slot time (A-6 ruling 10)
-SLOW_FAIL_MS = 10_000  # CCXT's default timeout (D-6: no timeout set in A-6)
+SLOW_FAIL_MS = 9_520  # with the 480 ms of every round request: f = 10 s of slot time, CCXT's default timeout (D-6)
 LATE_PUBLICATION_S = 300  # inside [e + 260 s, e + 490 s]
 START_WALL = ManualTime().wall_ms()
 E = ((START_WALL - OFFSET_MS) // STEP + 1) * STEP  # the first round's boundary (the rig aligns to its wake)
@@ -129,6 +130,8 @@ def report(name: str, value: float | None) -> None:
 def test_ideal_early_readable_by_250_s(tmp_path: Path, steady_db: Path) -> None:
     """Ideal, published before the request (p <= 48 s): readable by e + 250 s.
 
+    Zero margin: on the model both slots finish together, at exactly e + 250.0 s (the documents say so).
+
     Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
     """
 
@@ -147,6 +150,8 @@ def test_ideal_early_readable_by_250_s(tmp_path: Path, steady_db: Path) -> None:
 
 def test_ideal_late_readable_by_550_s(tmp_path: Path, steady_db: Path) -> None:
     """Ideal, published after the request: readable by e + 550 s.
+
+    Zero margin: on the model the late row is readable at exactly e + 550.0 s (the documents say so).
 
     Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
     """
@@ -172,7 +177,8 @@ def test_ideal_late_readable_by_550_s(tmp_path: Path, steady_db: Path) -> None:
 @pytest.mark.parametrize("failures", [60, 200])
 def test_fast_failures_any_count_readable_by_265_and_565_s(tmp_path: Path, steady_db: Path, failures: int) -> None:
     """F fast failures (f ~ 0.5 s), reserve exhausted or not: every row a round stores, retries included, is readable
-    by e + 265 s on the early path; the late-published last symbol by e + 565 s.
+    by e + 265 s on the early path (e + 565 s on the late path). The late-published last symbol, whose request is
+    delayed by first-attempt failures only, is readable by e + 552 s (p' <= 50 s): retries do not delay it.
 
     The first F symbols in sorted order fail their first attempt in both rounds. With F = 200 the last symbol fails
     too and gets no ticket in either round, so its late row is not stored by the next round (the exhausted lines).
@@ -189,12 +195,16 @@ def test_fast_failures_any_count_readable_by_265_and_565_s(tmp_path: Path, stead
         await until_rounds(rig, 1)
         early = latest_readable_s(rig)
         report(f"F = {failures} fast, early (latest stored row)", early)
+        stored = sum(1 for symbol in SYMBOLS if readable_s(rig, symbol) is not None)
+        late_unpublished = 0 if LAST in rig.source.fail_symbols else 1  # the last symbol's row is published late
+        # every first-attempt success but the late-published last symbol, and the 50 retries
+        assert stored == len(SYMBOLS) - failures - late_unpublished + min(failures, 50)
         assert early <= 265
         await until_rounds(rig, 2)
         late = readable_s(rig, LAST)
         report(f"F = {failures} fast, late (last symbol)", late)
         if failures < len(SYMBOLS):
-            assert late is not None and late <= 565
+            assert late is not None and late <= 552
         else:
             assert late is None
             assert any(LAST in line for line in rig.lines_with("oi-warning symbol-not-retried"))
@@ -219,7 +229,7 @@ async def slow_failures_on_the_late_path(tmp_path: Path, steady: Path, failures:
 
 
 def test_five_slow_failures_keep_the_late_path_by_600_s(tmp_path: Path, steady_db: Path) -> None:
-    """F = 5 slow failures (10 s) in the round that serves the late path: met (p' ~ 72 s estimated), by e + 600 s.
+    """F = 5 slow failures (10 s) in the round that serves the late path: met (p' ~ 71.8 s estimated), by e + 600 s.
 
     Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
     """
@@ -231,8 +241,8 @@ def test_five_slow_failures_keep_the_late_path_by_600_s(tmp_path: Path, steady_d
     run(scenario)
 
 
-def test_ten_slow_failures_keep_the_late_path_at_the_edge_by_600_s(tmp_path: Path, steady_db: Path) -> None:
-    """F = 10 slow failures (10 s): the threshold, met at the edge (p' ~ 96 s estimated), readable by e + 600 s.
+def test_ten_slow_failures_keep_the_late_path_by_600_s(tmp_path: Path, steady_db: Path) -> None:
+    """F = 10 slow failures (10 s): the threshold, met (p' ~ 95.6 s estimated, e + 597.6 s), readable by e + 600 s.
 
     Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
     """
@@ -245,7 +255,7 @@ def test_ten_slow_failures_keep_the_late_path_at_the_edge_by_600_s(tmp_path: Pat
 
 
 def test_eleven_slow_failures_miss_the_late_path(tmp_path: Path, steady_db: Path) -> None:
-    """F = 11 slow failures (10 s), one above the threshold: missed (p' ~ 100 s estimated), readable after e + 600 s.
+    """F = 11 slow failures (10 s), one above the threshold: missed (p' ~ 100.4 s estimated), readable after e + 600 s.
 
     Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
     """
@@ -257,14 +267,13 @@ def test_eleven_slow_failures_miss_the_late_path(tmp_path: Path, steady_db: Path
     run(scenario)
 
 
-@pytest.mark.parametrize(("failures", "deadline_first"), [(47, False), (48, True)])
-def test_slow_failures_before_the_last_symbol_reach_the_deadline_from_48(
+@pytest.mark.parametrize(("failures", "deadline_first"), [(49, False), (50, True)])
+def test_slow_failures_before_the_last_symbol_reach_the_deadline_from_50(
     tmp_path: Path, steady_db: Path, failures: int, deadline_first: bool
 ) -> None:
-    """The edge of the deadline line, f = 10 s: with 47 slow first-attempt failures the last symbol's first attempt
-    still ends inside the round deadline (285 s after the wake); with 48 it does not and the symbol ends ``deadline``.
-
-    Estimated with f = 10 s: up to F = 49 inside. The fake holds a slow failure 10.48 s, which moves the edge to 48.
+    """The edge of the deadline line, f = 10 s: with 49 slow first-attempt failures the last symbol's first attempt
+    still ends inside the round deadline (285 s after the wake, p ~ 281.2 s estimated); with 50 it does not
+    (p ~ 286 s) and the symbol ends ``deadline``.
 
     Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
     """
@@ -277,12 +286,11 @@ def test_slow_failures_before_the_last_symbol_reach_the_deadline_from_48(
         await until_rounds(rig, 1)
         value = readable_s(rig, LAST)
         report(f"F = {failures} slow, early, round of e", value)
-        warning = rig.lines_with("oi-warning round-deadline")
-        assert len(warning) == 1  # the retries reach the deadline in both cases
+        unfinished = " ".join(rig.lines_with("oi-warning round-deadline"))  # retries may reach the deadline either way
         if deadline_first:
-            assert value is None and f"{LAST}:" in warning[0]
+            assert value is None and f"{LAST}:" in unfinished
         else:
-            assert value is not None and value <= 200 + 285 + 2 and f"{LAST}:" not in warning[0]
+            assert value is not None and value <= 200 + 285 + 2 and f"{LAST}:" not in unfinished
         await finish(rig)
 
     run(scenario)
@@ -438,6 +446,8 @@ def test_storing_round_starting_30_s_late_readable_by_600_s(tmp_path: Path, stea
 @pytest.mark.parametrize(("late_s", "met"), [(50, True), (51, False)])
 def test_late_start_limit_is_50_s(tmp_path: Path, steady_db: Path, late_s: int, met: bool) -> None:
     """The edge of the late-start line: a round 50 s late still stores the late row by e + 600 s, 51 s late misses.
+
+    Zero margin at 50 s: the late row is readable at exactly e + 600.0 s (p' = 50 s + 48 s).
 
     Simulation on a fake clock: a measurement of the code on a model of the network, not of Binance.
     """

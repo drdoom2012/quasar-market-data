@@ -480,10 +480,10 @@ second.
 |---|---|---|
 | Ideal, published before the request (`p ≤ 48 s`) | ≤ `e + 250 s`; *simulated (fake clock)*: `e + 250.0 s` | met (zero margin in the simulation) |
 | Ideal, published after the request | ≤ `e + 550 s`; *simulated (fake clock)*: `e + 550.0 s` | met (zero margin in the simulation) |
-| `F` fast failures (`f ≈ 0.5 s` of slot time), any `F ≤ 200`, reserve exhausted or not | last symbol `p ≤ 50 s`, every row the round stores (retries included) `p ≤ 63 s`: ≤ `e + 265 s` / `e + 565 s`; *simulated (fake clock)*: `F = 60` latest stored row `e + 262.6 s`, last symbol's late row `e + 550.6 s`; `F = 200` latest stored row `e + 264.0 s` (the last symbol, without a ticket, falls under the exhausted lines) | met |
-| Slow failures in the round that serves the late path, `f = 10 s` (default timeout) | `p' ≈ 48 s + F × 4.76 s`: met while `F ≤ 10` (`p' ≈ 96 s`, `e + 598 s`); `F = 11` gives `p' ≈ 100 s`, `e + 602 s`; *simulated (fake clock)* (a slow failure holds its slot 10.48 s in the fake): `F = 5` `e + 575.2 s`, `F = 10` `e + 600.0 s`, `F = 11` `e + 605.2 s` | met while `F ≤ 10`, at the edge for `F = 10` (simulated `e + 600.0 s`); **missed** from `F = 11` for late-published rows of symbols after the failures in sorted order; early rows met |
+| `F` fast failures (`f ≈ 0.5 s` of slot time), any `F ≤ 200`, reserve exhausted or not | last symbol `p ≤ 50 s`, every row the round stores (retries included) `p ≤ 63 s`: ≤ `e + 265 s` / `e + 565 s`; *simulated (fake clock)*: `F = 60` latest stored row `e + 262.6 s`, last symbol's late row `e + 550.6 s`; `F = 200` latest stored row `e + 264.0 s`; the last symbol's late row is bounded by `p' ≤ 50 s`, ≤ `e + 552 s`, since retries do not delay it (the last symbol, without a ticket, falls under the exhausted lines) | met |
+| Slow failures in the round that serves the late path, `f = 10 s` (default timeout) | `p' ≈ 48 s + F × 4.76 s`: met while `F ≤ 10` (`p' ≈ 96 s`, `e + 598 s`); `F = 11` gives `p' ≈ 100 s`, `e + 602 s`; *simulated (fake clock)*: `F = 5` `e + 573.84 s`, `F = 10` `e + 597.6 s`, `F = 11` `e + 602.4 s` | met while `F ≤ 10` (`F = 10`: simulated `e + 597.6 s`, 2.4 s margin); **missed** from `F = 11` for late-published rows of symbols after the failures in sorted order; early rows met |
 | Same with `f = 3 s` (only if a timeout were set; D-6 sets none) | `p' ≈ 48 s + F × 1.26 s`: met while `F ≤ 39` (`p' ≈ 97 s`); not simulated | missed above |
-| Slow failures, `F ≥ 50` at `f = 10 s` | the last symbol's first attempt ends after the round deadline (`p ≈ 48 s + F × 4.76 s > 285 s`); unfinished symbols end `deadline`, their rows come from the next round (`e + 500 s + p'`). Below that, the retries can still reach the deadline after the last symbol; their rows also come from the next round. *simulated (fake clock)*: the edge is at `F = 48` (`F = 47`: last symbol readable by `e + 485.2 s`; `F = 48`: `deadline`), two lower than estimated because a slow failure holds 10.48 s in the fake; `F = 60`: the unfinished last symbol's early row `e + 550.0 s` from the next round | early rows met if the next round is healthy; late rows missed |
+| Slow failures, `F ≥ 50` at `f = 10 s` | the last symbol's first attempt ends after the round deadline (`p ≈ 48 s + F × 4.76 s > 285 s`; `F = 49` gives 281.2 s, `F = 50` 286 s); unfinished symbols end `deadline`, their rows come from the next round (`e + 500 s + p'`). Below that, the retries can still reach the deadline after the last symbol; their rows also come from the next round. *simulated (fake clock)*: the edge is at `F = 50` (`F = 49`: last symbol readable by `e + 483.28 s`; `F = 50`: `deadline`); `F = 60`: the unfinished last symbol's early row `e + 550.0 s` from the next round | early rows met if the next round is healthy; late rows missed |
 | Reserve exhausted, the unretried symbol's next request succeeds | its row comes from the next round (overlap `[B − 10 min, B]`): `e + 500 s + p'`; *simulated (fake clock)*: `e + 550.0 s` | met while `p' ≤ 98 s` |
 | Exhausted, and the next request also fails | `e + 800 s + p`; *simulated (fake clock)*: `e + 850.0 s` | **missed**, fail closed (`series_stale`) |
 | Limiter contention: backfill saturated, previous round on schedule **and on pace** (pace rule above) | our k-th start waits at most until the previous round's k-th start leaves the window: `p' ≤ 60 s + 5 s`; *simulated (fake clock)*: `e + 550.0 s` (no start waited: the previous round's k-th start leaves the window as our k-th is due) | met (≤ `e + 567 s`) |
@@ -493,13 +493,13 @@ second.
 | An open interest write waiting for candle writes while it holds its slot (P-9) | bounded only by the round deadline (for example candle backfill after a restart) | **not bounded** by A-6; missed when the wait is long |
 
 *Simulated (fake clock)* values come from `tests/collector/test_open_interest_latency.py` (A-6 Task 5): the real
-task and budget on a model of the network (a success holds its slot 0.48 s, a fast failure 0.5 s in all, a slow one
-10.48 s), not a measurement of Binance. The ideal lines are met with **zero margin** in the simulation (`e + 250.0 s`,
+task and budget on a model of the network (a success holds its slot 0.48 s, a fast failure 0.5 s and a slow one 10 s,
+each the whole slot time), not a measurement of Binance. The ideal lines are met with **zero margin** in the simulation (`e + 250.0 s`,
 `e + 550.0 s`): on the model both slots finish together. The simulation reads the stamp of the recording writer; the
 real writer keeps stamps unique (`max(wall, last + 1)`), which adds 1 ms per stamp that falls in the same millisecond
-as the previous one (`e + 250.001 s` and `e + 550.001 s` with the real writer on the same model). A threshold the
-correction moved is pinned by a pair of tests, one at it and one above it (`F = 10` / `11` at `f = 10 s`, the
-deadline edge `F = 47` / `48`, a late start of 50 s / 51 s).
+as the previous one (`e + 250.001 s` and `e + 550.001 s` with the real writer on the same model). A late start of 50 s is also met with zero margin
+(`e + 600.0 s`). A threshold the correction moved is pinned by a pair of tests, one at it and one above it
+(`F = 10` / `11` at `f = 10 s`, the deadline edge `F = 49` / `50`, a late start of 50 s / 51 s).
 
 For the shipped subset (`S = 200`): `c = 1`, `p ≈ 48 s`. Rows published within 200 s (about 98 % in the measurement)
 are stored by about `e + 250 s`; late-published rows by about `e + 550 s`, 50 s inside R1. A round that starts 30 s
