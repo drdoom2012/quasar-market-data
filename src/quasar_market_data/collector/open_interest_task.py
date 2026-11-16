@@ -33,7 +33,9 @@ successful page answers without its row is *tried*; after three tries it is not 
 in memory). A failed page is not a try: the symbol backs off 1, 2, 4 windows, then is suspended until restart.
 
 Output is one injected callable ``emit(line)``; the families are ``oi-round``, ``oi-conflict``, ``oi-warning``,
-``oi-error``, ``oi-measurement``, ``oi-reconcile`` and ``oi-catchup``.
+``oi-error``, ``oi-measurement``, ``oi-reconcile`` and ``oi-catchup``. The ``oi-round`` line ends with the round's
+``span_ms`` and ``pace=ok|slow`` (the pace rule of the backfill gate); an ``oi-catchup`` window that the gate stopped
+only because the previous round was counted in full (late or slow) ends ``end=previous-round`` instead of ``budget``.
 """
 
 import asyncio
@@ -182,6 +184,7 @@ class OpenInterestRoundReport:
     pending: int
     skipped_rounds: int
     late_ms: int
+    span_ns: int  # monotonic, from the round's start to its end: the span the backfill gate's pace rule judges
 
     def line(self) -> str:
         counts = {outcome: 0 for outcome in OpenInterestSymbolOutcome}
@@ -196,8 +199,18 @@ class OpenInterestRoundReport:
             f"pending={self.pending}",
             f"skipped_rounds={self.skipped_rounds}",
             f"late_ms={self.late_ms}",
+            f"span_ms={self.span_ns // _NS_PER_MS}",
+            f"pace={'ok' if _on_pace(self.span_ns, len(self.symbols)) else 'slow'}",
         ]
         return " ".join(fields)
+
+
+def _on_pace(span_ns: int, round_size: int) -> bool:
+    """The pace rule of the backfill gate (ADR-0003 P-10, A-6 decision D-7): a span of at most ``pace_limit_ms(n)``.
+
+    An empty round (impossible with the derived cadence, see ``_round``) has no pace limit and counts as on pace.
+    """
+    return round_size < 1 or span_ns <= pace_limit_ms(round_size) * _NS_PER_MS
 
 
 @dataclass
@@ -396,8 +409,23 @@ class _OpenInterestTask:
         if span is None or self._last_round_size < 1:
             return None
         on_schedule = span[0] + WINDOW_MS * _NS_PER_MS <= wake_ns + ON_SCHEDULE_TOLERANCE_MS * _NS_PER_MS
-        on_pace = span[1] - span[0] <= pace_limit_ms(self._last_round_size) * _NS_PER_MS
+        on_pace = _on_pace(span[1] - span[0], self._last_round_size)
         return span if on_schedule and on_pace else None
+
+    def _refused_for_the_previous_round(self, now_ns: int, wake_ns: int, excluded: tuple[int, int] | None) -> bool:
+        """The gate refused a page only because the previous round was counted in full (it ran late or slow).
+
+        Observability only (the ``oi-catchup`` end reason ``previous-round``): the gate itself is unchanged.
+        """
+        span = self._last_round_span
+        if excluded is not None or span is None:
+            return False
+        return backfill_may_start(
+            self.budget.committed_at(now_ns),
+            self.budget.committed_at(wake_ns, excluding=span),
+            self.config.budget_per_5min,
+            self.config.round_cost,
+        )
 
     def _grantable_now(self) -> bool:
         return self.budget.committed_at(self.clock.monotonic_ns()) + 1 <= self.config.budget_per_5min
@@ -441,13 +469,15 @@ class _OpenInterestTask:
             if now_ns + PAGE_BUDGET_MS * _NS_PER_MS > deadline_ns:
                 window.end = "deadline"
                 return
+            excluded = self._previous_round_if_on_schedule(wake_ns)
             if not backfill_may_start(
                 self.budget.committed_at(now_ns),
-                self.budget.committed_at(wake_ns, excluding=self._previous_round_if_on_schedule(wake_ns)),
+                self.budget.committed_at(wake_ns, excluding=excluded),
                 config.budget_per_5min,
                 config.round_cost,
             ):
-                window.end = "budget"
+                late_or_slow = self._refused_for_the_previous_round(now_ns, wake_ns, excluded)
+                window.end = "previous-round" if late_or_slow else "budget"
                 return
             page = min(heads.values(), key=lambda head: (head.start_ms, head.symbol))  # oldest first, then by symbol
             status = await self._run_page(page, trust, window)
@@ -666,7 +696,8 @@ class _OpenInterestTask:
         state = _RoundState(symbols, retry_limit=retry_reserve(len(symbols)) if symbols else 0)
         span_start = self.clock.monotonic_ns()
         status, _ = await self._run_until(self._round_work(boundary, state, deadline_ns), deadline_ns)
-        self._last_round_span = (span_start, self.clock.monotonic_ns())
+        span_end = self.clock.monotonic_ns()
+        self._last_round_span = (span_start, span_end)
         self._last_round_size = len(symbols)
         if status != "done":
             self._close_unfinished(boundary, state, status)
@@ -680,6 +711,7 @@ class _OpenInterestTask:
             state.pending,
             skipped,
             late_ms,
+            span_end - span_start,
         )
 
     def _close_unfinished(self, boundary: int, state: _RoundState, status: str) -> None:

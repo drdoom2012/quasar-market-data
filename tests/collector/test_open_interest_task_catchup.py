@@ -7,13 +7,14 @@ import sqlite3
 import threading
 from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import pytest
 
 import quasar_market_data.collector.open_interest_task as task_module
 from quasar_market_data.collector.async_open_interest_writer import OpenInterestPageError, OpenInterestWriteReport
-from quasar_market_data.collector.extension_pause import ExtensionPaused
+from quasar_market_data.collector.binance_usdm_open_interest import BinanceUsdmOpenInterestSource
+from quasar_market_data.collector.extension_pause import ExtensionPause, ExtensionPaused
 from quasar_market_data.collector.kline_source import SourceError
 from quasar_market_data.collector.open_interest_reader import OpenInterestReadError
 from quasar_market_data.collector.open_interest_task import OpenInterestWriterUnusable
@@ -33,6 +34,7 @@ from tests.collector.open_interest_task_fakes import (
     symbols_of,
     table_rows,
 )
+from tests.collector.test_binance_usdm_open_interest import FakeExchange
 
 DAY = 86_400_000
 START_WALL = 1_792_677_036_000
@@ -211,7 +213,9 @@ def test_rounds_pre_empt_the_catch_up_when_the_budget_is_nearly_used(tmp_path: P
         await rig.until_lines("oi-round", 1)
         await rig.until_lines("oi-catchup", 1)
         first = rig.lines_with("oi-catchup")[0]
-        assert field(first, "pages") == "0" and field(first, "end") == "budget"  # a page would take the round's room
+        # a page would take the round's room; the first round ran late (the first after a start), so it is counted in
+        # full, and without its 3 starts the page would fit: the window names it
+        assert field(first, "pages") == "0" and field(first, "end") == "previous-round"
         assert page_calls(rig) == []
         wake_ns = min(rig.t.waiting)
         await next_cycle(rig, 2)
@@ -868,7 +872,7 @@ def test_a_slow_previous_round_is_counted_in_full(tmp_path: Path) -> None:
         rig = await paced_rig(tmp_path)
         wake0, wake1 = await slow_second_round(rig)
         window = rig.lines_with("oi-catchup")[1]
-        assert field(window, "pages") == "0" and field(window, "end") == "budget"
+        assert field(window, "pages") == "0" and field(window, "end") == "previous-round"
         await rig.advance_to_next_wake()
         wake2 = await run_cycle(rig, 3)
         slow = round_budget_starts(rig, wake1)
@@ -876,6 +880,58 @@ def test_a_slow_previous_round_is_counted_in_full(tmp_path: Path) -> None:
         # the window added nothing but its own time call to what the slow round left in the budget at the next wake
         assert counted_at(rig, wake2) == sum(1 for start in slow if wake2 < start + 300 * SECOND) + 1
         assert round_starts(rig, wake2) == round_starts(rig, wake0)  # no start waited: the pace of an empty budget
+        await rig.stop_and_wait()
+
+    run(scenario)
+
+
+def test_the_round_line_reports_its_span_and_pace(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        rig = await paced_rig(tmp_path)
+        wake0, wake1 = await slow_second_round(rig)
+        on_pace, slow = rig.lines_with("oi-round")[:2]
+        # the span runs from the round's start to its end, so it holds at least the round's requests
+        assert round_span(rig, wake0) <= int(field(on_pace, "span_ms")) * NS_PER_MS + NS_PER_MS
+        assert int(field(on_pace, "span_ms")) <= PACE_LIMIT_200_MS and field(on_pace, "pace") == "ok"
+        assert round_span(rig, wake1) <= int(field(slow, "span_ms")) * NS_PER_MS + NS_PER_MS
+        assert int(field(slow, "span_ms")) > PACE_LIMIT_200_MS and field(slow, "pace") == "slow"
+        # the same rule as the gate: the window after the on-pace round was not stopped by it, the one after the slow was
+        assert field(rig.lines_with("oi-catchup")[0], "end") != "previous-round"
+        assert field(rig.lines_with("oi-catchup")[1], "end") == "previous-round"
+        await rig.stop_and_wait()
+
+    run(scenario)
+
+
+@pytest.mark.parametrize(("span_ms", "pace"), [(60_000, "ok"), (60_001, "slow")])
+def test_the_round_line_judges_the_pace_with_the_gates_limit(span_ms: int, pace: str) -> None:
+    report = task_module.OpenInterestRoundReport(
+        boundary_ms=0,
+        symbols=symbols_of(200),
+        outcomes={},
+        stored=0,
+        duplicates=0,
+        conflicts=0,
+        pending=0,
+        skipped_rounds=0,
+        late_ms=0,
+        span_ns=span_ms * NS_PER_MS,
+    )
+    assert report.line().endswith(f" late_ms=0 span_ms={span_ms} pace={pace}")
+
+
+def test_a_window_after_a_late_round_starts_no_page_and_names_the_previous_round(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        rig = await paced_rig(tmp_path)
+        late_ms = 10_000  # more than the 5 s tolerance of "on schedule"
+        rig.t._wall_ms += late_ms
+        rig.t._mono_ns += late_ms * NS_PER_MS
+        rig.start()
+        await run_cycle(rig, 1)
+        assert int(field(rig.lines_with("oi-round")[0], "late_ms")) == late_ms
+        window = rig.lines_with("oi-catchup")[0]
+        assert field(window, "pages") == "0" and field(window, "end") == "previous-round"
+        assert page_calls(rig) == []
         await rig.stop_and_wait()
 
     run(scenario)
@@ -894,5 +950,55 @@ def test_a_slow_round_does_not_propagate(tmp_path: Path) -> None:
         assert saturated(rig.lines_with("oi-catchup")[2])  # the window before the last round filled the backfill
         assert counted_at(rig, wake3) + 201 > 400  # so the last round really met contention
         await rig.stop_and_wait()
+
+    run(scenario)
+
+
+# ---- request durations end to end (ADR-0003 A-6, decision D-6) --------------------------------------------------------
+
+ROUND_CALL_MS = 100
+PAGE_CALL_MS = 700
+
+
+class TimedExchange(FakeExchange):
+    """Answers like Binance; a round's call (3 period ends) takes 100 ms, a catch-up page 700 ms; time is the clock's."""
+
+    async def fapiDataGetOpenInterestHist(self, params: dict[str, Any]) -> object:
+        self.delay_ms = ROUND_CALL_MS if params["limit"] <= 3 else PAGE_CALL_MS
+        return await super().fapiDataGetOpenInterestHist(params)
+
+    async def fapiPublicGetTime(self) -> object:
+        assert self._clock is not None
+        self.delay_ms = 0
+        self.time_response = {"serverTime": self._clock.wall_ms()}
+        return await super().fapiPublicGetTime()
+
+
+def test_a_catch_up_page_yields_a_request_duration_sample(tmp_path: Path) -> None:
+    """The real task over the real adapter, the observer wired as ``run`` wires it: a page is timed like a round's call."""
+
+    async def scenario() -> None:
+        rig = await make_rig(tmp_path, symbols=(BTC,), backfill_days=1)
+        exchange = TimedExchange(rig.t)
+        adapter = await BinanceUsdmOpenInterestSource.open(
+            rig.budget, ExtensionPause(rig.t), rig.t, exchange, on_hist_request=rig.measurements.record_request
+        )
+        rig.source = cast(Any, adapter)
+        rig.align_to_next_wake()
+        rig.start()
+        for _ in range(60):
+            await rig.t.settle()
+            if rig.lines_with("oi-catchup"):
+                break
+            await rig.t.advance(1_000)
+        window = rig.lines_with("oi-catchup")[0]
+        assert int(field(window, "pages")) >= 1
+        limits = [params["limit"] for name, params in exchange.calls if name == "hist"]
+        assert any(limit > 3 for limit in limits) and any(limit == 3 for limit in limits)  # pages and the round
+        await rig.stop_and_wait()
+        line = rig.lines_with("oi-measurement")[-1]
+        assert float(field(line, "request_ok_max_ms")) == PAGE_CALL_MS  # only a page's call takes 700 ms
+        assert float(field(line, "request_ok_p50_ms")) in (ROUND_CALL_MS, PAGE_CALL_MS)
+        assert field(line, "request_failed_max_ms") == "na"
 
     run(scenario)
