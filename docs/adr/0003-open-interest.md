@@ -930,7 +930,10 @@ were throwaway in the session scratchpad and are not in the repository.
      backfill share is `b − round_cost(S, c)` (P-10, P-12, P-13).
   2. **Open interest symbols.** `[open_interest].symbols` (`"all"` or a list) is required; `S` is its count; the
      rounds and the backfill request only these symbols (P-13, P-12). The shipped files list 200 symbols by 24 h
-     quote volume; the list and its snapshot time are recorded here when the files are written.
+     quote volume. Recorded when the files were written (2026-11-16): the snapshot time is 2026-11-16T22:05Z (UTC);
+     the rule is the 200 linear USDT perpetual swaps of the venue list with the largest 24 h `quoteVolume` of one
+     public `fetch_tickers` call (`binanceusdm`, no credentials), tickers mapped to symbols through the CCXT markets,
+     ties broken by symbol, listed sorted in both files; the list itself is the `symbols` array of the files.
   3. **Planned latency** includes the round position `p`; the ideal run assumes the round starts at its wake time;
      `expected_after_ms` and `rule.cadence` do not change. Measured and estimated figures and the table of
      scenarios, with the missed and unbounded lines, are in P-10 ("R1 latency").

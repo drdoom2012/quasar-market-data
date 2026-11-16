@@ -1,5 +1,6 @@
 """The optional ``[open_interest]`` table (ADR-0003 P-13): fail closed, every key named in its error."""
 
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -166,9 +167,8 @@ def test_the_collector_derives_the_adr_cadence_from_the_parsed_file(count: int, 
 def test_the_shipped_files_switch_open_interest_on(name: str) -> None:
     path = REPO / "config" / name
     parsed = parse_settings(path.read_text(encoding="utf-8"), base_dir=path.parent)
-    assert parsed.open_interest == OpenInterestSettings(
-        True, "5m", 15_000, 200_000, 400, 7, tuple(sorted(parsed.venues[0].symbols))
-    )
+    listed = tomllib.loads(path.read_text(encoding="utf-8"))["open_interest"]["symbols"]
+    assert parsed.open_interest == OpenInterestSettings(True, "5m", 15_000, 200_000, 400, 7, tuple(sorted(listed)))
 
 
 def test_symbols_all_resolves_to_the_venue_symbols() -> None:
