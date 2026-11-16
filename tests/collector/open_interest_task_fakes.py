@@ -122,6 +122,7 @@ class ManualOiSource:
             if self.fail_first and (symbol, end_time_ms) not in self._seen:
                 self._seen.add((symbol, end_time_ms))
                 raise SourceError("scripted first-attempt failure")
+            # shares ``_seen`` with ``fail_first``: a (symbol, range end) fails at most once across both
             if symbol in self.fail_symbols and (symbol, end_time_ms) not in self._seen:
                 self._seen.add((symbol, end_time_ms))
                 await asyncio.sleep(0)  # after the limiter grant, before raising: other failures can interleave here

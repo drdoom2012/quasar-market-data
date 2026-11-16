@@ -655,6 +655,7 @@ class _OpenInterestTask:
     async def _round(self, boundary: int, deadline_ns: int, skipped: int, late_ms: int) -> OpenInterestRoundReport:
         config = self.config
         symbols = symbols_for_round(config.symbols, boundary, config.cadence, config.period)
+        # defensive: the derived cadence keeps c <= S, so a round is never empty; retry_reserve refuses n < 1
         state = _RoundState(symbols, retry_limit=retry_reserve(len(symbols)) if symbols else 0)
         span_start = self.clock.monotonic_ns()
         status, _ = await self._run_until(self._round_work(boundary, state, deadline_ns), deadline_ns)

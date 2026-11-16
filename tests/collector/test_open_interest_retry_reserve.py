@@ -2,6 +2,10 @@
 
 A round of ``n`` symbols hands out at most ``min(50, n)`` retry tickets. A ticket is taken by one synchronous
 check-and-increment on attempt 2, inside the request slot, after the paused/stop check; it is never returned.
+
+The concurrency test makes 200 retries reach the check in one scheduler turn (no slot limit, one shared release of the
+retry delay), so it fails for a check, then an ``await``, then the increment. The synchronous test pins that
+``try_take_retry`` is not a coroutine function, so no ``await`` can be put inside it.
 """
 
 import asyncio
@@ -134,12 +138,37 @@ def test_ten_failures_are_all_retried(tmp_path: Path, states: list[_RoundState])
 
 
 @pytest.mark.parametrize("fail_delay_ms", [0, 40])
-def test_tickets_are_atomic_under_concurrency(tmp_path: Path, states: list[_RoundState], fail_delay_ms: int) -> None:
+def test_tickets_are_atomic_under_concurrency(
+    tmp_path: Path, states: list[_RoundState], monkeypatch: pytest.MonkeyPatch, fail_delay_ms: int
+) -> None:
+    """All 200 attempts 2 reach the ticket check in the same scheduler turn, so a non-atomic check races.
+
+    The slot limit is lifted (``MAX_IN_FLIGHT`` = 1000) and the retry delay waits on one shared event that is released
+    only when all 200 failed symbols are waiting: every retry then enters its slot in the same turn, with nothing to
+    pace it before the check. A check with an ``await`` before the increment would hand out 200 tickets here.
+    """
+    released = asyncio.Event()
+    waiting = [0]
+    original_sleep_or_stop = open_interest_task.sleep_or_stop
+
+    async def retry_delay(sleep: Any, ms: int, stop: asyncio.Event) -> bool:
+        if ms != open_interest_task.RETRY_DELAY_MS:
+            return await original_sleep_or_stop(sleep, ms, stop)
+        waiting[0] += 1
+        if waiting[0] == 200:
+            released.set()
+        await released.wait()
+        return stop.is_set()
+
+    monkeypatch.setattr(open_interest_task, "MAX_IN_FLIGHT", 1_000)
+    monkeypatch.setattr(open_interest_task, "sleep_or_stop", retry_delay)
+
     async def scenario() -> None:
         rig = await two_hundred_symbol_rig(tmp_path, failing=200)
         rig.source.fail_delay_ms = fail_delay_ms
         rig.start()
         await finish_rounds(rig, 1, step_ms=200)
+        assert waiting[0] == 200 and released.is_set()  # every retry was held back and released together
         (state,) = states
         assert state.retries_taken == 50
         assert len(retried(rig)) == 50
