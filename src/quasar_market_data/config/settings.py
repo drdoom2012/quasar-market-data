@@ -9,6 +9,7 @@ import hashlib
 import os
 import re
 import tomllib
+from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
@@ -315,7 +316,7 @@ def _open_interest_symbols(table: dict[str, Any], path: str, venue: Venue) -> tu
         if type(item) is not str:
             raise ConfigError(key, f"entry {index} must be a string, got {_kind(item)}")
     if len(set(value)) != len(value):
-        duplicates = sorted({item for item in value if value.count(item) > 1})
+        duplicates = sorted(item for item, count in Counter(value).items() if count > 1)
         raise ConfigError(key, f"has duplicate symbols {duplicates}")
     known = set(venue.symbols)
     for item in value:

@@ -542,13 +542,16 @@ PRE_A6_CONFIG = Path(__file__).resolve().parent / "golden" / "open_interest_heal
 PRE_A6_GOLDEN = Path(__file__).resolve().parent / "golden" / "open_interest_health_pre_a6.json"
 PRE_A6_AS_OF = S + 1000 * TF + 230_000  # T_e = slot 999 under c = 1; lag 1 is due, lag 2 and more are stale
 PRE_A6_SEED = 20261116
+RETIRED = "RETIRED/USDT:USDT"  # a stored series of a symbol that is not a venue symbol
 
 
 def pre_a6_golden_database(path: Path, symbols: tuple[str, ...]) -> Path:
-    """One 5m series per venue symbol, lags drawn with a fixed seed, one unaligned row, recent and old conflicts.
+    """One 5m series per venue symbol, lags drawn with a fixed seed, one unaligned row, recent and old conflicts, and one
+    stored series of a symbol that is not a venue symbol (``configured: false``).
 
     Copied verbatim from the script that captured ``golden/open_interest_health_pre_a6.json`` on a worktree of
-    ``main`` before A-6 (see the A-6 Task 6 report); changing it invalidates the golden.
+    ``main`` before A-6 (``d8f1b47``; the A-6 Task 6 report, re-captured with the retired series in the final fix wave);
+    changing it invalidates the golden.
     """
     rng = random.Random(PRE_A6_SEED)
     t_e = S + 999 * TF
@@ -565,6 +568,7 @@ def pre_a6_golden_database(path: Path, symbols: tuple[str, ...]) -> Path:
         for symbol in rng.sample(symbols, 2):
             insert_open_interest_conflict(conn, t_e - TF, 1, symbol=symbol)  # inside the 24 h window
         insert_open_interest_conflict(conn, t_e - 400 * TF, 2, symbol=symbols[0])  # older than 24 h: not counted
+        insert_open_interest(conn, t_e - 13 * TF, symbol=RETIRED)  # not a venue symbol: stale, configured false
     finally:
         conn.close()
     return path
@@ -786,15 +790,21 @@ def test_outer_fields_with_all_equal_the_pre_a6_golden(tmp_path: Path) -> None:
 
 
 def test_all_makes_collected_equal_the_outer_counts(tmp_path: Path) -> None:
-    """Every stored series has the venue, a venue symbol and the period: ``collected`` repeats the outer judgment."""
+    """Every stored series but the retired one has the venue, a venue symbol and the period: ``collected`` repeats the
+    outer judgment without it."""
     settings = pre_a6_settings_with_all()
     path = pre_a6_golden_database(tmp_path / "m.db", settings.venues[0].symbols)
 
     found = a6_object(path, settings, PRE_A6_AS_OF)
 
     collected = found["collected"]
-    assert {key: collected[key] for key in COUNT_KEYS} == {key: found[key] for key in COUNT_KEYS}
-    assert (collected["behind"], collected["truncated"]) == (found["behind"], found["truncated"])
+    retired = [e for e in found["behind"] if e["symbol"] == RETIRED]
+    assert [(e["state"], e["configured"]) for e in retired] == [("stale", False)]
+    outer = {key: found[key] for key in COUNT_KEYS}
+    outer.update(series_count=found["series_count"] - 1, stale=found["stale"] - 1)  # the retired series left out
+    assert {key: collected[key] for key in COUNT_KEYS} == outer
+    assert collected["behind"] == [e for e in found["behind"] if e["symbol"] != RETIRED]
+    assert collected["truncated"] == found["truncated"] is False
     assert (collected["symbol_count"], collected["never_stored"]) == (len(settings.venues[0].symbols), 0)
 
 
@@ -804,5 +814,6 @@ def test_collected_is_absent_when_open_interest_is_null(tmp_path: Path) -> None:
     body = ingest(path, (inst(sym(0)),), open_interest=None, open_interest_symbols=frozenset())
     empty = oi_object(make_database(tmp_path / "e.db"), (), open_interest_symbols=frozenset())
 
-    assert body["open_interest"] is None and "collected" not in body
+    assert body["open_interest"] is None
+    assert '"collected"' not in json.dumps(body)  # no `collected` key anywhere in the body
     assert empty["collected"]["status"] == "no_series" and empty["collected"]["symbol_count"] == 0

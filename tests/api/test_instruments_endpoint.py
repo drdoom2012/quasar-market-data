@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import sqlite3
 from collections.abc import Callable, Sequence
@@ -182,6 +183,22 @@ def test_a_disabled_table_that_lists_the_symbol_gives_null_everywhere(tmp_path: 
     assert periods(client.get("/v1/instruments").json()) == [(SYMBOL, "5m", None), (ETH, "5m", None)]
 
 
+def test_a_file_without_an_open_interest_table_gives_null_everywhere(tmp_path: Path) -> None:
+    """No ``[open_interest]`` table at all, wired as ``api/cli.py`` wires it."""
+    path = make_database(tmp_path / "market.db", candles=[slot(0)])
+    settings = parse_settings(config_text(), base_dir=Path("/cfg"))
+    assert settings.open_interest is None  # the table is absent, not disabled
+
+    client = client_for(
+        path,
+        settings.instruments(),
+        open_interest=rule_from_settings(settings),
+        open_interest_symbols=symbols_from_settings(settings),
+    )
+
+    assert periods(client.get("/v1/instruments").json()) == [(SYMBOL, "5m", None), (ETH, "5m", None)]
+
+
 def test_an_enabled_table_gives_the_period_of_the_file(tmp_path: Path) -> None:
     path = make_database(tmp_path / "market.db")
     settings = settings_with_table(enabled=True, listed=[ETH])
@@ -234,12 +251,15 @@ def test_the_contract_example_is_what_the_server_returns(tmp_path: Path) -> None
     """The scenario of the 6.4.2 example: BTC is an open interest symbol with a stored candle, LTC is not stored."""
     example = contract_example("### 6.4.2 Response `200`")
     btc, ltc = example["instruments"]
+    venue = btc["venue"]
     path = make_database(tmp_path / "market.db", candles=[btc["newest_open_time_ms"]])
-    universe = (Instrument(VENUE, btc["symbol"], btc["timeframe"]), Instrument(VENUE, ltc["symbol"], ltc["timeframe"]))
-
-    client = client_for(
-        path, universe, open_interest=LISTED_RULE, open_interest_symbols=frozenset({(VENUE, btc["symbol"])})
+    universe = (
+        Instrument(venue, btc["symbol"], btc["timeframe"]),
+        Instrument(ltc["venue"], ltc["symbol"], ltc["timeframe"]),
     )
+    rule = dataclasses.replace(LISTED_RULE, period=Timeframe(btc["open_interest_period"]))  # the example's period
+
+    client = client_for(path, universe, open_interest=rule, open_interest_symbols=frozenset({(venue, btc["symbol"])}))
     response = client.get("/v1/instruments")
 
     assert response.status_code == 200

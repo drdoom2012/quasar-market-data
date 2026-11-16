@@ -133,6 +133,12 @@ def _legacy_cadence(symbols: int, budget: int) -> int:
 
 def test_every_budget_and_symbol_count() -> None:
     """Spec section 5, properties (1) to (6), for every integer budget and every symbol count up to largest + 1."""
+
+    def cost(symbols: int, c: int) -> int:
+        """The round cost of ADR-0003 P-10 (A-6) written out, an oracle independent of ``round_cost``."""
+        n = -(-symbols // c)
+        return n + min(50, n) + 2
+
     refused = MAX_CADENCE + 1
     previous_budget: list[int] = []
     for budget in range(MIN_BUDGET_PER_5MIN, MAX_BUDGET_PER_5MIN + 1):
@@ -153,18 +159,18 @@ def test_every_budget_and_symbol_count() -> None:
             assert (c == refused) == (symbols > largest)
             if c == refused:
                 # nothing up to 12 fits
-                assert round_cost(symbols, MAX_CADENCE) > steady
+                assert cost(symbols, MAX_CADENCE) > steady
                 continue
             assert 1 <= c <= MAX_CADENCE
             # (1) c fits and is minimal
-            assert round_cost(symbols, c) <= steady
-            assert c == 1 or round_cost(symbols, c - 1) > steady
+            assert cost(symbols, c) <= steady
+            assert c == 1 or cost(symbols, c - 1) > steady
             # (3) never above the legacy cadence
             assert c <= _legacy_cadence(symbols, budget)
             # (4) the backfill keeps at least b - steady(b), at least 25; (5) round cost plus share is b
             share = backfill_share(symbols, budget)
             assert share >= budget - steady >= 25
-            assert round_cost(symbols, c) + share == budget
+            assert cost(symbols, c) + share == budget
             # (6) non-decreasing in S
             assert c >= last_c
             last_c = c

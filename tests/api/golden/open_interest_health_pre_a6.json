@@ -7,10 +7,10 @@
   },
   "scope": "stored_series",
   "status": "degraded",
-  "series_count": 40,
+  "series_count": 41,
   "current": 10,
   "due": 5,
-  "stale": 24,
+  "stale": 25,
   "unjudged_series": 1,
   "conflicted_series": 2,
   "behind": [
@@ -67,6 +67,15 @@
       "lag_slots": 13,
       "state": "stale",
       "configured": true
+    },
+    {
+      "venue": "binance-usdm",
+      "symbol": "RETIRED/USDT:USDT",
+      "period": "5m",
+      "newest_time_ms": 1792939200000,
+      "lag_slots": 13,
+      "state": "stale",
+      "configured": false
     },
     {
       "venue": "binance-usdm",

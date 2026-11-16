@@ -866,6 +866,8 @@ def _open_interest_collected(
         for item in judged
         if item.series.period == period and (item.series.venue, item.series.symbol) in open_interest_symbols
     ]
+    # A conflict record of a listed series without a stored row is counted too, like the outer object counts it; the
+    # Collector cannot produce that state (it records a conflict only against a stored row).
     conflicted = sum(
         1
         for venue, symbol, series_period in facts.conflicted

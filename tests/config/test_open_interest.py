@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from quasar_market_data.config.settings import ConfigError, OpenInterestSettings, parse_settings
+from quasar_market_data.domain.open_interest_cadence import open_interest_cadence
 from tests.config_files import TEN_SYMBOLS, config_text
 
 BASE = Path("/cfg")
@@ -168,13 +169,18 @@ def test_the_shipped_files_switch_open_interest_on(name: str) -> None:
     path = REPO / "config" / name
     parsed = parse_settings(path.read_text(encoding="utf-8"), base_dir=path.parent)
     listed = tomllib.loads(path.read_text(encoding="utf-8"))["open_interest"]["symbols"]
-    assert parsed.open_interest == OpenInterestSettings(True, "5m", 15_000, 200_000, 400, 7, tuple(sorted(listed)))
+    # tuple(listed), not sorted: the shipped file itself is sorted (an unsorted file would be sorted on parsing silently)
+    assert parsed.open_interest == OpenInterestSettings(True, "5m", 15_000, 200_000, 400, 7, tuple(listed))
 
 
 def test_symbols_all_resolves_to_the_venue_symbols() -> None:
     settings = parse_settings(text(table(symbols='"all"')), base_dir=BASE)
     assert settings.open_interest is not None
     assert settings.open_interest.symbols == tuple(sorted(TEN_SYMBOLS))
+    budget = settings.open_interest.budget_per_5min
+    assert open_interest_cadence(len(settings.open_interest.symbols), budget) == open_interest_cadence(
+        len(settings.venues[0].symbols), budget
+    )
 
 
 def test_symbols_list_is_sorted_and_kept() -> None:
@@ -187,12 +193,12 @@ def test_symbols_list_is_sorted_and_kept() -> None:
     ("value", "problem"),
     [
         (None, "missing"),
-        ('""', "all"),
-        ('"ALL"', "all"),
-        ('"BTC/USDT:USDT"', "all"),
+        ('""', 'must be "all" or an array'),
+        ('"ALL"', 'must be "all" or an array'),
+        ('"BTC/USDT:USDT"', 'must be "all" or an array'),
         ("[]", "empty"),
         ("[1]", "string"),
-        ("5", "all"),
+        ("5", 'must be "all" or an array'),
         ('["BTC/USDT:USDT", "BTC/USDT:USDT"]', "duplicate"),
         ('["DOGE2/USDT:USDT"]', "not a symbol of venue"),
         ('["btc/usdt:usdt"]', "not a symbol of venue"),
