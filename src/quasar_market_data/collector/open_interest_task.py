@@ -13,7 +13,9 @@ gate expires after 60 s, a lower bound only gets more conservative as time passe
 makes no history request at all. Each symbol of the round (``symbols_for_round``) asks for ``[B - 2c * 5 min, B]``; rows
 are parsed all-or-nothing, only eligible rows are written. A row that Binance has not published yet is simply absent:
 not an error, not retried; the symbol's next overlapping request or the catch-up stores it. A request error (not a
-refusal, a pause or a ban) gets one retry after ``RETRY_DELAY_MS`` if that fits before the deadline.
+refusal, a pause or a ban) gets one retry after ``RETRY_DELAY_MS`` if that fits before the deadline and a ticket of the
+round's shared retry reserve, ``min(50, n)``, is left (ADR-0003 A-6); without one the symbol is
+``retry_reserve_exhausted``.
 
 429 / 418. ``ExtensionPaused`` stops the round at once (the remaining symbols are ``paused``) and the task goes on
 with the next round; ``ExtensionStopped`` ends the task. At the round deadline unfinished symbols are cancelled and
@@ -63,6 +65,7 @@ from quasar_market_data.domain.open_interest import OpenInterest, select_eligibl
 from quasar_market_data.domain.open_interest_cadence import (
     backfill_share,
     open_interest_cadence,
+    retry_reserve,
     round_cost,
     symbols_for_round,
 )
@@ -124,6 +127,7 @@ class OpenInterestSymbolOutcome(StrEnum):
     STOPPED = "stopped"
     REFUSED = "refused"
     UNTRUSTED = "untrusted"
+    RETRY_RESERVE_EXHAUSTED = "retry_reserve_exhausted"
 
 
 @dataclass(frozen=True)
@@ -198,6 +202,8 @@ class OpenInterestRoundReport:
 @dataclass
 class _RoundState:
     symbols: tuple[str, ...]
+    retry_limit: int  # the round's shared retry reserve, min(50, n) (ADR-0003 P-10, A-6)
+    retries_taken: int = 0
     outcomes: dict[str, OpenInterestSymbolOutcome] = field(default_factory=dict)
     phases: dict[str, str] = field(default_factory=dict)
     stored: int = 0
@@ -205,6 +211,17 @@ class _RoundState:
     conflicts: int = 0
     pending: int = 0
     paused: bool = False
+
+    def try_take_retry(self) -> bool:
+        """Take one retry ticket if any is left; never given back (INV-148).
+
+        Deliberately synchronous: the check and the increment run with no ``await`` in between, so concurrent symbols of
+        the round (one event loop) can never take more than ``retry_limit`` tickets.
+        """
+        if self.retries_taken < self.retry_limit:
+            self.retries_taken += 1
+            return True
+        return False
 
 
 @dataclass
@@ -638,7 +655,7 @@ class _OpenInterestTask:
     async def _round(self, boundary: int, deadline_ns: int, skipped: int, late_ms: int) -> OpenInterestRoundReport:
         config = self.config
         symbols = symbols_for_round(config.symbols, boundary, config.cadence, config.period)
-        state = _RoundState(symbols)
+        state = _RoundState(symbols, retry_limit=retry_reserve(len(symbols)) if symbols else 0)
         span_start = self.clock.monotonic_ns()
         status, _ = await self._run_until(self._round_work(boundary, state, deadline_ns), deadline_ns)
         self._last_round_span = (span_start, self.clock.monotonic_ns())
@@ -737,6 +754,10 @@ class _OpenInterestTask:
                     state.outcomes[symbol] = (
                         OpenInterestSymbolOutcome.PAUSED if state.paused else OpenInterestSymbolOutcome.STOPPED
                     )
+                    return
+                if attempt == 2 and not state.try_take_retry():  # no await between the check and acting on it
+                    state.outcomes[symbol] = OpenInterestSymbolOutcome.RETRY_RESERVE_EXHAUSTED
+                    self.emit(f"oi-warning symbol-not-retried boundary={boundary} symbol={symbol} {problem}")
                     return
                 state.phases[symbol] = "fetching"
                 try:

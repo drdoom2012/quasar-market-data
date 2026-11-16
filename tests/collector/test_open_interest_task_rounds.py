@@ -387,10 +387,6 @@ def max_starts_in_any_window(starts: list[int]) -> int:
     return worst
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ADR-0003 A-6: the round still retries every symbol; the shared retry tickets arrive in a later task",
-)
 @pytest.mark.parametrize(("budget", "cadence"), [(400, 3), (200, 7)])
 def test_no_five_minute_window_exceeds_the_round_cost_even_when_every_first_attempt_fails(
     tmp_path: Path, budget: int, cadence: int

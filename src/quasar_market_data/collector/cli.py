@@ -927,7 +927,7 @@ def _open_interest_run(settings: Settings, open_oi_source: OpenInterestOpenSourc
     venue = settings.venues[0]
     config = OpenInterestTaskConfig(
         venue=venue.id,
-        symbols=venue.symbols,
+        symbols=table.symbols,  # ADR-0003 A-6: only the listed symbols ("all" is resolved to the venue's)
         period=Timeframe(table.period),
         publication_delay_ms=table.publication_delay_ms,
         round_offset_ms=table.round_offset_ms,
