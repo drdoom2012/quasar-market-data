@@ -1,5 +1,6 @@
 """The two-phase refresh with open interest (OI-6b, design 8.1, 8.2, 8.9): candles first, then open interest."""
 
+import dataclasses
 import json
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlsplit
@@ -23,7 +24,7 @@ from tests.tools.symbol_overview.oi_helpers import (
 )
 from tools.symbol_overview import judge as judge_module
 from tools.symbol_overview.fetch import TransportError, http_fetch
-from tools.symbol_overview.judge import OiPart
+from tools.symbol_overview.judge import STATE_ORDER, OiPart
 from tools.symbol_overview.model import MAX_BODY_BYTES, TF_MS, OiReport
 from tools.symbol_overview.refresh import Overviewer, Snapshot
 
@@ -179,6 +180,65 @@ def test_other_failures_of_the_open_interest_call_touch_only_that_part() -> None
         if detail:
             assert block["reasons"][0]["detail"] == detail
     assert candle_part(snapshot.body) == baseline(rs)  # no candle field moved
+
+
+# --- open_interest_period of /v1/instruments (ADR-0003 A-6, design 2.5) ---------------------------------------------
+
+
+def with_period(row: Any, period: str | None) -> Any:
+    """``row`` as an A-6 API lists it: ``open_interest_period`` present, a string or an explicit null."""
+    return dataclasses.replace(row, open_interest_period=period, open_interest_known=True)
+
+
+def test_an_explicit_null_period_is_not_collected_and_gets_no_open_interest_call() -> None:
+    plain = rows(3)
+    rs = [with_period(plain[0], "5m"), with_period(plain[1], None), plain[2]]  # listed, unlisted, older API
+    fetch = StubFetch(stub_routes(rs, health_open_interest=HEALTHY))
+
+    snapshot = run(fetch)
+
+    asked = [q["symbol"] for q in queries(fetch, OI)]
+    assert sorted(asked) == sorted([rs[0].symbol, rs[2].symbol])  # the absent key is asked exactly as before
+    symbols = by_symbol(snapshot)
+    assert symbols[rs[1].symbol]["open_interest"]["state"] == "not_collected"
+    assert symbols[rs[1].symbol]["open_interest"]["strip"] is None
+    assert symbols[rs[0].symbol]["open_interest"]["state"] == "ok"
+    assert symbols[rs[2].symbol]["open_interest"]["state"] == "ok"
+    assert all(s["state"] == "ok" for s in symbols.values())  # the candle headline is untouched
+    summary = body_of(snapshot)["open_interest"]["summary"]
+    assert (summary["not_collected"], summary["ok"], summary["total"]) == (1, 2, 3)
+    assert list(body_of(snapshot)["summary"]) == ["total", *STATE_ORDER]  # the candle summary's keys do not change
+    assert body_of(snapshot)["refresh"]["oi_not_asked"] == 0
+    assert candle_part(snapshot.body) == baseline(rs)
+
+
+def test_a_not_collected_symbol_is_not_counted_as_not_asked_after_the_deadline() -> None:
+    plain = rows(2)
+    rs = [with_period(plain[0], None), plain[1]]
+    clock = Clock()
+
+    def slow_candles(path: str) -> None:
+        if urlsplit(path).path == CANDLE:
+            clock.now += 61.0
+
+    fetch = StubFetch(stub_routes(rs, health_open_interest=HEALTHY), on_call=slow_candles)
+
+    snapshot = run(fetch, clock, concurrency=1, deadline_s=60.0)
+
+    symbols = by_symbol(snapshot)
+    assert symbols[rs[0].symbol]["open_interest"]["state"] == "not_collected"
+    assert symbols[rs[1].symbol]["open_interest"]["state"] == "unknown"
+    assert body_of(snapshot)["refresh"]["oi_not_asked"] == 1 and fetch.count(OI) == 0
+
+
+def test_an_unusable_health_object_keeps_every_symbol_unknown_even_an_unlisted_one() -> None:
+    rs = [with_period(rows(1)[0], None)]
+    fetch = StubFetch(stub_routes(rs, health_open_interest=3))
+
+    snapshot = run(fetch)
+
+    assert fetch.count(OI) == 0
+    assert by_symbol(snapshot)[rs[0].symbol]["open_interest"]["state"] == "unknown"
 
 
 # --- the deadline ----------------------------------------------------------------------------------------------------

@@ -17,10 +17,12 @@ from tests.tools.symbol_overview.oi_helpers import (
     slot,
 )
 from tools.symbol_overview.judge import (
+    OI_STATE_ORDER,
     STATE_ORDER,
     OiPart,
     build_overview,
     judge_open_interest,
+    judge_open_interest_not_collected,
     open_interest_summary,
 )
 from tools.symbol_overview.model import (
@@ -218,10 +220,11 @@ def report_with(state: str) -> OiReport:
 
 
 def test_summary_counts_each_symbol_once_by_headline() -> None:
-    reports = [report_with(s) for s in ("ok", "ok", "holes", "stale", "no_data", "unknown", "behind", "conflict")]
+    states = ("ok", "ok", "holes", "stale", "no_data", "unknown", "behind", "conflict", "not_collected")
+    reports = [report_with(s) for s in states]
 
     assert open_interest_summary(reports) == {
-        "total": 8,
+        "total": 9,
         "no_data": 1,
         "unknown": 1,
         "stale": 1,
@@ -229,11 +232,13 @@ def test_summary_counts_each_symbol_once_by_headline() -> None:
         "holes": 1,
         "behind": 1,
         "ok": 2,
+        "not_collected": 1,
     }
 
 
 def test_summary_has_every_state_key_with_zero() -> None:
-    assert open_interest_summary([]) == {"total": 0, **dict.fromkeys(STATE_ORDER, 0)}
+    assert open_interest_summary([]) == {"total": 0, **dict.fromkeys(OI_STATE_ORDER, 0)}
+    assert OI_STATE_ORDER == (*STATE_ORDER, "not_collected")  # the candle order is unchanged; one key is added
     assert "unrecoverable" not in open_interest_summary([])  # option C: no tile
 
 
@@ -375,3 +380,27 @@ def test_the_open_interest_report_carries_the_present_slots_of_the_answer() -> N
     report = judge_open_interest(instrument(), coverage, OI_WINDOW)
     assert report.present_slots == coverage.present_slots == 2
     assert judge_open_interest(instrument(), Invalid("transport", "timeout"), OI_WINDOW).present_slots is None
+
+
+# --- not collected (ADR-0003 A-6, design 2.5) --------------------------------------------------------------------------
+
+
+def test_a_not_collected_symbol_has_its_own_state_and_no_numbers() -> None:
+    report = judge_open_interest_not_collected()
+
+    assert report.state == "not_collected"
+    assert codes(report) == ["not_collected"]
+    assert (report.oldest_time_ms, report.newest_time_ms, report.as_of_ms, report.strip) == (None, None, None, None)
+    assert report.present_slots is None
+
+
+def test_the_summary_counts_not_collected_and_the_candle_summary_keys_do_not_change() -> None:
+    stored = judged(doc_from_states(oldest=O, newest=N))
+    unlisted = judge_open_interest_not_collected()
+    body = overview(enabled_part(stored, unlisted), [candle_report(), candle_report()])
+
+    assert body["open_interest"]["summary"]["not_collected"] == 1 and body["open_interest"]["summary"]["ok"] == 1
+    assert list(body["summary"]) == ["total", *STATE_ORDER]
+    assert "not_collected" not in body["summary"]
+    assert body["symbols"][1]["open_interest"]["state"] == "not_collected"
+    assert [s["state"] for s in body["symbols"]] == ["ok", "ok"]

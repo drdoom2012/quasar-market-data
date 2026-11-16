@@ -145,7 +145,12 @@ def instruments_result(status: int, content_type: str | None, body: bytes) -> tu
             return _bad("schema")
         if newest is not None and not _aligned_ts(newest):
             return _bad("schema")
-        rows.append(InstrumentRow(venue, symbol, timeframe, newest))
+        # ADR-0003 A-6: an absent key is an API older than A-6 (unknown, judged as before); null is "not collected"
+        known = "open_interest_period" in item
+        period = item.get("open_interest_period")
+        if period is not None and not isinstance(period, str):
+            return _bad("schema")
+        rows.append(InstrumentRow(venue, symbol, timeframe, newest, period, known))
     if len({(r.venue, r.symbol, r.timeframe) for r in rows}) != len(rows):
         return _bad("schema")
     if not rows:

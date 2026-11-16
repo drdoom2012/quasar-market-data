@@ -25,6 +25,7 @@ from tools.symbol_overview.judge import (
     judge_funding,
     judge_funding_failure,
     judge_open_interest,
+    judge_open_interest_not_collected,
     judge_symbol,
     page_error,
 )
@@ -207,6 +208,8 @@ class Overviewer:
         def one(instrument: InstrumentRow) -> OiReport:
             if instrument.venue != VENUE or instrument.timeframe != TIMEFRAME:
                 return judge_open_interest(instrument, Invalid("schema", "unsupported_series"), oi_window)
+            if instrument.open_interest_not_collected:  # ADR-0003 A-6: an explicit null period, no call is made
+                return judge_open_interest_not_collected()
             if self._monotonic() - started > self._deadline_s:
                 deadline_hit.set()
                 not_asked.append(instrument.symbol)

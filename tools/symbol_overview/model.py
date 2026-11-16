@@ -157,6 +157,15 @@ class InstrumentRow:
     symbol: str
     timeframe: str
     newest_open_time_ms: int | None  # None: nothing stored
+    # ``open_interest_period`` of ``/v1/instruments`` (ADR-0003 A-6). ``open_interest_known`` is False when the key is
+    # absent (an API older than A-6): open interest is then asked and judged as before. When it is True, a None period
+    # is an explicit null: the symbol's open interest is not collected and is never asked.
+    open_interest_period: str | None = None
+    open_interest_known: bool = False
+
+    @property
+    def open_interest_not_collected(self) -> bool:
+        return self.open_interest_known and self.open_interest_period is None
 
 
 @dataclass(frozen=True)

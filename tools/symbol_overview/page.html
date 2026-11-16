@@ -106,7 +106,7 @@
   .names a { color: var(--link); text-decoration: none; font-weight: 500; }
   .names a:hover { text-decoration: underline; }
   .names a.lvl-warn { color: var(--warn); } .names a.lvl-bad { color: var(--bad); }
-  .s-ok { color: var(--ok); } .s-behind, .s-holes, .s-unverified, .s-partly_verified { color: var(--warn); } .s-stale, .s-conflict, .s-unknown, .s-quiet { color: var(--bad); } .s-no_data { color: var(--none); }
+  .s-ok { color: var(--ok); } .s-behind, .s-holes, .s-unverified, .s-partly_verified { color: var(--warn); } .s-stale, .s-conflict, .s-unknown, .s-quiet { color: var(--bad); } .s-no_data { color: var(--none); } .s-not_collected { color: var(--muted); }
 
   @media (max-width: 900px) {
     .tiles { grid-template-columns: repeat(2, 1fr); }
@@ -268,7 +268,7 @@ const TEXT = {
   never: "nothing yet",
   age: (s) => `state from the API, fetched ${s} s ago`,
   states: { no_data: "no data", unknown: "cannot judge", stale: "stale", conflict: "conflict", holes: "holes", behind: "behind", ok: "ok",
-    quiet: "quiet", unverified: "not verified", partly_verified: "partly verified", unrecognised: "unrecognised" },
+    quiet: "quiet", unverified: "not verified", partly_verified: "partly verified", not_collected: "not collected", unrecognised: "unrecognised" },
   title: "Market Data Overview",
   subtitle: "State and quality of collection for all tracked symbols.",
   tiles: { symbols: "Symbols", healthy: "Healthy", warning: "Warning", critical: "Critical" },
@@ -296,6 +296,7 @@ const TEXT = {
     missing: (r) => `${slots(r.slots)} without a row (runs: ${r.runs}); Binance omits periods without trades and the API cannot tell that from a lost row`,
     due: (r) => `behind by ${slots(r.slots)}`,
     unrecoverable: (r, b) => `${slots(r.slots)} inside the stored history have no row and are older than the retrieval horizon (${days(b.retrieval_horizon_ms)} days), so they can no longer be fetched`,
+    not_collected: () => "not an open interest symbol of the API's configuration, so it is not collected",
   },
   fundingReasons: {
     no_data: () => "no funding settlement and no verified span stored (the API cannot tell whether some should have been)",
@@ -343,7 +344,10 @@ const hours = (ms) => (ms == null ? "the API's threshold" : `${Math.round(ms / 3
 const ORDER = ["no_data", "unknown", "stale", "conflict", "holes", "behind", "ok"];
 // The states of the funding part (design 4.3) and the one rank over all three parts: the worst state of any part decides the order of the list.
 const FUNDING_ORDER = ["no_data", "unknown", "conflict", "quiet", "behind", "unverified", "partly_verified", "ok"];
-const RANK_ORDER = ["no_data", "unknown", "stale", "conflict", "quiet", "holes", "behind", "unverified", "partly_verified", "ok"];
+// `not_collected` (ADR-0003 A-6: open interest of a symbol the API does not collect) ranks after `ok`: it never outranks a real state and is not a problem.
+const RANK_ORDER = ["no_data", "unknown", "stale", "conflict", "quiet", "holes", "behind", "unverified", "partly_verified", "ok", "not_collected"];
+// The states that are not problems.
+function fine(state) { return state === "ok" || state === "not_collected"; }
 const POLL_MS = 60000, OLD_AFTER_S = 180;
 
 function fmt(ms) { return ms == null ? "–" : new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC"; }
@@ -375,7 +379,7 @@ function worstRank(s, status, fstatus = "absent") {
   return Math.min(...states.map(rank));
 }
 function isProblem(s, status, fstatus = "absent") {
-  return [candleState(s), oiStateOf(s, status), fundingStateOf(s, fstatus)].some((x) => x !== null && x !== "ok");
+  return [candleState(s), oiStateOf(s, status), fundingStateOf(s, fstatus)].some((x) => x !== null && !fine(x));
 }
 // Listed when the candle, the open interest OR the funding state is a problem; the worst of them first, then the candle state.
 function problemSymbols(symbols, status, fstatus = "absent") {
@@ -394,7 +398,7 @@ function worstState(s, status, fstatus = "absent") {
   return RANK_ORDER[worstRank(s, status, fstatus)] || "unrecognised";
 }
 // How loud a state is: "ok", "warn", "bad". `no_data` is "bad" here: a symbol with nothing downloaded is not a quiet one.
-const LEVELS = { ok: "ok", behind: "warn", holes: "warn", unverified: "warn", partly_verified: "warn" };
+const LEVELS = { ok: "ok", behind: "warn", holes: "warn", unverified: "warn", partly_verified: "warn", not_collected: "ok" };
 function levelOf(state) { return Object.hasOwn(LEVELS, state) ? LEVELS[state] : "bad"; }
 // The headline over the whole page. Green only when there are symbols, none is a problem and the refresh finished;
 // anything else is never green (nothing says it is fine).
@@ -429,8 +433,9 @@ function partCoverage(symbols, status, fstatus = "absent") {
   return PARTS.map((part) => {
     const partStatus = part === "openInterest" ? status : part === "funding" ? fstatus : "enabled";
     if (!applies(partStatus)) return { part, active: false, ok: 0, total: 0, note: notes[part][partStatus] || null };
-    const ok = symbols.filter((s) => partState(s, part, status, fstatus) === "ok").length;
-    return { part, active: true, ok, total: symbols.length, note: null };
+    const counted = symbols.filter((s) => partState(s, part, status, fstatus) !== "not_collected");
+    const ok = counted.filter((s) => partState(s, part, status, fstatus) === "ok").length;
+    return { part, active: true, ok, total: counted.length, note: null };
   });
 }
 // One row per part and non-ok state actually seen ("unrecognised" counts as the worst), worst state first. A row can be in several rows: the counts are per cause and are not summed.
@@ -442,7 +447,7 @@ function causeRows(symbols, status, fstatus = "absent") {
     const counts = new Map();
     for (const s of symbols) {
       const state = partState(s, part, status, fstatus);
-      if (state === "ok" || state === null) continue;
+      if (state === null || fine(state)) continue;
       counts.set(state, (counts.get(state) || 0) + 1);
     }
     for (const [state, count] of counts) rows.push({ part, state, count, level: levelOf(state), order });

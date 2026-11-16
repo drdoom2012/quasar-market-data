@@ -274,6 +274,8 @@ def stub_routes(
                         "symbol": r.symbol,
                         "timeframe": r.timeframe,
                         "newest_open_time_ms": r.newest_open_time_ms,
+                        # an API older than A-6 has no key at all; only a row built as "known" carries it
+                        **({"open_interest_period": r.open_interest_period} if r.open_interest_known else {}),
                     }
                     for r in rows
                 ]

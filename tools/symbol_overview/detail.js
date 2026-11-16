@@ -31,6 +31,7 @@ const DETAIL_TEXT = {
   noData: "no data in this range",
   nothingStored: "nothing stored yet",
   notEnabled: "not enabled in this deployment",
+  notCollected: "not collected",  // ADR-0003 A-6: the API lists the symbol with open_interest_period null
   noSettlement: "no settlement stored in the last 7 days",  // an empty or unverified window does not say none occurred
   specialNotPlotted: (n) => `${n} ${n === 1 ? "special settlement" : "special settlements"} in this range ${n === 1 ? "is" : "are"} not plotted`,
   fetched: (s) => `answer is up to 60 s old; fetched ${s} s ago`,
@@ -187,6 +188,7 @@ function qualityRows(s, status, fstatus, finfo) {
 function partMessage(part, hasRows, newestMs) {
   if (part.status === "empty") return DETAIL_TEXT.nothingStored;
   if (part.status === "disabled") return DETAIL_TEXT.notEnabled;
+  if (part.status === "not_collected") return DETAIL_TEXT.notCollected;
   if (part.status === "error") return `cannot be loaded (${part.code}${part.detail ? ": " + part.detail : ""})`;
   if (part.status !== "ok") return "cannot be shown";
   if (hasRows) return null;
@@ -471,7 +473,8 @@ function detailDrawBody(row) {
       q.state === null ? el("span", { class: "dash" }, "–") : detailTag(q.state),
       el("span", { class: "note", title: q.lines.join("\n") }, q.lines.join(" · ")))));
 
-  const oiCoverage = oiStateOf(row, status) === null ? null : openInterestCoverage(row.open_interest, data.open_interest && data.open_interest.window);
+  const oiShown = oiStateOf(row, status) !== null && oiStateOf(row, status) !== "not_collected";  // nothing is collected, so no bar
+  const oiCoverage = !oiShown ? null : openInterestCoverage(row.open_interest, data.open_interest && data.open_interest.window);
   const bar = (label, share, note) => {
     const track = el("span", { class: "track" });
     if (share) { const fill = el("b"); fill.style.width = `${share.present / share.span * 100}%`; track.append(fill); }
@@ -480,7 +483,7 @@ function detailDrawBody(row) {
   const fundingState = fundingStateOf(row, fstatus);
   detailFill($("detail-coverage"), el("h3", {}, `${DETAIL_TEXT.sections.coverage} (${DETAIL_TEXT.coverageOf})`),
     ...bar(TEXT.rows.candles, coverage, coverage ? "" : "cannot be computed from the overview's numbers"),
-    ...(oiStateOf(row, status) === null ? [] : bar(TEXT.rows.openInterest, oiCoverage, oiCoverage ? "" : "cannot be computed from the overview's numbers")),
+    ...(!oiShown ? [] : bar(TEXT.rows.openInterest, oiCoverage, oiCoverage ? "" : "cannot be computed from the overview's numbers")),
     ...(fundingState === null ? [] : [el("div", { class: "bar" }, el("span", { class: "lbl" }, TEXT.rows.funding), detailTag(fundingState)), el("div", { class: "note" }, DETAIL_TEXT.coverageFunding)]));
 
   detailDrawCharts(doc);

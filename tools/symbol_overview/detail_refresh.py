@@ -24,6 +24,7 @@ from tools.symbol_overview.detail import (
     part_disabled,
     part_empty,
     part_error,
+    part_not_collected,
     part_ok,
 )
 from tools.symbol_overview.detail_validate import (
@@ -266,6 +267,8 @@ class Detailer:
             return part_disabled()
         if isinstance(health, Invalid):
             return part_error(health)
+        if instrument.open_interest_not_collected:  # ADR-0003 A-6: an explicit null period, no call is made
+            return part_not_collected()
         window = windows.open_interest
         pages = self._read_pages(
             started, window.start, window.end, open_interest_rows_path, open_interest_page_result, instrument

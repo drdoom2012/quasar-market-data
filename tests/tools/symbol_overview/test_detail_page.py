@@ -13,6 +13,7 @@ from typing import Any
 
 from tests.tools.symbol_overview.test_funding_page import fund, js, sym
 from tests.tools.symbol_overview.test_oi_page import MARKER, NODE, SCRIPT, needs_node, reason
+from tests.tools.symbol_overview.test_oi_page import oi as oi_block
 
 DETAIL = (Path(__file__).resolve().parents[3] / "tools" / "symbol_overview" / "detail.js").read_text(encoding="utf-8")
 TF = 300_000
@@ -671,3 +672,21 @@ def test_the_chart_is_made_only_when_a_new_document_arrives_and_is_removed_when_
 
 def test_a_missing_library_is_said_not_thrown() -> None:
     assert 'typeof LightweightCharts === "undefined"' in DETAIL and "chartsFailed" in DETAIL
+
+
+# --- not collected (ADR-0003 A-6, design 2.5) --------------------------------------------------------------------------
+
+
+@needs_node
+def test_open_interest_that_is_not_collected_says_so_in_the_cards_the_pane_and_the_quality_row() -> None:
+    part = {"status": "not_collected", "code": "", "detail": ""}
+    cards = call(f"kpiModel({js(detail_doc(open_interest=part))})")
+    assert cards["openInterest"] == {"status": "not_collected", "head": None, "lines": ["not collected"]}
+    assert call(f"paneModel({js(part)})") == {"draw": False, "text": "not collected"}
+    row = series(open_interest={**oi_block("not_collected"), "reasons": [reason("not_collected", 0, 0)]})
+    quality = rows_of(call(f"qualityRows({js(row)}, 'enabled', 'enabled', null)"))
+    assert quality["openInterest"]["state"] == "not_collected"
+    assert quality["openInterest"]["lines"] == [
+        "not an open interest symbol of the API's configuration, so it is not collected"
+    ]
+    assert call("stateText('not_collected')") == "not collected"
