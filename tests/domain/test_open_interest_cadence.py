@@ -2,13 +2,20 @@ import random
 
 import pytest
 
+from quasar_market_data.collector.binance_usdm_open_interest import MAX_IN_FLIGHT
 from quasar_market_data.domain.open_interest_cadence import (
     MAX_BUDGET_PER_5MIN,
     MAX_CADENCE,
     MIN_BUDGET_PER_5MIN,
+    RETRY_RESERVE,
+    ROUND_IN_FLIGHT,
     CadenceError,
     backfill_share,
+    largest_symbol_count,
     open_interest_cadence,
+    pace_limit_ms,
+    retry_reserve,
+    round_cost,
     steady_budget,
     symbols_for_round,
 )
@@ -20,45 +27,163 @@ P5 = Timeframe("5m")
 FIVE_MIN = 300_000
 
 
-def largest_accepted(budget: int) -> int:
-    return MAX_CADENCE * ((steady_budget(budget) - 2) // 2)
-
-
 def test_constants() -> None:
     assert (MIN_BUDGET_PER_5MIN, MAX_BUDGET_PER_5MIN, MAX_CADENCE) == (100, 400, 12)
     assert steady_budget(400) == 300
     assert steady_budget(100) == 75
 
 
-@pytest.mark.parametrize(("symbols", "expected"), [(1, 1), (149, 1), (150, 2), (300, 3), (600, 5), (1_788, 12)])
-def test_cadence_at_default_budget(symbols: int, expected: int) -> None:
-    assert open_interest_cadence(symbols, 400) == expected
+def test_constants_of_the_shared_reserve() -> None:
+    assert RETRY_RESERVE == 50
+    assert ROUND_IN_FLIGHT == 2
 
 
-def test_cadence_refuses_too_many_symbols() -> None:
-    with pytest.raises(CadenceError, match="1788"):
-        open_interest_cadence(1_789, 400)
-    with pytest.raises(CadenceError, match="432"):
-        open_interest_cadence(433, 100)
+def test_the_domain_in_flight_count_equals_the_collectors() -> None:
+    # The domain must not import the collector; this pins that the two constants cannot drift apart.
+    assert MAX_IN_FLIGHT == ROUND_IN_FLIGHT
 
 
 @pytest.mark.parametrize(
-    ("symbols", "budget", "expected"), [(10, 100, 1), (36, 100, 1), (37, 100, 2), (432, 100, 12), (600, 200, 9)]
+    ("symbols", "budget", "expected", "share"),
+    [
+        (10, 100, 1, None),
+        (36, 100, 1, None),
+        (37, 100, 2, None),
+        (432, 100, 12, None),
+        (200, 400, 1, 148),
+        (248, 400, 1, None),
+        (249, 400, 2, None),
+        (522, 400, 3, 174),
+        (600, 400, 3, 148),
+        (200, 200, 3, 81),
+        (522, 200, 6, 61),
+        (600, 200, 7, 62),
+        (200, 100, 6, 30),
+        (2_976, 400, 12, 100),
+    ],
 )
-def test_cadence_at_lower_budgets(symbols: int, budget: int, expected: int) -> None:
+def test_fixed_points(symbols: int, budget: int, expected: int, share: int | None) -> None:
     assert open_interest_cadence(symbols, budget) == expected
+    if share is not None:
+        assert backfill_share(symbols, budget) == share
+
+
+def test_433_symbols_at_100_are_refused() -> None:
+    with pytest.raises(CadenceError):
+        open_interest_cadence(433, 100)
+
+
+def test_largest_symbol_count() -> None:
+    assert largest_symbol_count(400) == 2_976
+    assert largest_symbol_count(200) == 1_176
+    assert largest_symbol_count(100) == 432
+    for budget, largest in [(400, 2_976), (200, 1_176), (100, 432)]:
+        open_interest_cadence(largest, budget)
+        with pytest.raises(CadenceError, match=str(largest)):
+            open_interest_cadence(largest + 1, budget)
+
+
+@pytest.mark.parametrize(("round_size", "expected"), [(1, 1), (49, 49), (50, 50), (51, 50), (200, 50)])
+def test_retry_reserve(round_size: int, expected: int) -> None:
+    assert retry_reserve(round_size) == expected
+
+
+@pytest.mark.parametrize("round_size", [0, -1])
+def test_retry_reserve_refuses_an_empty_round(round_size: int) -> None:
+    with pytest.raises(ValueError):
+        retry_reserve(round_size)
+
+
+@pytest.mark.parametrize("round_size", [True, 1.0, "1"])
+def test_retry_reserve_refuses_a_wrong_type(round_size: object) -> None:
+    with pytest.raises(TypeError):
+        retry_reserve(untyped(round_size))
+
+
+@pytest.mark.parametrize(("round_size", "expected"), [(200, 60_000), (131, 39_600), (1, 600), (2, 600), (3, 1_200)])
+def test_pace_limit(round_size: int, expected: int) -> None:
+    assert pace_limit_ms(round_size) == expected
+
+
+@pytest.mark.parametrize("round_size", [0, -1])
+def test_pace_limit_refuses_an_empty_round(round_size: int) -> None:
+    with pytest.raises(ValueError):
+        pace_limit_ms(round_size)
+
+
+def test_pace_limit_refuses_a_wrong_type() -> None:
+    with pytest.raises(TypeError):
+        pace_limit_ms(untyped(True))
+
+
+def test_round_cost_is_requests_reserve_and_time_calls() -> None:
+    assert round_cost(200, 1) == 200 + 50 + 2
+    assert round_cost(40, 1) == 40 + 40 + 2
+    assert round_cost(522, 3) == 174 + 50 + 2
+
+
+def _legacy_cadence(symbols: int, budget: int) -> int:
+    """The per-symbol reserve of ADR-0003 P-10 before A-6, kept here as the oracle: ``2 * ceil(S / c) + 2``."""
+    steady = budget * 3 // 4
+    for c in range(1, MAX_CADENCE + 1):
+        if 2 * -(-symbols // c) + 2 <= steady:
+            return c
+    return MAX_CADENCE + 1
+
+
+def test_every_budget_and_symbol_count() -> None:
+    """Spec section 5, properties (1) to (6), for every integer budget and every symbol count up to largest + 1."""
+    refused = MAX_CADENCE + 1
+    previous_budget: list[int] = []
+    for budget in range(MIN_BUDGET_PER_5MIN, MAX_BUDGET_PER_5MIN + 1):
+        steady = steady_budget(budget)
+        largest = largest_symbol_count(budget)
+        # the closed form of the spec, written independently of the implementation
+        n_at_12 = steady - 52 if steady >= 102 else (steady - 2) // 2
+        assert largest == MAX_CADENCE * n_at_12
+        current: list[int] = []
+        last_c = 1
+        for symbols in range(1, largest + 2):
+            try:
+                c = open_interest_cadence(symbols, budget)
+            except CadenceError:
+                c = refused
+            current.append(c)
+            # (2) 1 <= c <= 12 and refused exactly above the closed form
+            assert (c == refused) == (symbols > largest)
+            if c == refused:
+                # nothing up to 12 fits
+                assert round_cost(symbols, MAX_CADENCE) > steady
+                continue
+            assert 1 <= c <= MAX_CADENCE
+            # (1) c fits and is minimal
+            assert round_cost(symbols, c) <= steady
+            assert c == 1 or round_cost(symbols, c - 1) > steady
+            # (3) never above the legacy cadence
+            assert c <= _legacy_cadence(symbols, budget)
+            # (4) the backfill keeps at least b - steady(b), at least 25; (5) round cost plus share is b
+            share = backfill_share(symbols, budget)
+            assert share >= budget - steady >= 25
+            assert round_cost(symbols, c) + share == budget
+            # (6) non-decreasing in S
+            assert c >= last_c
+            last_c = c
+            # (6) non-increasing in b: the previous (smaller) budget needed at least this cadence
+            if symbols <= len(previous_budget):
+                assert c <= previous_budget[symbols - 1]
+        previous_budget = current
 
 
 @pytest.mark.parametrize("budget", [100, 101, 199, 200, 300, 399, 400])
 def test_backfill_share_is_at_least_a_quarter(budget: int) -> None:
-    for symbols in range(1, largest_accepted(budget) + 1):
+    for symbols in range(1, largest_symbol_count(budget) + 1):
         assert backfill_share(symbols, budget) >= budget - steady_budget(budget)
     with pytest.raises(CadenceError):
-        open_interest_cadence(largest_accepted(budget) + 1, budget)
+        open_interest_cadence(largest_symbol_count(budget) + 1, budget)
 
 
 @pytest.mark.parametrize(
-    ("symbols", "budget", "expected"), [(10, 400, 378), (600, 400, 158), (10, 100, 78), (600, 200, 64)]
+    ("symbols", "budget", "expected"), [(10, 400, 378), (600, 400, 148), (10, 100, 78), (600, 200, 62)]
 )
 def test_backfill_share_values(symbols: int, budget: int, expected: int) -> None:
     assert backfill_share(symbols, budget) == expected

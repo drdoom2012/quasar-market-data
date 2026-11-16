@@ -99,12 +99,12 @@ def test_the_api_and_the_collector_derive_the_same_cadence(count: int, budget: i
 
 
 def test_a_lower_budget_raises_the_cadence_for_the_same_universe() -> None:
-    """S = 300: b = 400 -> steady 300, c = 3 (2 x 100 + 2); b = 200 -> steady 150, c = 5 (2 x 60 + 2; c = 4 needs 152)."""
+    """S = 300: b = 400 -> steady 300, c = 2 (150 + 50 + 2); b = 200 -> steady 150, c = 4 (75 + 50 + 2; c = 3 needs 152)."""
     high = rule_from_settings(settings_for(300, 400))
     low = rule_from_settings(settings_for(300, 200))
 
     assert high is not None and low is not None
-    assert (high.cadence, low.cadence) == (3, 5)
+    assert (high.cadence, low.cadence) == (2, 4)
 
 
 def test_a_universe_that_needs_a_cadence_above_twelve_never_reaches_the_api() -> None:

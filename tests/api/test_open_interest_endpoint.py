@@ -130,7 +130,7 @@ def test_the_rule_echoes_what_the_states_were_computed_with(tmp_path: Path) -> N
     }
 
 
-@pytest.mark.parametrize(("budget", "symbols", "cadence"), [(100, 10, 1), (200, 300, 5), (400, 300, 3)])
+@pytest.mark.parametrize(("budget", "symbols", "cadence"), [(100, 10, 1), (200, 300, 4), (400, 300, 2)])
 def test_the_rule_in_the_body_is_the_one_derived_from_the_file(
     tmp_path: Path, budget: int, symbols: int, cadence: int
 ) -> None:

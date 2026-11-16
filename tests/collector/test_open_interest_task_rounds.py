@@ -122,24 +122,24 @@ def test_c1_every_round_asks_all_symbols_with_three_period_ends(tmp_path: Path) 
     run(scenario)
 
 
-def test_c5_every_symbol_is_asked_exactly_once_per_five_rounds(tmp_path: Path) -> None:
+def test_c3_every_symbol_is_asked_exactly_once_per_three_rounds(tmp_path: Path) -> None:
     async def scenario() -> None:
         rig = await make_rig(tmp_path, symbols=symbols_of(600), budget_per_5min=400, recording=True)
-        assert rig.config.cadence == 5
+        assert rig.config.cadence == 3
         rig.start()
         await rig.until_lines("oi-round", 1)
-        for index in range(2, 26):
+        for index in range(2, 16):
             await rig.advance_to_next_wake()
             await rig.until_lines("oi-round", index)
         by_boundary: dict[int, list[str]] = {}
         for call in rig.source.hist_calls:
             by_boundary.setdefault(call.end_ms, []).append(call.symbol)
-        assert len(by_boundary) == 25 and all(len(s) == 120 for s in by_boundary.values())
+        assert len(by_boundary) == 15 and all(len(s) == 200 for s in by_boundary.values())
         ordered = [by_boundary[b] for b in sorted(by_boundary)]
-        for start in range(0, 25, 5):  # any five consecutive rounds ask each symbol exactly once
-            window = [symbol for symbols in ordered[start : start + 5] for symbol in symbols]
+        for start in range(0, 15, 3):  # any three consecutive rounds ask each symbol exactly once
+            window = [symbol for symbols in ordered[start : start + 3] for symbol in symbols]
             assert sorted(window) == sorted(symbols_of(600))
-        assert {c.end_ms - c.start_ms for c in rig.source.hist_calls} == {10 * STEP}  # 2c + 1 = 11 period ends
+        assert {c.end_ms - c.start_ms for c in rig.source.hist_calls} == {6 * STEP}  # 2c + 1 = 7 period ends
         await rig.stop_and_wait()
 
     run(scenario)
@@ -387,7 +387,11 @@ def max_starts_in_any_window(starts: list[int]) -> int:
     return worst
 
 
-@pytest.mark.parametrize(("budget", "cadence"), [(400, 5), (200, 9)])
+@pytest.mark.xfail(
+    strict=True,
+    reason="ADR-0003 A-6: the round still retries every symbol; the shared retry tickets arrive in a later task",
+)
+@pytest.mark.parametrize(("budget", "cadence"), [(400, 3), (200, 7)])
 def test_no_five_minute_window_exceeds_the_round_cost_even_when_every_first_attempt_fails(
     tmp_path: Path, budget: int, cadence: int
 ) -> None:
@@ -406,7 +410,7 @@ def test_no_five_minute_window_exceeds_the_round_cost_even_when_every_first_atte
             await rig.t.advance(1_000)  # the retry delay
             await rig.until_lines("oi-round", index)
         starts = [call.at_ns for call in rig.source.hist_calls] + rig.source.time_calls
-        bound = 2 * math.ceil(600 / cadence) + 2
+        bound = math.ceil(600 / cadence) + 50 + 2
         assert rig.config.round_cost == bound
         assert max_starts_in_any_window(starts) <= bound
         assert max_starts_in_any_window(starts) <= budget

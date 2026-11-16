@@ -125,7 +125,7 @@ def symbols(count: int) -> tuple[str, ...]:
 
 
 @pytest.mark.parametrize(
-    ("count", "budget", "accepted"), [(432, 100, True), (433, 100, False), (1788, 400, True), (1789, 400, False)]
+    ("count", "budget", "accepted"), [(432, 100, True), (433, 100, False), (2976, 400, True), (2977, 400, False)]
 )
 def test_the_cadence_limit_is_checked_and_names_the_computed_values(count: int, budget: int, accepted: bool) -> None:
     config = text(table(budget_per_5min=str(budget)), symbols(count))
@@ -143,11 +143,11 @@ def test_the_cadence_limit_is_checked_and_names_the_computed_values(count: int, 
         (10, 100, 1),
         (10, 200, 1),
         (10, 400, 1),
-        (150, 400, 2),
-        (150, 200, 3),
+        (150, 400, 1),
+        (150, 200, 2),
         (150, 100, 5),
-        (600, 400, 5),
-        (600, 200, 9),
+        (600, 400, 3),
+        (600, 200, 7),
     ],
 )
 def test_the_collector_derives_the_adr_cadence_from_the_parsed_file(count: int, budget: int, cadence: int) -> None:

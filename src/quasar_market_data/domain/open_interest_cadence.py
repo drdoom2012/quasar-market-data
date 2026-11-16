@@ -1,13 +1,15 @@
-"""Open interest request cadence, budget shares and round assignment (ADR-0003 P-10).
+"""Open interest request cadence, budget shares and round assignment (ADR-0003 P-10, amendment A-6).
 
 Each configured symbol is asked every ``c`` periods. ``c`` is not configured: it is derived from the
 symbol count ``S`` and the configured budget ``b`` (request starts per 5 minutes) by
 ``open_interest_cadence``. The Collector and the API both derive it from this function and the same
 configuration, so they agree.
 
-``steady(b) = floor(3b / 4)``; ``c(S, b)`` is the smallest ``c >= 1`` with ``2 * ceil(S / c) + 2 <= steady(b)``
-(one request and one retry per symbol of a round, plus two server-time calls). The rest of ``b``, at
-least ``b - steady(b)``, is the backfill share. ``c`` above ``MAX_CADENCE`` is refused (fail closed).
+``steady(b) = floor(3b / 4)``. A round asks ``n = ceil(S / c)`` symbols and hands out at most
+``retry_reserve(n) = min(RETRY_RESERVE, n)`` retries, shared by the whole round, plus two server-time calls:
+``round_cost(S, c) = n + retry_reserve(n) + 2``. ``c(S, b)`` is the smallest ``c >= 1`` with
+``round_cost(S, c) <= steady(b)``. The rest of ``b``, at least ``b - steady(b)``, is the backfill share.
+``c`` above ``MAX_CADENCE`` is refused (fail closed).
 
 Integer arithmetic only.
 """
@@ -22,6 +24,11 @@ from quasar_market_data.domain.timestamps import ensure_timestamp_ms
 MIN_BUDGET_PER_5MIN: Final = 100
 MAX_BUDGET_PER_5MIN: Final = 400
 MAX_CADENCE: Final = 12
+RETRY_RESERVE: Final = 50
+# Request slots a round keeps in flight. The Collector's ``MAX_IN_FLIGHT`` must equal it; a test pins that, because
+# the domain does not import the Collector.
+ROUND_IN_FLIGHT: Final = 2
+PACE_MS_PER_REQUEST: Final = 600
 
 
 class CadenceError(ValueError):
@@ -46,13 +53,41 @@ def steady_budget(budget_per_5min: int) -> int:
     return budget * 3 // 4
 
 
+def retry_reserve(round_size: int) -> int:
+    """Retries one round may start in all: ``min(RETRY_RESERVE, n)`` for a round of ``n >= 1`` symbols."""
+    size = _ensure_int(round_size, "round_size")
+    if size < 1:
+        raise ValueError(f"round_size must be >= 1, got {size}")
+    return min(RETRY_RESERVE, size)
+
+
 def round_cost(symbol_count: int, c: int) -> int:
-    """Request starts per 5 minutes a round needs: one request and one retry per symbol, plus two time calls."""
-    return 2 * _ceil_div(symbol_count, c) + 2
+    """Request starts per 5 minutes a round needs: its requests, the shared retry reserve and two time calls."""
+    n = _ceil_div(symbol_count, c)
+    return n + retry_reserve(n) + 2
+
+
+def largest_symbol_count(budget_per_5min: int) -> int:
+    """Largest symbol count accepted at ``budget_per_5min``: the symbols of ``MAX_CADENCE`` full rounds."""
+    steady = steady_budget(budget_per_5min)
+    # n + min(R, n) + 2 <= steady: 2n + 2 while n <= R, otherwise n + R + 2
+    if steady >= 2 * RETRY_RESERVE + 2:
+        per_round = steady - RETRY_RESERVE - 2
+    else:
+        per_round = (steady - 2) // 2
+    return MAX_CADENCE * per_round
+
+
+def pace_limit_ms(round_size: int) -> int:
+    """Span above which a round counts as slow: ``ceil(n / ROUND_IN_FLIGHT)`` requests of 600 ms each."""
+    size = _ensure_int(round_size, "round_size")
+    if size < 1:
+        raise ValueError(f"round_size must be >= 1, got {size}")
+    return _ceil_div(size, ROUND_IN_FLIGHT) * PACE_MS_PER_REQUEST
 
 
 def open_interest_cadence(symbol_count: int, budget_per_5min: int) -> int:
-    """Smallest ``c >= 1`` whose round, retry and time starts fit ``steady(b)``; ``CadenceError`` above 12."""
+    """Smallest ``c >= 1`` whose round, shared reserve and time starts fit ``steady(b)``; ``CadenceError`` above 12."""
     count = _ensure_int(symbol_count, "symbol_count")
     if count < 1:
         raise ValueError(f"symbol_count must be >= 1, got {count}")
@@ -60,15 +95,14 @@ def open_interest_cadence(symbol_count: int, budget_per_5min: int) -> int:
     for c in range(1, MAX_CADENCE + 1):
         if round_cost(count, c) <= steady:
             return c
-    largest = MAX_CADENCE * ((steady - 2) // 2)
     raise CadenceError(
         f"symbol_count {count} needs a cadence above {MAX_CADENCE} at budget_per_5min {budget_per_5min}; "
-        f"the largest accepted symbol count is {largest}"
+        f"the largest accepted symbol count is {largest_symbol_count(budget_per_5min)}"
     )
 
 
 def backfill_share(symbol_count: int, budget_per_5min: int) -> int:
-    """Request starts per 5 minutes left for the backfill: ``b - 2 * ceil(S / c) - 2``."""
+    """Request starts per 5 minutes left for the backfill: ``b - round_cost(S, c)``."""
     c = open_interest_cadence(symbol_count, budget_per_5min)
     return budget_per_5min - round_cost(symbol_count, c)
 

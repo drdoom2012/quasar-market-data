@@ -738,7 +738,7 @@ def test_with_realistic_request_latency_the_catch_up_still_gets_its_share(tmp_pa
     async def scenario() -> None:
         symbols = tuple(f"S{index:03d}/USDT:USDT" for index in range(149))
         rig = await make_rig(tmp_path, symbols=symbols, count_budget_in_source=True)
-        assert rig.config.cadence == 1 and rig.config.round_cost == 300
+        assert rig.config.cadence == 1 and rig.config.round_cost == 201
         rig.source.round_delay_ms = 100
         rig.source.rtt_ms = 50
         rig.align_to_next_wake()
@@ -750,7 +750,7 @@ def test_with_realistic_request_latency_the_catch_up_still_gets_its_share(tmp_pa
             await rig.t.advance(1_000)
         await rig.until_lines("oi-catchup", 1)
         line = rig.lines_with("oi-catchup")[0]
-        assert int(field(line, "pages")) >= 90  # the share is b - round cost = 100; zero before the fix
+        assert int(field(line, "pages")) >= 90  # the share is b - round cost = 199; zero before the fix
         await rig.stop_and_wait()
 
     run(scenario)
