@@ -351,7 +351,7 @@ Planned latency at `b = 400` (definition and limits under **Timing**; `p` is the
 
 | `S` | `c` | Rounds + retries + time | Backfill share | Planned, publication ≤ 200 s | Planned, later publication |
 |---|---|---|---|---|---|
-| 10 (the shipped files before A-6) | 1 | 22 | 378 | 200 s + `p` | 500 s + `p` |
+| 10 | 1 | 22 | 378 | 200 s + `p` | 500 s + `p` |
 | 200 (the shipped subset, D-3) | 1 | 252 | 148 | 200 s + `p` | 500 s + `p` |
 | 248 (largest at `c = 1`) | 1 | 300 | 100 | 200 s + `p` | 500 s + `p` |
 | 300 | 2 | 202 | 198 | 500 s + `p` (8 min) | 800 s + `p` (13 min) |
@@ -749,7 +749,7 @@ the key `symbols` and the new formula.
   connection and time slot (P-9).
 - At the architecture's 600-symbol target each symbol is asked every 15 minutes (`c = 3`, A-6; `c = 5` before); the
   stored data stays at 5m and the planned latency in an ideal run is up to about 18 minutes, `1 100 s + p` (P-10).
-  No latency is guaranteed; the read side reports what is not yet stored. Today's 10 symbols keep `c = 1`. A lower
+  No latency is guaranteed; the read side reports what is not yet stored. Up to 248 symbols keep `c = 1` at `b = 400`. A lower
   `budget_per_5min` raises `c`.
 - With the shipped subset of 200 symbols (A-6) `c = 1`: a row published within 200 s is stored by about `e + 250 s`
   and a late-published row by about `e + 550 s` in an ideal run, estimated and labelled as such (P-10, "R1 latency").
@@ -774,7 +774,7 @@ the key `symbols` and the new formula.
 | O-2 | Budget: default and maximum 400 of 1 000 per 5 min (40 %), minimum 100, leaving at least 60 % for other users of the IP. | 400 (P-10) |
 | O-3 | Name of the "not yet expected" state: `not_yet_expected` (rule-based, same as candles) or the review's `not_yet_published`? | `not_yet_expected` (P-7) |
 | O-4 | `conflicted_series` in `/health/ingest` for open interest makes open interest health stricter than candle health. Keep, or mirror candles (no conflict count)? | keep (P-8) |
-| O-5 | Latency at scale: is a planned latency of up to ~28 minutes (ideal run, no guarantee) acceptable at 600 symbols and `b = 400` (`c = 5`)? The alternative is a higher budget share than 40 % (O-2). | accept (P-10). **Answered by A-6 (2026-11-16):** the 40 % share is kept; the shared retry reserve lowers `c` to 3 at 600 symbols (up to `1 100 s + p`, about 18 minutes), and the request for a row stored by `e + 600 s` is met in an ideal run by a configured subset of 200 symbols with `c = 1` (P-10, P-13), not by a higher budget |
+| O-5 | Latency at scale: is a planned latency of up to ~28 minutes (ideal run, no guarantee) acceptable at 600 symbols and `b = 400` (`c = 5`)? The alternative is a higher budget share than 40 % (O-2). | accept (P-10). **Answered by A-6 (2026-11-16):** the 40 % share is kept; the shared retry reserve lowers `c` to 3 at 600 symbols (up to `1 100 s + p`, about 18 minutes), and the request for a row stored by `e + 600 s` is met in an ideal run by a configured subset of 200 symbols with `c = 1` (estimated, P-10 "R1 latency"; P-13), not by a higher budget |
 
 ## Part 3 — Evidence
 
@@ -909,7 +909,7 @@ were throwaway in the session scratchpad and are not in the repository.
   and the timeout is revisited after the soak; **D-7** the pace rule is adopted.
   1. **Shared retry reserve.** The per-symbol reserve `n` is replaced by `min(50, n)` per round, handed out as atomic
      tickets; a symbol without a ticket ends `retry_reserve_exhausted` and waits for its next request. `c` is never
-     above the old one; the largest `S` is 2 976 at 400 (was 1 788), 1 176 at 200 (888), 432 at 100 (unchanged); the
+     above the old one (and differs only where `n > 50`); the largest `S` is 2 976 at 400 (was 1 788), 1 176 at 200 (888), 432 at 100 (unchanged); the
      backfill share is `b − round_cost(S, c)` (P-10, P-12, P-13).
   2. **Open interest symbols.** `[open_interest].symbols` (`"all"` or a list) is required; `S` is its count; the
      rounds and the backfill request only these symbols (P-13, P-12). The shipped files list 200 symbols by 24 h
@@ -921,8 +921,10 @@ were throwaway in the session scratchpad and are not in the repository.
      `pace_limit_ms(n) = ceil(n / MAX_IN_FLIGHT) × 600 ms`; the allocation of P-10 is unchanged.
   5. **API (additive).** `/health/ingest` `open_interest` gains `collected` (the listed series only) and
      `/v1/instruments` gains `open_interest_period`; the value of `behind[].configured` follows the list. With
-     `symbols = "all"` every existing value equals the one of a build before A-6 reading the same file without the key
-     (contract 6.4.2, 6.5.7, 6.5.8).
+     `symbols = "all"` the outer health fields equal those of a build before A-6 reading the same file without the key
+     wherever the cadence `c` is unchanged (`ceil(S / c) ≤ 50`); `c`, `rule.expected_after_ms` and the states derived from
+     them follow the new formula otherwise (for example `c` goes from 4 to 3 at the 522 venue symbols of the shipped
+     files at 400) (contract 6.4.2, 6.5.7, 6.5.8).
   6. **Unchanged:** the schema (no migration), the row identity, the eligibility, the slot states, `readable_by_ms`,
      the endpoints and their fields, the candle path, funding rate, `ExtensionPause`, the budget range `[100, 400]`,
      and `fetch-oi-once` (it takes `--symbol` and never reads the list). New invariants INV-146 to INV-151.

@@ -28,7 +28,7 @@ D-1, D-3 and D-4 were approved as proposed, and D-2 was revised to the additive 
 - Largest accepted `S`: `12 × (steady − 52)` when `steady ≥ 102`, otherwise `12 × ((steady − 2) // 2)`. That is 2 976 at 400, 1 176 at 200 and 432 at 100.
 - `pace_limit_ms(n) = ceil(n / MAX_IN_FLIGHT) × 600`. That is 60 000 at `n = 200` and 39 600 at `n = 131`.
 - No schema change, no migration, no new table; no stored row is touched.
-- Every existing response field keeps its meaning. With `symbols = "all"` the values equal a pre-A-6 build reading the same file without the key. The only value change is `behind[].configured` with a list (spec §3).
+- Every existing response field keeps its meaning. With `symbols = "all"` the values equal a pre-A-6 build reading the same file without the key only where `c` is the same under both formulas (every round has at most 50 symbols, or the new formula gives the same `c`); where `c` changes (522 symbols at 400: 4 to 3), `rule.cadence`, `expected_after_ms` and the derived states change. The only other value change is `behind[].configured` with a list (spec §3).
 - The symbol list comes only from the file and is never derived at run time.
 - Integer arithmetic only in the domain; the domain imports no CCXT, FastAPI or SQLite (`make imports`).
 - One branch, one PR (squash-merged; the PR title and body are the squash commit message). No release tag or version bump.
@@ -38,7 +38,7 @@ D-1, D-3 and D-4 were approved as proposed, and D-2 was revised to the additive 
 ## Review Focus
 
 - A file whose `symbols` lists a symbol in a different case (`btc/usdt:usdt`) must be refused, not matched. Task 2 tests it.
-- `"all"` must behave like the pre-A-6 build: the same `c`, the same outer health fields, and `collected` equal to the outer counts. Tasks 2 and 6 test it.
+- `"all"` must behave like the pre-A-6 build where `c` is unchanged (at most 50 symbols per round): the same `c`, the same outer health fields, and `collected` equal to the outer counts. Where the new formula lowers `c`, only the `c`-derived values differ. Tasks 2 and 6 test it.
 - A round in which every symbol fails must never start more than `n + 50 + 1` budget starts. Task 3 tests it.
 - `open_interest_period` must be `null` everywhere when `[open_interest]` is absent or `enabled = false`, even if `symbols` lists the symbol. Task 7 tests it.
 - A listed symbol whose only stored series has another period counts as `never_stored`. Task 6 tests it.
@@ -132,7 +132,7 @@ D-1, D-3 and D-4 were approved as proposed, and D-2 was revised to the additive 
   - the cadence is checked with `len(symbols)`.
 
 - [ ] **Step 1: Write the failing tests**
-  - `test_symbols_all_resolves_to_the_venue_symbols` (same `c` as before A-6)
+  - `test_symbols_all_resolves_to_the_venue_symbols` (same `c` as before A-6 when every round has at most 50 symbols)
   - `test_symbols_list_is_sorted_and_kept`
   - `test_symbols_invalid_values_are_rejected_by_key`, parametrized; each case raises `ConfigError` keyed `open_interest.symbols`:
     - the key missing; `""`; `"ALL"`; `[]`; `[1]`;
@@ -256,7 +256,7 @@ Model: `S = 200`, `b = 400`, `round_offset_ms = 200 000`. "Readable" means the w
   - `test_all_makes_collected_equal_the_outer_counts` (all series with the venue, a venue symbol and the period)
   - `test_collected_is_absent_when_open_interest_is_null`
 - [ ] **Step 2: Capture the golden** before changing `app.py`.
-  - Run `git worktree add ../qmd-main main` and use the seeding of `tests/api/test_health_universe.py` (the `golden_database` pattern) with a fixed seed and `as_of_ms`. Use only venue symbols with the configured period, and no `symbols` key.
+  - Run `git worktree add ../qmd-main main` and use the seeding of `tests/api/test_health_universe.py` (the `golden_database` pattern) with a fixed seed and `as_of_ms`. Use only venue symbols with the configured period, at most 50 symbols (so `c` is the same under the old and the new formula), and no `symbols` key.
   - Write `/health/ingest`'s `open_interest` object to `tests/api/golden/open_interest_health_pre_a6.json`.
   - Then run `git worktree remove ../qmd-main`.
 - [ ] **Step 3:** Run the test files. Expected: FAIL.

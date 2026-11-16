@@ -179,7 +179,10 @@ plans holes only for listed symbols (P-12 "per configured series"), and:
 - **Resolution (D-2, revised by the user): an additive `collected` object** inside `/health/ingest`
   `open_interest`, shipped in A-6, so the first production release already has it. Every existing field keeps its
   meaning (`scope: "stored_series"`, the counts, `status`, `behind`). With `symbols = "all"` an A-6 build gives the
-  same values for them as a pre-A-6 build reading the same file without the key (a pre-A-6 build refuses the key).
+  same values for them as a pre-A-6 build reading the same file without the key (a pre-A-6 build refuses the key),
+  **only where the cadence `c` is the same under both formulas** (every round has at most 50 symbols, or the new
+  formula gives the same `c`). Where `c` changes (the shipped 522 symbols at 400: `c` 4 to 3), `rule.cadence`,
+  `rule.expected_after_ms` and the states and counts derived from them change with it.
   `configured` changes only with a list (section 3). No stored row is touched.
 
   ```json
@@ -401,8 +404,9 @@ exception now also covers slow rounds.
   of retired series, `status: "behind"`), `collected.status: "current"`; one listed series stale → it is the first
   entry of `collected.behind` and `collected.status: "behind"`; a listed symbol with no row → `never_stored: 1`,
   `series_count + never_stored = symbol_count`; a conflict on a retired series counts only in the outer object; with
-  `symbols = "all"` the outer fields are byte-identical to a golden captured from `main` on the same seeded database,
-  the same `as_of_ms` and the same file without the key (golden comparison); with `"all"`, `collected` equals the
+  `symbols = "all"` and a file whose `c` is the same under both formulas (at most 50 symbols per round) the outer
+  fields are byte-identical to a golden captured from `main` on the same seeded database, the same `as_of_ms` and the
+  same file without the key (golden comparison); with `"all"`, `collected` equals the
   outer counts when every stored series has the configured venue, a venue symbol and the configured period.
 - Instruments: `open_interest_period` is `"5m"` for listed symbols on every timeframe entry, `null` for the others,
   `null` everywhere when `[open_interest]` is disabled or absent; the other fields and the order are unchanged.
