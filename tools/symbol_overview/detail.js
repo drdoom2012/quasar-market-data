@@ -163,7 +163,7 @@ function qualityRows(s, status, fstatus, finfo) {
   const has = (code) => reasons.some((r) => r.code === code);
   const words = (codes) => reasons.filter((r) => codes.includes(r.code)).map((r) => reasonText(r, s));
   let continuity, delay;
-  const candle = known(s.state);
+  const candle = candleState(s);
   if (candle === "no_data" || candle === "unknown" || candle === "unrecognised") {
     const all = reasons.map((r) => reasonText(r, s));
     continuity = { state: candle, lines: all };

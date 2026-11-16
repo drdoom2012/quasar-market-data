@@ -231,6 +231,18 @@ def test_a_not_collected_symbol_is_not_counted_as_not_asked_after_the_deadline()
     assert body_of(snapshot)["refresh"]["oi_not_asked"] == 1 and fetch.count(OI) == 0
 
 
+def test_a_period_that_is_neither_null_nor_a_string_is_a_page_error_and_no_coverage_is_asked() -> None:
+    plain = rows(2)
+    rs = [with_period(plain[0], "5m"), with_period(plain[1], cast(Any, 5))]
+    fetch = StubFetch(stub_routes(rs, health_open_interest=HEALTHY))
+
+    snapshot = run(fetch)
+
+    assert snapshot.status == 502
+    assert body_of(snapshot) == {"api_error": {"code": "schema", "detail": ""}}  # no state at all, never a green page
+    assert fetch.count(CANDLE) == 0 and fetch.count(OI) == 0
+
+
 def test_an_unusable_health_object_keeps_every_symbol_unknown_even_an_unlisted_one() -> None:
     rs = [with_period(rows(1)[0], None)]
     fetch = StubFetch(stub_routes(rs, health_open_interest=3))

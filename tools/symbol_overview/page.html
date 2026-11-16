@@ -275,6 +275,7 @@ const TEXT = {
   criticalHint: "Includes \"cannot judge\" and \"no data\": the API cannot say more",
   cards: { health: "Symbol health", parts: "Healthy symbols by data", causes: "What is wrong (symbols per cause)", attention: "Needs attention", healthy: "Healthy", notes: "Notes" },
   noHealthy: "No symbol is healthy.",
+  okNotCollected: "open interest not collected",
   rows: { candles: "Candles", openInterest: "Open interest", funding: "Funding rate" },
   noProblems: "Nothing is wrong.",
   prefix: { candles: "candles: ", openInterest: "open interest: ", funding: "funding: " },
@@ -346,6 +347,8 @@ const ORDER = ["no_data", "unknown", "stale", "conflict", "holes", "behind", "ok
 const FUNDING_ORDER = ["no_data", "unknown", "conflict", "quiet", "behind", "unverified", "partly_verified", "ok"];
 // `not_collected` (ADR-0003 A-6: open interest of a symbol the API does not collect) ranks after `ok`: it never outranks a real state and is not a problem.
 const RANK_ORDER = ["no_data", "unknown", "stale", "conflict", "quiet", "holes", "behind", "unverified", "partly_verified", "ok", "not_collected"];
+// The states of the open interest part: the candle ones plus `not_collected`.
+const OI_ORDER = [...ORDER, "not_collected"];
 // The states that are not problems.
 function fine(state) { return state === "ok" || state === "not_collected"; }
 const POLL_MS = 60000, OLD_AFTER_S = 180;
@@ -353,9 +356,10 @@ const POLL_MS = 60000, OLD_AFTER_S = 180;
 function fmt(ms) { return ms == null ? "–" : new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC"; }
 
 // A state the page does not know (a new one, a missing one, even "constructor") is "unrecognised": the worst there is,
-// never echoed from the answer and never a key into an object.
-function known(state) { return RANK_ORDER.includes(state) ? state : "unrecognised"; }
-function candleState(s) { return known(s.state); }
+// never echoed from the answer and never a key into an object. Each part is checked against its own states (`order`),
+// so a state of another part (a candle `not_collected`, a funding `holes`) is unrecognised too: it fails closed.
+function known(state, order) { return order.includes(state) ? state : "unrecognised"; }
+function candleState(s) { return known(s.state, ORDER); }
 
 // The status of the open interest part: "disabled", "unknown", "enabled", or "absent" (a tool that does not report it).
 function oiStatus(data) { return data.open_interest ? data.open_interest.status : "absent"; }
@@ -364,14 +368,14 @@ function applies(status) { return status !== "disabled" && status !== "absent"; 
 // applies and a symbol has no block, nothing says it is fine.
 function oiStateOf(s, status) {
   if (!applies(status)) return null;
-  return s.open_interest ? known(s.open_interest.state) : "unknown";
+  return s.open_interest ? known(s.open_interest.state, OI_ORDER) : "unknown";
 }
 // The status of the funding part: "disabled", "unknown", "enabled", or "absent" (a tool that does not report it).
 // Every function below takes it as an OPTIONAL last parameter; "absent" gives exactly the output of a page without funding.
 function fundingStatus(data) { return data.funding_rate ? data.funding_rate.status : "absent"; }
 function fundingStateOf(s, fstatus = "absent") {
   if (!applies(fstatus)) return null;
-  return s.funding_rate ? known(s.funding_rate.state) : "unknown";
+  return s.funding_rate ? known(s.funding_rate.state, FUNDING_ORDER) : "unknown";
 }
 function rank(state) { return RANK_ORDER.indexOf(state); }
 function worstRank(s, status, fstatus = "absent") {
@@ -543,9 +547,11 @@ function reasonLines(s, status, fstatus = "absent", finfo = null) {
   }
   return lines;
 }
-// Symbols where both parts are ok, each with the information line `unrecoverable` when it has one (option C).
+// Symbols where both parts are ok, each with the information line `unrecoverable` when it has one (option C), or
+// "open interest not collected" for a symbol whose open interest is not collected, so it does not read as ok in it.
 function okEntries(symbols, status, fstatus = "absent") {
   return symbols.filter((s) => !isProblem(s, status, fstatus)).map((s) => {
+    if (oiStateOf(s, status) === "not_collected") return { symbol: s.symbol, note: TEXT.okNotCollected };
     const block = s.open_interest;
     const found = block ? block.reasons.find((r) => r.code === "unrecoverable") : undefined;
     return { symbol: s.symbol, note: found ? oiReasonText(found, block) : "" };
