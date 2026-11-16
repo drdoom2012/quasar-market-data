@@ -219,7 +219,7 @@ def test_the_database_path_does_not_depend_on_the_working_directory(
 
 OPEN_INTEREST_TABLE = (
     '\n[open_interest]\nenabled = {enabled}\nperiod = "5m"\npublication_delay_ms = 15000\n'
-    "round_offset_ms = 250000\nbudget_per_5min = 400\nbackfill_days = 29\n"
+    'round_offset_ms = 250000\nbudget_per_5min = 400\nsymbols = "all"\nbackfill_days = 29\n'
 )
 
 

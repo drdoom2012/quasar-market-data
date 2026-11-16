@@ -51,6 +51,7 @@ def settings_for(
             "publication_delay_ms = 15000\n"
             f"round_offset_ms = {offset}\n"
             f"budget_per_5min = {budget}\n"
+            'symbols = "all"\n'
             f"backfill_days = {backfill_days}\n"
         )
     return parse_settings(text, base_dir=BASE)

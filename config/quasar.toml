@@ -553,6 +553,7 @@ period = "5m"
 publication_delay_ms = 15000   # a row is stored only when its period end + this is behind the server-time lower bound
 round_offset_ms = 200000       # 60000..280000: the round for boundary B wakes at B + this
 budget_per_5min = 400          # 100..400 request starts per 300 s (history and server time together)
+symbols = "all"                # "all" (every symbol of the venue) or a list of venue symbols; required (ADR-0003 A-6)
 backfill_days = 7             # 1..30: how far back a hole is still requested; more than 30 stops the process at start
 
 # Funding rate (ADR-0004), judged together with open interest: they share one rate-limit pause.

@@ -29,7 +29,7 @@ from tests.config_files import write_config
 
 TABLE = (
     '\n[open_interest]\nenabled = true\nperiod = "5m"\npublication_delay_ms = 15000\n'
-    "round_offset_ms = 200000\nbudget_per_5min = 250\nbackfill_days = 29\n"
+    'round_offset_ms = 200000\nbudget_per_5min = 250\nsymbols = "all"\nbackfill_days = 29\n'
 )
 
 
