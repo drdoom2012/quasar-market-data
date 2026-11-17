@@ -114,8 +114,8 @@ Rules [P]:
   a value is not a string in the decimal grammar; there are more rows than period ends in the range; the response
   is not a list. Missing rows are **not** an error (P-7).
 - No request uses a `startTime` older than the **retrieval horizon** `H` before the current server lower bound. `H` is
-  the configured `backfill_days` (P-13, amendment A-4; **1 to 30 days**, the shipped files use **29**, one day of
-  margin under the observed 30/31-day edge of Binance, which may itself vary [P]). The request check of the
+  the configured `backfill_days` (P-13, amendment A-4; **1 to 30 days**, the shipped files use **7**; 29 would be one
+  day of margin under the observed 30/31-day edge of Binance, which may itself vary [P]). The request check of the
   adapter is the largest value the file allows (30 days), so a smaller configured `H` is enforced by the plan
   (P-12), not by a second constant.
 
