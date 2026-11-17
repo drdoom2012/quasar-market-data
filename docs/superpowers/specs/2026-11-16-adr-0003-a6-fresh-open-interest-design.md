@@ -9,12 +9,12 @@
   `request_failed_p50_ms`, `request_failed_p99_ms` and `request_failed_max_ms`; the failure duration `f` is the total
   slot time of a failed request; the retry model is corrected (retries queue behind every first attempt) and the
   tables carry the simulated values (2.6); the pace rule says the window after a late or slow round "starts no page".
-  The history of the proposal follows. Revision 3. Revision 2 applied an independent review. Revision 3 (2026-11-16) applies the
-  user's decisions: D-1, D-3, D-4 and D-5 approved as proposed; D-2 revised (retired-series masking resolved before the
-  first production release, additively, section 2.4); latency validated under reserve exhaustion and limiter
-  contention, measured and estimated figures separated (section 2.6); an additive API field for the open interest
-  universe (section 2.7); cadence tests over every budget 100..400; atomic reserve accounting. Constraints the user
-  restated: the 40 % budget cap (60 % of the IP limit left to others), the backfill guarantee, deterministic
+  The history of the proposal follows. Revision 2 applied an independent review. Revision 3 (2026-11-16) applies the
+  user's decisions: D-1, D-3, D-4 and D-5 approved as proposed; D-2 revised by the user (the retired-series masking of
+  open interest health is resolved in A-6, additively, section 2.4); latency validated under reserve exhaustion and
+  limiter contention, measured and estimated figures separated (section 2.6); an additive API field for the open
+  interest universe (section 2.7); cadence tests over every budget 100..400; atomic reserve accounting. Constraints
+  the user restated: the 40 % budget cap (60 % of the IP limit left to others), the backfill guarantee, deterministic
   configuration and the existing schema stay. Revision 4 (2026-11-16) applies an independent review of revision 3 and
   of the plan. Failure duration is now in the latency model, and slow failures, not the reserve, decide R1 under
   errors. A new pace rule (D-7) stops a slow round's pace from propagating through the limiter. The missing cases
@@ -380,7 +380,7 @@ met / missed pair). The late path is exercised for the
 | ID | Question | Decision |
 |---|---|---|
 | D-1 | Form of the key | **approved (2026-11-16):** required `symbols = "all" \| [...]`; the shipped files add it; a file without it exits with code 2 |
-| D-2 | Retired series masking open interest health | **revised by the user (2026-11-16):** resolved before the first production release, existing semantics and data kept: the additive `collected` object (2.4) |
+| D-2 | Retired series masking open interest health | **revised by the user (2026-11-16):** resolve the retired-series masking of open interest health in A-6, keeping historical data and existing contract semantics: the additive `collected` object (2.4) |
 | D-3 | Shipped subset | **approved (2026-11-16):** 200 symbols, chosen once by 24 h quote volume at authoring time (public ticker, no credentials), written into both files, never derived at run time |
 | D-4 | `R` | **approved (2026-11-16):** `R = 50` |
 | D-5 | Overview tool | **approved (2026-11-16)** as "read the file", then **changed by the user (2026-11-16)** to the API field of 2.7 (2.5) |
