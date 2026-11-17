@@ -261,7 +261,7 @@ def test_the_funding_tiles_keep_their_own_key_list_and_the_others_keep_theirs() 
     assert call("FUNDING_ORDER") == list(FUNDING_STATE_ORDER)
     assert call("ORDER") == ["no_data", "unknown", "stale", "conflict", "holes", "behind", "ok"]
     ranks = call("RANK_ORDER")
-    assert sorted(ranks) == sorted(set(call("ORDER")) | set(FUNDING_STATE_ORDER))
+    assert sorted(ranks) == sorted(set(call("ORDER")) | set(FUNDING_STATE_ORDER) | {"not_collected"})  # A-6
     # the relative order of every existing state is the one of before
     old = call("ORDER")
     assert [s for s in ranks if s in old] == old

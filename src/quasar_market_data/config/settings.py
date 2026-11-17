@@ -9,6 +9,7 @@ import hashlib
 import os
 import re
 import tomllib
+from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
@@ -103,6 +104,7 @@ class OpenInterestSettings:
     round_offset_ms: int
     budget_per_5min: int
     backfill_days: int
+    symbols: tuple[str, ...]  # ADR-0003 A-6: the open interest symbols, sorted; "all" is resolved to the venue's
 
 
 @dataclass(frozen=True)
@@ -300,7 +302,30 @@ def _api(root: dict[str, Any]) -> ApiSettings:
     return ApiSettings(host, _int(table, "api", "port", 1, 65535))
 
 
-def _open_interest(root: dict[str, Any], symbol_count: int) -> OpenInterestSettings | None:
+def _open_interest_symbols(table: dict[str, Any], path: str, venue: Venue) -> tuple[str, ...]:
+    """``"all"`` or a non-empty list of the venue's symbols, case-sensitive and without duplicates (ADR-0003 A-6)."""
+    value = _get(table, path, "symbols")
+    key = f"{path}.symbols"
+    if value == "all" and type(value) is str:
+        return tuple(sorted(venue.symbols))
+    if not isinstance(value, list):
+        raise ConfigError(key, f'must be "all" or an array of venue symbols, got {_kind(value)} {value!r}')
+    if not value:
+        raise ConfigError(key, 'must not be empty; use "all" for every symbol of the venue')
+    for index, item in enumerate(value):
+        if type(item) is not str:
+            raise ConfigError(key, f"entry {index} must be a string, got {_kind(item)}")
+    if len(set(value)) != len(value):
+        duplicates = sorted(item for item, count in Counter(value).items() if count > 1)
+        raise ConfigError(key, f"has duplicate symbols {duplicates}")
+    known = set(venue.symbols)
+    for item in value:
+        if item not in known:
+            raise ConfigError(key, f"{item!r} is not a symbol of venue {venue.id!r}")
+    return tuple(sorted(value))
+
+
+def _open_interest(root: dict[str, Any], venue: Venue) -> OpenInterestSettings | None:
     if "open_interest" not in root:
         return None
     table = _table(root, "", "open_interest")
@@ -308,7 +333,7 @@ def _open_interest(root: dict[str, Any], symbol_count: int) -> OpenInterestSetti
     _check_keys(
         table,
         path,
-        {"enabled", "period", "publication_delay_ms", "round_offset_ms", "budget_per_5min", "backfill_days"},
+        {"enabled", "period", "publication_delay_ms", "round_offset_ms", "budget_per_5min", "symbols", "backfill_days"},
     )
     enabled = _bool(table, path, "enabled")
     period = _str(table, path, "period")
@@ -318,11 +343,12 @@ def _open_interest(root: dict[str, Any], symbol_count: int) -> OpenInterestSetti
     offset = _int(table, path, "round_offset_ms", MIN_ROUND_OFFSET_MS, MAX_ROUND_OFFSET_MS)
     budget = _int(table, path, "budget_per_5min", MIN_BUDGET_PER_5MIN, MAX_BUDGET_PER_5MIN)
     backfill_days = _int(table, path, "backfill_days", MIN_OI_BACKFILL_DAYS, MAX_OI_BACKFILL_DAYS)  # ADR-0003 A-4
+    symbols = _open_interest_symbols(table, path, venue)
     try:
-        open_interest_cadence(symbol_count, budget)
+        open_interest_cadence(len(symbols), budget)
     except CadenceError as exc:
         raise ConfigError(f"{path}.budget_per_5min", str(exc)) from exc
-    return OpenInterestSettings(enabled, period, delay, offset, budget, backfill_days)
+    return OpenInterestSettings(enabled, period, delay, offset, budget, backfill_days, symbols)
 
 
 def _funding_rate(root: dict[str, Any], symbol_count: int) -> FundingRateSettings | None:
@@ -367,7 +393,7 @@ def parse_settings(text: str, *, base_dir: Path) -> Settings:
     venues = _venues(root)
     collector = _collector(root)
     api = _api(root)
-    open_interest = _open_interest(root, len(venues[0].symbols))
+    open_interest = _open_interest(root, venues[0])
     funding_rate = _funding_rate(root, len(venues[0].symbols))
     needed = steady_state_limit_needed(rule.publication_delay_ms, Timeframe(SUPPORTED_TIMEFRAMES[0]).milliseconds)
     if collector.limit < needed:

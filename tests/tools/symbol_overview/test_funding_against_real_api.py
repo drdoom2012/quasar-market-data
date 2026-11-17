@@ -63,7 +63,14 @@ def universe() -> list[Instrument]:
 
 @contextmanager
 def serve(db_path: Path, *, funding: FundingRateRule | None) -> Iterator[str]:
-    app = create_app(db_path, rule=SAMPLE_RULE, universe=universe(), now_ms=lambda: AT, funding_rate=funding)
+    app = create_app(
+        db_path,
+        rule=SAMPLE_RULE,
+        universe=universe(),
+        open_interest_symbols=frozenset(),
+        now_ms=lambda: AT,
+        funding_rate=funding,
+    )
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()

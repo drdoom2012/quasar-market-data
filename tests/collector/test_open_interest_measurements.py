@@ -56,6 +56,12 @@ def test_the_line_has_every_field() -> None:
         "candle_p50_ms": "7.0",
         "candle_p99_ms": "11.0",
         "candle_max_ms": "11.0",
+        "request_ok_p50_ms": "na",
+        "request_ok_p99_ms": "na",
+        "request_ok_max_ms": "na",
+        "request_failed_p50_ms": "na",
+        "request_failed_p99_ms": "na",
+        "request_failed_max_ms": "na",
     }
 
 
@@ -71,3 +77,38 @@ def test_a_partial_report_counts_the_transactions_that_committed() -> None:
     m.record_open_interest_write(report([4, 6]), 500)  # two of five transactions committed before the failure
     values = fields(m.line(3_600_000))
     assert values["oi_tx"] == "2" and values["oi100_tx"] == "2"
+
+
+def test_measurement_line_reports_request_durations() -> None:
+    m = OpenInterestMeasurements()
+    for duration_ms in range(1, 101):  # 100 successes of 1..100 ms
+        m.record_request(duration_ms * MS, ok=True)
+    m.record_request(10_000 * MS, ok=False)
+    m.record_request(500 * MS, ok=False)
+    line = m.line(3_600_000)
+    assert line is not None
+    values = fields(line)
+    ok = [values[f"request_ok_{name}_ms"] for name in ("p50", "p99", "max")]
+    failed = [values[f"request_failed_{name}_ms"] for name in ("p50", "p99", "max")]
+    assert ok == ["50.0", "99.0", "100.0"]
+    assert failed == ["500.0", "10000.0", "10000.0"]
+    names = [part.split("=", 1)[0] for part in line.split()[1:]]
+    assert names[-7:] == [  # appended after the existing fields
+        "candle_max_ms",
+        "request_ok_p50_ms",
+        "request_ok_p99_ms",
+        "request_ok_max_ms",
+        "request_failed_p50_ms",
+        "request_failed_p99_ms",
+        "request_failed_max_ms",
+    ]
+    m.reset()
+    assert m.line(3_600_000) is None
+
+
+def test_a_request_alone_makes_a_line() -> None:
+    m = OpenInterestMeasurements()
+    m.record_request(3 * MS, ok=False)
+    values = fields(m.line(3_600_000))
+    assert values["request_ok_p50_ms"] == "na" and values["request_ok_max_ms"] == "na"
+    assert values["request_failed_p50_ms"] == "3.0" and values["request_failed_max_ms"] == "3.0"

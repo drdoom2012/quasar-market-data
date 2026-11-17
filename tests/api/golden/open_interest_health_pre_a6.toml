@@ -1,0 +1,34 @@
+# The configuration of the pre-A-6 open interest health golden (tests/api/golden/open_interest_health_pre_a6.json).
+# No [open_interest].symbols key: a pre-A-6 build refuses it. The A-6 test appends symbols = "all".
+[database]
+path = "market.db"
+
+[rule]
+publication_delay_ms = 15000
+lag_threshold_ms = 60000
+
+[[venues]]
+id = "binance-usdm"
+timeframes = ["5m"]
+symbols = ["P000/USDT:USDT", "P001/USDT:USDT", "P002/USDT:USDT", "P003/USDT:USDT", "P004/USDT:USDT", "P005/USDT:USDT", "P006/USDT:USDT", "P007/USDT:USDT", "P008/USDT:USDT", "P009/USDT:USDT", "P010/USDT:USDT", "P011/USDT:USDT", "P012/USDT:USDT", "P013/USDT:USDT", "P014/USDT:USDT", "P015/USDT:USDT", "P016/USDT:USDT", "P017/USDT:USDT", "P018/USDT:USDT", "P019/USDT:USDT", "P020/USDT:USDT", "P021/USDT:USDT", "P022/USDT:USDT", "P023/USDT:USDT", "P024/USDT:USDT", "P025/USDT:USDT", "P026/USDT:USDT", "P027/USDT:USDT", "P028/USDT:USDT", "P029/USDT:USDT", "P030/USDT:USDT", "P031/USDT:USDT", "P032/USDT:USDT", "P033/USDT:USDT", "P034/USDT:USDT", "P035/USDT:USDT", "P036/USDT:USDT", "P037/USDT:USDT", "P038/USDT:USDT", "P039/USDT:USDT"]
+
+[collector]
+limit = 100
+max_concurrency = 4
+min_request_interval_ms = 100
+
+[collector.backfill]
+enabled = true
+days = 30
+
+[api]
+host = "127.0.0.1"
+port = 8000
+
+[open_interest]
+enabled = true
+period = "5m"
+publication_delay_ms = 15000
+round_offset_ms = 200000
+budget_per_5min = 400
+backfill_days = 29

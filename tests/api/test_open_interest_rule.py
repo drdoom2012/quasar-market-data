@@ -4,14 +4,17 @@
 ``_open_interest_run`` is called on the same parsed ``Settings``, so a change of how it derives ``c`` fails here.
 """
 
+import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from quasar_market_data.api.open_interest_rule import rule_from_settings
+from quasar_market_data.api.open_interest_rule import rule_from_settings, symbols_from_settings
 from quasar_market_data.collector.cli import _open_interest_run
 from quasar_market_data.config.settings import ConfigError, Settings, parse_settings
+from quasar_market_data.domain.open_interest_cadence import open_interest_cadence
 from quasar_market_data.domain.open_interest_coverage import (
     OpenInterestRule,
     OpenInterestSlotState,
@@ -41,6 +44,7 @@ def settings_for(
     lag: int = 60_000,
     table: bool = True,
     backfill_days: int = 29,
+    listed: Sequence[str] | None = None,
 ) -> Settings:
     text = config_text(symbols=symbols(count), lag_threshold_ms=lag)
     if table:
@@ -51,6 +55,7 @@ def settings_for(
             "publication_delay_ms = 15000\n"
             f"round_offset_ms = {offset}\n"
             f"budget_per_5min = {budget}\n"
+            f"symbols = {json.dumps('all' if listed is None else list(listed))}\n"
             f"backfill_days = {backfill_days}\n"
         )
     return parse_settings(text, base_dir=BASE)
@@ -98,13 +103,46 @@ def test_the_api_and_the_collector_derive_the_same_cadence(count: int, budget: i
     assert rule.period == run.config.period
 
 
+@pytest.mark.parametrize(("venue_count", "listed_count", "budget"), [(522, 200, 400), (600, 150, 200), (300, 10, 100)])
+def test_the_api_and_the_collector_derive_the_same_cadence_from_a_list(
+    venue_count: int, listed_count: int, budget: int
+) -> None:
+    """With a list, ``S`` is the number of open interest symbols, not of venue symbols (ADR-0003 A-6, INV-090)."""
+    listed = symbols(venue_count)[::-1][:listed_count]  # not a prefix, not sorted
+    settings = settings_for(venue_count, budget, listed=listed)
+
+    rule = rule_from_settings(settings)
+    run = _open_interest_run(settings, fake_open_source)
+
+    assert rule is not None and run is not None
+    assert rule.cadence == run.config.cadence == open_interest_cadence(listed_count, budget)
+    assert rule.cadence != open_interest_cadence(venue_count, budget)  # the venue count would give another c
+    assert rule.expected_after_ms == expected_after_ms(
+        run.config.cadence, run.config.round_offset_ms, run.config.period
+    )
+
+
+def test_the_open_interest_symbols_are_the_listed_venue_symbols() -> None:
+    listed = symbols(30)[5:12]
+
+    assert symbols_from_settings(settings_for(30, 400, listed=listed)) == frozenset(
+        ("binance-usdm", symbol) for symbol in listed
+    )
+    assert symbols_from_settings(settings_for(30, 400)) == frozenset(("binance-usdm", s) for s in symbols(30))
+
+
+def test_no_open_interest_symbols_when_open_interest_is_absent_or_disabled() -> None:
+    assert symbols_from_settings(settings_for(10, 400, table=False)) == frozenset()
+    assert symbols_from_settings(settings_for(10, 400, enabled=False)) == frozenset()
+
+
 def test_a_lower_budget_raises_the_cadence_for_the_same_universe() -> None:
-    """S = 300: b = 400 -> steady 300, c = 3 (2 x 100 + 2); b = 200 -> steady 150, c = 5 (2 x 60 + 2; c = 4 needs 152)."""
+    """S = 300: b = 400 -> steady 300, c = 2 (150 + 50 + 2); b = 200 -> steady 150, c = 4 (75 + 50 + 2; c = 3 needs 152)."""
     high = rule_from_settings(settings_for(300, 400))
     low = rule_from_settings(settings_for(300, 200))
 
     assert high is not None and low is not None
-    assert (high.cadence, low.cadence) == (3, 5)
+    assert (high.cadence, low.cadence) == (2, 4)
 
 
 def test_a_universe_that_needs_a_cadence_above_twelve_never_reaches_the_api() -> None:

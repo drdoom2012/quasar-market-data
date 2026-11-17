@@ -26,10 +26,11 @@ def _ready_queue_is_empty(loop: asyncio.AbstractEventLoop) -> bool:
 
 
 class _ThreadJobs:
-    """The jobs a loop has handed to an executor and that have not completed."""
+    """The jobs a loop has handed to an executor: how many have not completed, and how many have."""
 
     def __init__(self) -> None:
         self.pending = 0
+        self.finished = 0  # grows on every completion: ``settle`` sees a job that ended during its hops
 
 
 def _thread_jobs(loop: asyncio.AbstractEventLoop) -> _ThreadJobs:
@@ -43,7 +44,7 @@ def _thread_jobs(loop: asyncio.AbstractEventLoop) -> _ThreadJobs:
     def run_in_executor(executor: Any, func: Callable[..., Any], *args: Any) -> "asyncio.Future[Any]":
         future: asyncio.Future[Any] = original(executor, func, *args)
         jobs.pending += 1
-        future.add_done_callback(lambda _: setattr(jobs, "pending", jobs.pending - 1))
+        future.add_done_callback(lambda _: _finish(jobs))
         return future
 
     loop.run_in_executor = run_in_executor  # type: ignore[assignment]
@@ -53,6 +54,7 @@ def _thread_jobs(loop: asyncio.AbstractEventLoop) -> _ThreadJobs:
 
 def _finish(jobs: _ThreadJobs) -> None:
     jobs.pending -= 1
+    jobs.finished += 1
 
 
 @dataclass(order=True)
@@ -129,6 +131,7 @@ class ManualTime:
         loop = asyncio.get_running_loop()
         jobs = _thread_jobs(loop)
         while True:
+            finished = jobs.finished
             quiet = 0
             for _ in range(YIELDS):
                 await asyncio.sleep(0)
@@ -143,8 +146,14 @@ class ManualTime:
                         break
                 else:
                     quiet = 0
-            if jobs.pending == 0 or not self._wait_for_threads:
+            if not self._wait_for_threads:
                 return
+            if jobs.pending == 0:
+                if jobs.finished == finished:
+                    return
+                # a job ended during the hops: the task that awaits it may have had too few hops left to run until it
+                # blocks again, and time must not move on before it does (a slower machine sees that more often)
+                continue
             await asyncio.sleep(0.001)  # real time: a worker thread is still running
 
     async def until_waiting(self, count: int) -> None:

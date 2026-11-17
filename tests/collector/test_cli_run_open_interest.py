@@ -5,6 +5,7 @@ that only the wiring is under test: when it starts, what it receives, what happe
 """
 
 import asyncio
+import json
 import signal
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -22,14 +23,16 @@ from quasar_market_data.collector.clock import Clock
 from quasar_market_data.collector.extension_pause import ExtensionPause, ExtensionStopped
 from quasar_market_data.collector.fetch_open_interest_once import OpenInterestOnceSource
 from quasar_market_data.collector.open_interest_budget import OpenInterestBudget
+from quasar_market_data.collector.open_interest_measurements import OpenInterestMeasurements
+from quasar_market_data.config.settings import load_settings
 from tests.collector.fetch_fakes import SYMBOL, AdvancingSleep, FakeClock, FakeSource, forming_rows
 from tests.collector.open_interest_fakes import FakeOiSource
 from tests.collector.test_cli_run import candle_count
-from tests.config_files import write_config
+from tests.config_files import TEN_SYMBOLS, write_config
 
 TABLE = (
     '\n[open_interest]\nenabled = true\nperiod = "5m"\npublication_delay_ms = 15000\n'
-    "round_offset_ms = 200000\nbudget_per_5min = 250\nbackfill_days = 29\n"
+    'round_offset_ms = 200000\nbudget_per_5min = 250\nsymbols = "all"\nbackfill_days = 29\n'
 )
 
 
@@ -45,6 +48,7 @@ class Recorder:
         self.events: list[str] = []
         self.calls: list[dict[str, Any]] = []
         self.opened: list[FakeOiSource] = []
+        self.observers: list[Any] = []
 
 
 @pytest.fixture
@@ -75,7 +79,15 @@ def stub_task(
     ) -> None:
         rec.events.append("task")
         rec.calls.append(
-            {"source": source, "writer": writer, "config": config, "budget": budget, "activity": activity, "emit": emit}
+            {
+                "source": source,
+                "writer": writer,
+                "config": config,
+                "budget": budget,
+                "activity": activity,
+                "emit": emit,
+                "measurements": measurements,
+            }
         )
         if behaviour is not None:
             await behaviour(stop=stop, emit=emit)
@@ -90,8 +102,11 @@ def stub_task(
 def oi_opener(
     rec: Recorder, clock: FakeClock, error: BaseException | None = None
 ) -> Callable[..., Awaitable[OpenInterestOnceSource]]:
-    async def open_oi(budget: OpenInterestBudget, pause: ExtensionPause, received: Clock) -> OpenInterestOnceSource:
+    async def open_oi(
+        budget: OpenInterestBudget, pause: ExtensionPause, received: Clock, *, on_hist_request: Any = None
+    ) -> OpenInterestOnceSource:
         rec.events.append("open")
+        rec.observers.append(on_hist_request)
         assert isinstance(budget, OpenInterestBudget) and isinstance(pause, ExtensionPause) and received is clock
         if error is not None:
             raise error
@@ -181,6 +196,40 @@ def test_enabled_starts_the_task_after_round_one_with_its_own_budget_and_closes_
     captured = capsys.readouterr()
     assert "oi-round stub boundary=1" in captured.out and "oi-warning stub warning" in captured.err
     assert "oi-warning" not in captured.out and "oi-round" not in captured.err
+
+
+def test_the_source_reports_its_history_call_durations_to_the_task_measurement_line(
+    db: Path, rec: Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0003 A-6 (D-6): ``run`` opens the source with the measurement line's ``record_request`` as its observer."""
+    stub_task(monkeypatch, rec)
+    assert run_cli(db, rec, TABLE) == 0
+    (call,) = rec.calls
+    (observer,) = rec.observers
+    measurements = call["measurements"]
+    assert isinstance(measurements, OpenInterestMeasurements)
+    assert observer == measurements.record_request  # the same bound method of the instance the task emits from
+    observer(7_000_000, ok=False)
+    line = measurements.line(1_000)
+    assert line is not None and "request_failed_max_ms=7.0" in line.split()
+
+
+def test_the_task_gets_the_listed_symbols(db: Path) -> None:
+    """INV-147: a venue of 10 symbols with a list of 3 builds the task from the 3 only (ADR-0003 A-6)."""
+    path = write_config(db.parent, database_path=db.name, symbols=TEN_SYMBOLS, backfill_enabled=False)
+    listed = ["LINK/USDT:USDT", "BTC/USDT:USDT", "SOL/USDT:USDT"]
+    table = TABLE.replace('symbols = "all"', f"symbols = {json.dumps(listed)}")
+    path.write_text(path.read_text(encoding="utf-8") + table, encoding="utf-8")
+    settings = load_settings(path).settings
+
+    async def never_opened(*args: Any, **kwargs: Any) -> OpenInterestOnceSource:
+        raise AssertionError("building the run opens no source")
+
+    run = cli._open_interest_run(settings, never_opened)
+
+    assert run is not None
+    assert run.config.symbols == tuple(sorted(listed))
+    assert not set(run.config.symbols) & (set(TEN_SYMBOLS) - set(listed))  # an unlisted symbol is never requested
 
 
 def test_the_task_is_not_started_when_round_one_is_fatal(

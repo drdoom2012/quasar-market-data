@@ -98,6 +98,7 @@ def url(start: int, end: int | None = None, indicators: str = "rsi:period=14", s
 def client_for(path: Path, **kwargs: Any) -> TestClient:
     kwargs.setdefault("rule", SAMPLE_RULE)
     kwargs.setdefault("universe", SAMPLE_UNIVERSE)
+    kwargs.setdefault("open_interest_symbols", frozenset())  # open interest is off
     return TestClient(create_app(path, **kwargs), raise_server_exceptions=False)
 
 

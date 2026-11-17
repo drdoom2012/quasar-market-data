@@ -34,7 +34,7 @@ TABLE = (
 )
 OI_TABLE = (
     '\n[open_interest]\nenabled = true\nperiod = "5m"\npublication_delay_ms = 15000\n'
-    "round_offset_ms = 200000\nbudget_per_5min = 250\nbackfill_days = 29\n"
+    'round_offset_ms = 200000\nbudget_per_5min = 250\nsymbols = "all"\nbackfill_days = 29\n'
 )
 
 
@@ -290,7 +290,7 @@ def test_both_extension_datasets_share_the_activity_and_both_measurement_collect
 
     from tests.collector.open_interest_fakes import FakeOiSource
 
-    async def open_oi(budget: Any, gate: Any, received: Clock) -> Any:
+    async def open_oi(budget: Any, gate: Any, received: Clock, *, on_hist_request: Any = None) -> Any:
         rec.events.append("open")
         return FakeOiSource(clock)
 
@@ -329,7 +329,7 @@ def test_both_extension_datasets_receive_the_same_pause_and_each_its_own_limiter
     async def open_source() -> FakeSource:
         return source
 
-    async def open_oi(budget: Any, pause: Any, received: Clock) -> Any:
+    async def open_oi(budget: Any, pause: Any, received: Clock, *, on_hist_request: Any = None) -> Any:
         rec.events.append("open")
         pauses["oi"], limits["oi"] = pause, budget
         return FakeOiSource(clock)

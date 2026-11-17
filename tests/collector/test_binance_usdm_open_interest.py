@@ -67,6 +67,7 @@ class FakeExchange:
         self.errors: list[BaseException] = []  # the next calls raise these, in order
         self.error_always: BaseException | None = None
         self.hold = False  # calls wait on ``release`` until it is set
+        self.delay_ms = 0  # ManualTime ms every call takes (needs a clock)
         self.release = asyncio.Event()
         self.calls: list[tuple[str, Any]] = []
         self.instants: list[int] = []
@@ -87,6 +88,8 @@ class FakeExchange:
         try:
             if self.hold:
                 await self.release.wait()
+            if self.delay_ms and self._clock is not None:
+                await self._clock.sleep(self.delay_ms)
             if self.errors:
                 raise self.errors.pop(0)
             if self.error_always is not None:
@@ -130,9 +133,15 @@ class Rig:
         self.budget = CountingBudget(b, self.t)
         self.pause = ExtensionPause(self.t)
         self.source: BinanceUsdmOpenInterestSource | None = None
+        self.observed: list[tuple[int, bool]] = []  # (duration ns, ok) of every history call the observer saw
+
+    def observe(self, duration_ns: int, *, ok: bool) -> None:
+        self.observed.append((duration_ns, ok))
 
     async def open(self) -> BinanceUsdmOpenInterestSource:
-        self.source = await BinanceUsdmOpenInterestSource.open(self.budget, self.pause, self.t, self.exchange)
+        self.source = await BinanceUsdmOpenInterestSource.open(
+            self.budget, self.pause, self.t, self.exchange, on_hist_request=self.observe
+        )
         return self.source
 
 
@@ -752,3 +761,86 @@ def test_the_module_does_not_import_the_candle_limiter_or_shared_server_time() -
     text = Path(source).read_text()
     assert "rate_limiter" not in text
     assert "shared_server_time" not in text
+
+
+# ---- request durations for the measurement line (ADR-0003 A-6, decision D-6) -----------------------------------------
+
+
+def test_the_observer_times_only_the_ccxt_history_call_not_the_slot_budget_or_time_requests() -> None:
+    async def scenario() -> None:
+        rig = Rig(b=1)
+        source = await rig.open()
+        rig.exchange.delay_ms = 250
+        await rig.budget.acquire()  # the only start of the window is used: the request waits 300 s in the budget
+        request = asyncio.create_task(hist(source))
+        await rig.t.settle()
+        await rig.t.advance(WINDOW_MS + 250)
+        await request
+        assert rig.observed == [(250 * NS_PER_MS, True)]  # the call alone, not the 300 s in front of it
+        await rig.t.advance(WINDOW_MS)
+        time_request = asyncio.create_task(source.fetch_server_time())
+        await rig.t.settle()
+        await rig.t.advance(250)
+        await time_request
+        assert len(rig.observed) == 1  # a time request is not a history request
+
+    run(scenario)
+
+
+@pytest.mark.parametrize(
+    ("error", "raised"),
+    [
+        (ccxt.NetworkError("connection reset"), SourceError),
+        (ccxt.RequestTimeout("timed out"), SourceError),
+        (ddos(429), ExtensionPaused),  # the exchange answered 429: a failed request, and the pause starts
+        (ddos(418), ExtensionStopped),
+    ],
+)
+def test_an_exchange_or_transport_error_of_the_call_is_a_failed_request(
+    error: ccxt.BaseError, raised: type[BaseException]
+) -> None:
+    async def scenario() -> None:
+        rig = Rig()
+        source = await rig.open()
+        rig.exchange.delay_ms = 40
+        rig.exchange.errors = [error]
+        request = asyncio.create_task(hist(source))
+        await rig.t.settle()
+        await rig.t.advance(40)
+        with pytest.raises(raised):
+            await request
+        assert rig.observed == [(40 * NS_PER_MS, False)]
+
+    run(scenario)
+
+
+def test_an_answer_that_fails_the_content_check_is_timed_as_a_success() -> None:
+    async def scenario() -> None:
+        rig = Rig()
+        source = await rig.open()
+        rig.exchange.response = {"code": -1}
+        with pytest.raises(SourceError, match="list"):
+            await hist(source)
+        assert rig.observed == [(0, True)]  # the exchange answered; the adapter rejected the content
+
+    run(scenario)
+
+
+def test_a_pause_a_refusal_and_a_cancellation_are_not_request_durations() -> None:
+    async def scenario() -> None:
+        rig = Rig()
+        source = await rig.open()
+        with pytest.raises(OpenInterestRequestRefused):
+            await hist(source, AS_OF - 500 * STEP, AS_OF)  # 501 period ends: nothing sent
+        rig.exchange.hold = True
+        stuck = asyncio.create_task(hist(source))
+        await rig.t.settle()
+        stuck.cancel()
+        await asyncio.gather(stuck, return_exceptions=True)
+        rig.exchange.hold = False
+        rig.pause.record_rate_limited(0)
+        with pytest.raises(ExtensionPaused):
+            await hist(source)  # paused before the call
+        assert rig.exchange.called("hist") == 1 and rig.observed == []
+
+    run(scenario)

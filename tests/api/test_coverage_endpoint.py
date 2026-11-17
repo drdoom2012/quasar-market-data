@@ -32,6 +32,7 @@ def query(start: int, end: int) -> str:
 def client_for(path: Path, **kwargs: Any) -> TestClient:
     kwargs.setdefault("rule", SAMPLE_RULE)
     kwargs.setdefault("universe", SAMPLE_UNIVERSE)
+    kwargs.setdefault("open_interest_symbols", frozenset())  # open interest is off
     return TestClient(create_app(path, **kwargs), raise_server_exceptions=False)
 
 
@@ -210,7 +211,12 @@ def test_a_window_of_10001_slots_is_400(tmp_path: Path) -> None:
 
 def test_create_app_refuses_an_out_of_bound_rule(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
-        create_app(tmp_path / "m.db", rule=ExpectationRule(0, MAX_LAG_THRESHOLD_MS + 1), universe=SAMPLE_UNIVERSE)
+        create_app(
+            tmp_path / "m.db",
+            rule=ExpectationRule(0, MAX_LAG_THRESHOLD_MS + 1),
+            universe=SAMPLE_UNIVERSE,
+            open_interest_symbols=frozenset(),
+        )
 
 
 def test_request_errors(tmp_path: Path) -> None:

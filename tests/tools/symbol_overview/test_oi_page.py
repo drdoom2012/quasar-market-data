@@ -41,7 +41,7 @@ def test_clear_states_clears_the_new_elements() -> None:
 def test_every_reason_code_of_open_interest_has_text() -> None:
     block = SCRIPT.split("oiReasons:")[1].split("},\n")[0]
 
-    for code in ("no_data", "invalid", "stale", "conflict", "missing", "due", "unrecoverable"):
+    for code in ("no_data", "invalid", "stale", "conflict", "missing", "due", "unrecoverable", "not_collected"):
         assert f"{code}:" in block
 
 

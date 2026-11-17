@@ -49,6 +49,7 @@ def sym(i: int) -> str:
 def client(path: Path, as_of: int = AS_OF, **kwargs: Any) -> TestClient:
     kwargs.setdefault("funding_rate", RULE)
     kwargs.setdefault("universe", ())
+    kwargs.setdefault("open_interest_symbols", frozenset())  # open interest is off unless a test enables it
     return TestClient(
         create_app(path, rule=SAMPLE_RULE, now_ms=lambda: as_of, **kwargs),
         raise_server_exceptions=False,

@@ -29,6 +29,8 @@ from tools.symbol_overview.model import (
 from tools.symbol_overview.window import build_open_interest_strip, build_strip, open_interest_window
 
 STATE_ORDER: Final = ("no_data", "unknown", "stale", "conflict", "holes", "behind", "ok")
+# The open interest summary's keys (ADR-0003 A-6): the candle states plus `not_collected`, which is not a problem.
+OI_STATE_ORDER: Final = (*STATE_ORDER, "not_collected")
 _REASON_STATE: Final = {
     "no_data": "no_data",
     "invalid": "unknown",
@@ -269,9 +271,17 @@ def judge_open_interest(instrument: InstrumentRow, outcome: OiCoverage | Invalid
     return _oi_report(state, tuple(reasons), outcome, build_open_interest_strip(outcome.runs, oldest, oi_window))
 
 
+def judge_open_interest_not_collected() -> OiReport:
+    """A symbol the API lists with ``open_interest_period: null`` (ADR-0003 A-6): not collected, never asked.
+
+    It is not a problem and has no numbers; its one reason says why.
+    """
+    return _oi_report("not_collected", (Reason("not_collected", 0, 0),))
+
+
 def open_interest_summary(reports: Sequence[OiReport]) -> dict[str, int]:
-    """Counts of symbols by open interest headline, in the shape of the candle ``summary``."""
-    summary: dict[str, int] = {"total": len(reports), **dict.fromkeys(STATE_ORDER, 0)}
+    """Counts of symbols by open interest headline, in the shape of the candle ``summary`` plus ``not_collected``."""
+    summary: dict[str, int] = {"total": len(reports), **dict.fromkeys(OI_STATE_ORDER, 0)}
     for report in reports:
         summary[report.state] += 1
     return summary

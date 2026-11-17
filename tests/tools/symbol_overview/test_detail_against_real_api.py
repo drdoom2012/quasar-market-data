@@ -56,6 +56,7 @@ def serve(db_path: Path) -> Iterator[str]:
         db_path,
         rule=SAMPLE_RULE,
         universe=[Instrument("binance-usdm", s, "5m") for s in (FULL, EMPTY)],
+        open_interest_symbols=frozenset(("binance-usdm", s) for s in (FULL, EMPTY)),  # symbols = "all"
         open_interest=OpenInterestRule(
             cadence=1, expected_after_ms=500_000, lag_threshold_ms=60_000, period=Timeframe("5m")
         ),

@@ -52,6 +52,9 @@ def client_for(path: Path, now: int | Callable[[], int] = NOW, **kwargs: Any) ->
     kwargs.setdefault("rule", SAMPLE_RULE)
     kwargs.setdefault("universe", SAMPLE_UNIVERSE)
     kwargs.setdefault("open_interest", RULE)
+    kwargs.setdefault(
+        "open_interest_symbols", frozenset((item.venue, item.symbol) for item in kwargs["universe"])
+    )  # symbols = "all"
     now_ms = now if callable(now) else (lambda: now)
     return TestClient(create_app(path, now_ms=now_ms, **kwargs), raise_server_exceptions=False)
 
@@ -130,14 +133,14 @@ def test_the_rule_echoes_what_the_states_were_computed_with(tmp_path: Path) -> N
     }
 
 
-@pytest.mark.parametrize(("budget", "symbols", "cadence"), [(100, 10, 1), (200, 300, 5), (400, 300, 3)])
+@pytest.mark.parametrize(("budget", "symbols", "cadence"), [(100, 10, 1), (200, 300, 4), (400, 300, 2)])
 def test_the_rule_in_the_body_is_the_one_derived_from_the_file(
     tmp_path: Path, budget: int, symbols: int, cadence: int
 ) -> None:
     """P-15: the API and the Collector derive the same ``c`` from the same file (b = 100, 200, 400)."""
     text = config_text(symbols=tuple(f"C{i:04d}/USDT:USDT" for i in range(symbols))) + (
         '\n[open_interest]\nenabled = true\nperiod = "5m"\npublication_delay_ms = 15000\n'
-        f"round_offset_ms = 200000\nbudget_per_5min = {budget}\nbackfill_days = 29\n"
+        f'round_offset_ms = 200000\nbudget_per_5min = {budget}\nsymbols = "all"\nbackfill_days = 29\n'
     )
     rule = rule_from_settings(parse_settings(text, base_dir=tmp_path))
     path = make_database(tmp_path / "m.db", open_interest=[slot(0)])

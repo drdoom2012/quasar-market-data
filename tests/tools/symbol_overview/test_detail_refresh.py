@@ -1,5 +1,6 @@
 """The Detailer: calls, paging, fail-closed parts, cache and concurrency (design 5.2, 5.5), against a fake API."""
 
+import dataclasses
 import json
 import threading
 from collections.abc import Collection
@@ -49,6 +50,7 @@ def instruments(rows: list[InstrumentRow] | None = None) -> Route:
                     "symbol": r.symbol,
                     "timeframe": r.timeframe,
                     "newest_open_time_ms": r.newest_open_time_ms,
+                    **({"open_interest_period": r.open_interest_period} if r.open_interest_known else {}),
                 }
                 for r in listed
             ]
@@ -223,6 +225,27 @@ def test_unknown_series_of_open_interest_and_funding_is_empty_not_an_error() -> 
         _, doc = get(api)
     assert doc["open_interest"]["status"] == "empty" and doc["funding_rate"]["status"] == "empty"
     assert doc["candles"]["status"] == "ok"
+
+
+def test_an_explicit_null_period_is_not_collected_and_makes_no_open_interest_call() -> None:
+    unlisted = dataclasses.replace(instrument(newest=NEWEST), open_interest_period=None, open_interest_known=True)
+    with FakeApi(routes(instrument_rows=[unlisted])) as api:
+        status, doc = get(api)
+    assert status == 200 and doc["open_interest"] == {"status": "not_collected", "code": "", "detail": ""}
+    assert api.count("/v1/open-interest") == 0
+    assert doc["candles"]["status"] == "ok" and doc["funding_rate"]["status"] == "ok"
+
+
+def test_a_period_string_or_an_absent_key_reads_open_interest_as_before() -> None:
+    listed = dataclasses.replace(instrument(newest=NEWEST), open_interest_period="5m", open_interest_known=True)
+    for row in (listed, instrument(newest=NEWEST)):
+        with FakeApi(routes(instrument_rows=[row])) as api:
+            _, doc = get(api)
+        assert doc["open_interest"]["status"] == "ok" and api.count("/v1/open-interest") >= 1
+    table = routes() | {"/v1/open-interest": lambda query: api_error(404, "unknown_series")}
+    with FakeApi(table) as api:  # an API older than A-6: an unknown series is still "nothing stored"
+        _, doc = get(api)
+    assert doc["open_interest"]["status"] == "empty"
 
 
 def test_unknown_series_of_candles_for_a_stored_instrument_is_inconsistent() -> None:

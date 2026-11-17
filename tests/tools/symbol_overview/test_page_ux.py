@@ -45,7 +45,8 @@ def test_every_state_has_a_loudness_and_only_ok_is_ok() -> None:
 
     levels = {state: call(f"levelOf('{state}')") for state in states}
 
-    assert [s for s, level in levels.items() if level == "ok"] == ["ok"]
+    # `not_collected` (ADR-0003 A-6) is not a problem either: open interest the API does not collect
+    assert [s for s, level in levels.items() if level == "ok"] == ["ok", "not_collected"]
     assert set(levels.values()) <= {"ok", "warn", "bad"}
 
 

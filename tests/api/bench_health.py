@@ -133,7 +133,15 @@ def _handler_ms(path: Path, series: int, reads: int) -> list[float]:
     The universe is the generated stored triples (S20): every configured instrument is stored, none is missing.
     """
     universe = tuple(Instrument(VENUE, symbol_name(i), "5m") for i in range(series))
-    client = TestClient(create_app(path, rule=SAMPLE_RULE, universe=universe, now_ms=lambda: BASE_MS + 10 * TF_MS))
+    client = TestClient(
+        create_app(
+            path,
+            rule=SAMPLE_RULE,
+            universe=universe,
+            open_interest_symbols=frozenset(),
+            now_ms=lambda: BASE_MS + 10 * TF_MS,
+        )
+    )
     times: list[float] = []
     for _ in range(reads):
         start = perf_counter()

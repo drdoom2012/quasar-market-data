@@ -219,7 +219,7 @@ def test_the_database_path_does_not_depend_on_the_working_directory(
 
 OPEN_INTEREST_TABLE = (
     '\n[open_interest]\nenabled = {enabled}\nperiod = "5m"\npublication_delay_ms = 15000\n'
-    "round_offset_ms = 250000\nbudget_per_5min = 400\nbackfill_days = 29\n"
+    'round_offset_ms = 250000\nbudget_per_5min = 400\nsymbols = "all"\nbackfill_days = 29\n'
 )
 
 
@@ -241,6 +241,37 @@ def test_serve_passes_the_open_interest_rule_of_the_file_to_the_app(
 
     def recorder(db_path: Path, **kwargs: Any) -> str:
         seen.append(kwargs["open_interest"])
+        return "app"
+
+    monkeypatch.setattr(cli, "create_app", recorder)
+
+    assert cli.main(["serve", str(cfg)]) == 0
+
+    assert seen == [expected]
+
+
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [
+        (None, frozenset()),
+        (OPEN_INTEREST_TABLE.format(enabled="false"), frozenset()),
+        (OPEN_INTEREST_TABLE.format(enabled="true"), frozenset({("binance-usdm", "ETH/USDT:USDT")})),
+    ],
+)
+def test_serve_passes_the_open_interest_symbols_of_the_file_to_the_app(
+    tmp_path: Path, run_calls: RunCalls, monkeypatch: pytest.MonkeyPatch, table: str | None, expected: object
+) -> None:
+    """ADR-0003 A-6: the listed symbols, not the venue's; an empty set when open interest is not enabled."""
+    cfg = write_config(tmp_path, database_path="m.db")
+    if table is not None:
+        cfg.write_text(
+            cfg.read_text(encoding="utf-8") + table.replace('symbols = "all"', 'symbols = ["ETH/USDT:USDT"]'),
+            encoding="utf-8",
+        )
+    seen: list[Any] = []
+
+    def recorder(db_path: Path, **kwargs: Any) -> str:
+        seen.append(kwargs["open_interest_symbols"])
         return "app"
 
     monkeypatch.setattr(cli, "create_app", recorder)

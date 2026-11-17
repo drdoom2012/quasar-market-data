@@ -162,6 +162,96 @@ def test_every_problem_symbol_is_in_some_cause_row() -> None:
     assert covered is True
 
 
+# --- not collected (ADR-0003 A-6, design 2.5) ---------------------------------------------------------------------------
+
+
+@needs_node
+def test_not_collected_open_interest_is_not_a_problem_and_not_red() -> None:
+    unlisted = sym("U", "ok", "not_collected", fund("ok"))
+    rows = [sym("A", "ok", "ok", fund("ok")), unlisted]
+
+    assert call(f"isProblem({js(unlisted)}, {BOTH})") is False
+    assert call(f"problemSymbols({js(rows)}, {BOTH})") == []
+    assert call(f"healthCounts({js(rows)}, {BOTH})") == {"total": 2, "ok": 2, "warn": 0, "bad": 0}
+    assert call(f"oiStateOf({js(unlisted)}, 'enabled')") == "not_collected"  # never "unrecognised", the worst there is
+    assert call("levelOf('not_collected')") not in ("bad", "warn")
+    assert call("stateText('not_collected')") == "not collected"
+    assert call(f"worstState({js(unlisted)}, {BOTH})") == "ok"  # it never outranks a real state
+    assert call(f"causeRows({js(rows)}, {BOTH})") == []
+
+
+@needs_node
+def test_each_part_accepts_only_its_own_states_so_a_foreign_one_stays_the_worst() -> None:
+    # `not_collected` is an open interest state only; a candle or funding part that reports it fails closed
+    candle = sym("A", "not_collected", "ok", fund("ok"))
+    funding = sym("B", "ok", "ok", fund("not_collected"))
+    assert call(f"candleState({js(candle)})") == "unrecognised"
+    assert call(f"fundingStateOf({js(funding)}, 'enabled')") == "unrecognised"
+    assert call(f"isProblem({js(candle)}, {BOTH})") is True and call(f"isProblem({js(funding)}, {BOTH})") is True
+    assert call(f"worstState({js(candle)}, {BOTH})") == "unrecognised"
+    # the same for the other states another part owns
+    assert call(f"candleState({js(sym('C', 'quiet', 'ok', fund('ok')))})") == "unrecognised"
+    assert call(f"oiStateOf({js(sym('D', 'ok', 'partly_verified', fund('ok')))}, 'enabled')") == "unrecognised"
+    assert call(f"fundingStateOf({js(sym('E', 'ok', 'ok', fund('holes')))}, 'enabled')") == "unrecognised"
+    # and each part still knows its own
+    assert call(f"oiStateOf({js(sym('F', 'ok', 'not_collected', fund('ok')))}, 'enabled')") == "not_collected"
+    assert call(f"fundingStateOf({js(sym('G', 'ok', 'ok', fund('quiet')))}, 'enabled')") == "quiet"
+    assert call(f"candleState({js(sym('H', 'holes', 'ok', fund('ok')))})") == "holes"
+
+
+@needs_node
+def test_a_not_collected_row_in_the_healthy_group_says_open_interest_is_not_collected() -> None:
+    data = js(
+        {
+            "symbols": [sym("U", "ok", "not_collected", fund("ok")), sym("A", "ok", "ok", fund("ok"))],
+            "open_interest": {"status": "enabled"},
+            "funding_rate": {"status": "enabled"},
+        }
+    )
+
+    model = call(f"dashboardModel({data}, {js({'query': '', 'part': None, 'state': None})})")
+
+    titles = {h["label"]: h["title"] for h in model["healthy"]}
+    assert titles == {"A": "", "U": "open interest not collected"}  # not read as "ok in open interest"
+
+
+@needs_node
+def test_a_not_collected_symbol_still_shows_its_candle_problem() -> None:
+    row = sym("U", "holes", "not_collected", fund("ok"))
+
+    assert call(f"isProblem({js(row)}, {BOTH})") is True
+    assert call(f"worstState({js(row)}, {BOTH})") == "holes"
+    assert call(f"causeRows({js([row])}, {BOTH})") == [
+        {"part": "candles", "state": "holes", "count": 1, "level": "warn"}
+    ]
+
+
+@needs_node
+def test_open_interest_coverage_counts_only_the_collected_symbols() -> None:
+    rows = [sym("A", "ok", "ok", fund("ok")), sym("B", "ok", "holes", fund("ok")), sym("U", "ok", "not_collected")]
+
+    parts = call(f"partCoverage({js(rows)}, 'enabled', 'disabled')")
+
+    assert parts[1] == {"part": "openInterest", "active": True, "ok": 1, "total": 2, "note": None}
+    assert parts[0]["total"] == 3
+
+
+@needs_node
+def test_the_model_of_a_not_collected_symbol_lists_it_as_healthy() -> None:
+    data = js(
+        {
+            "symbols": [sym("U", "ok", "not_collected", fund("ok"))],
+            "open_interest": {"status": "enabled"},
+            "funding_rate": {"status": "enabled"},
+        }
+    )
+
+    model = call(f"dashboardModel({data}, {js({'query': '', 'part': None, 'state': None})})")
+
+    assert model["attention"] == [] and [h["label"] for h in model["healthy"]] == ["U"]
+    assert model["counts"]["ok"] == 1 and model["causes"] == []
+
+
 # --- links and the donut ------------------------------------------------------------------------------------------------
 
 

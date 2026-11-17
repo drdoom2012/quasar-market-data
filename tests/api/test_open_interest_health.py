@@ -1,6 +1,10 @@
 """The ``open_interest`` object of ``GET /health/ingest`` (contract api-v1 6.5.8, ADR-0003 P-8, P-11)."""
 
+import json
+import random
+import re
 import sqlite3
+import textwrap
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -16,8 +20,9 @@ from quasar_market_data.api.health_reader import (
     _UNCONFIRMED,
     read_ingest_snapshot,
 )
+from quasar_market_data.api.open_interest_rule import rule_from_settings, symbols_from_settings
 from quasar_market_data.collector.open_interest_writer import OpenInterestWriter
-from quasar_market_data.config.settings import Instrument
+from quasar_market_data.config.settings import Instrument, Settings, parse_settings
 from quasar_market_data.domain.open_interest import OpenInterest, OpenInterestKey
 from quasar_market_data.domain.open_interest_coverage import OpenInterestRule
 from quasar_market_data.domain.timeframe import Timeframe
@@ -35,7 +40,7 @@ from tests.api.seed import (
 )
 from tests.api.test_health_universe import AS_OF as GOLDEN_AS_OF
 from tests.api.test_health_universe import GOLDEN, golden_database, s17_fields
-from tests.api.test_open_interest_endpoint import contract_example
+from tests.api.test_open_interest_endpoint import CONTRACT, contract_example
 from tests.config_files import TEN_SYMBOLS
 
 READABILITY_COUNT = _UNCONFIRMED.split(" WHERE ")[0]  # the one statement of 6.2.4 that names every table
@@ -59,8 +64,14 @@ def inst(symbol: str) -> Instrument:
     return Instrument(VENUE, symbol, "5m")
 
 
+def pairs(universe: Sequence[Instrument]) -> frozenset[tuple[str, str]]:
+    return frozenset((item.venue, item.symbol) for item in universe)
+
+
 def client(path: Path, universe: Sequence[Instrument], as_of: int = AS_OF, **kwargs: Any) -> TestClient:
+    """The open interest symbols default to the universe's pairs, which is ``symbols = "all"`` for these fixtures."""
     kwargs.setdefault("open_interest", RULE)
+    kwargs.setdefault("open_interest_symbols", pairs(universe))
     return TestClient(
         create_app(path, rule=SAMPLE_RULE, universe=universe, now_ms=lambda: as_of, **kwargs),
         raise_server_exceptions=False,
@@ -113,9 +124,9 @@ def test_the_contract_example_is_what_the_server_returns(tmp_path: Path) -> None
     path = seed(tmp_path / "m.db", rows, conflicts=[("BTC/USDT:USDT", 1792676400000)])
     universe = tuple(inst(symbol) for symbol in TEN_SYMBOLS)
 
-    found = oi_object(path, universe, as_of)
+    found = {key: value for key, value in oi_object(path, universe, as_of).items() if key != "collected"}
 
-    assert found == example
+    assert found == example  # collected (A-6) is the second example, checked below
     assert list(found) == list(example)
     assert list(found["behind"][0]) == list(example["behind"][0])
 
@@ -229,7 +240,7 @@ def test_a_retired_series_is_listed_as_not_configured_and_counted(tmp_path: Path
     old = slot(100)
     path = seed(tmp_path / "m.db", {(sym(0), "5m"): old, (sym(1), "5m"): old})
 
-    found = oi_object(path, (inst(sym(0)),), old + TF + E + L + 1)
+    found = oi_object(path, (inst(sym(0)),), old + TF + E + L + 1, open_interest_symbols=frozenset({(VENUE, sym(0))}))
 
     assert [(e["symbol"], e["configured"], e["state"]) for e in found["behind"]] == [
         (sym(0), True, "stale"),
@@ -508,3 +519,301 @@ def test_an_unreadable_database_is_still_a_503(tmp_path: Path) -> None:
     assert response.status_code == 503
     assert response.json()["error"]["details"] == {"reason": "database_missing"}
     assert client(tmp_path / "missing.db", ()).get("/health").status_code == 200
+
+
+# --- ADR-0003 A-6: configured from the open interest symbols, and the collected object --------------------------
+
+COLLECTED_KEYS = [
+    "scope",
+    "symbol_count",
+    "never_stored",
+    "status",
+    "series_count",
+    "current",
+    "due",
+    "stale",
+    "unjudged_series",
+    "conflicted_series",
+    "behind",
+    "truncated",
+]
+COUNT_KEYS = ("status", "series_count", "current", "due", "stale", "unjudged_series", "conflicted_series")
+PRE_A6_CONFIG = Path(__file__).resolve().parent / "golden" / "open_interest_health_pre_a6.toml"
+PRE_A6_GOLDEN = Path(__file__).resolve().parent / "golden" / "open_interest_health_pre_a6.json"
+PRE_A6_AS_OF = S + 1000 * TF + 230_000  # T_e = slot 999 under c = 1; lag 1 is due, lag 2 and more are stale
+PRE_A6_SEED = 20261116
+RETIRED = "RETIRED/USDT:USDT"  # a stored series of a symbol that is not a venue symbol
+
+
+def pre_a6_golden_database(path: Path, symbols: tuple[str, ...]) -> Path:
+    """One 5m series per venue symbol, lags drawn with a fixed seed, one unaligned row, recent and old conflicts, and one
+    stored series of a symbol that is not a venue symbol (``configured: false``).
+
+    Copied verbatim from the script that captured ``golden/open_interest_health_pre_a6.json`` on a worktree of
+    ``main`` before A-6 (``d8f1b47``; the A-6 Task 6 report, re-captured with the retired series in the final fix wave);
+    changing it invalidates the golden.
+    """
+    rng = random.Random(PRE_A6_SEED)
+    t_e = S + 999 * TF
+    make_database(path)
+    conn = open_writer(path)
+    try:
+        for index, symbol in enumerate(symbols):
+            if index == len(symbols) - 1:
+                insert_open_interest(conn, t_e - 7, symbol=symbol)  # unaligned: unjudged
+                continue
+            lag = rng.choice((0, 0, 0, 0, 1, 1, 2, 3, 5, 8, 13, 13))
+            insert_open_interest(conn, t_e - lag * TF - 40 * TF, symbol=symbol)  # an older row
+            insert_open_interest(conn, t_e - lag * TF, symbol=symbol)
+        for symbol in rng.sample(symbols, 2):
+            insert_open_interest_conflict(conn, t_e - TF, 1, symbol=symbol)  # inside the 24 h window
+        insert_open_interest_conflict(conn, t_e - 400 * TF, 2, symbol=symbols[0])  # older than 24 h: not counted
+        insert_open_interest(conn, t_e - 13 * TF, symbol=RETIRED)  # not a venue symbol: stale, configured false
+    finally:
+        conn.close()
+    return path
+
+
+def pre_a6_settings_with_all() -> Settings:
+    """The golden's file with ``symbols = "all"`` appended to its last table, ``[open_interest]``."""
+    text = PRE_A6_CONFIG.read_text(encoding="utf-8")
+    assert text.rstrip().endswith("backfill_days = 29") and '\nsymbols = "all"' not in text
+    return parse_settings(text.rstrip() + '\nsymbols = "all"\n', base_dir=PRE_A6_CONFIG.parent)
+
+
+def a6_object(path: Path, settings: Settings, as_of: int) -> dict[str, Any]:
+    """The answer of an A-6 build wired as ``api/cli.py`` wires it."""
+    return oi_object(
+        path,
+        settings.instruments(),
+        as_of,
+        open_interest=rule_from_settings(settings),
+        open_interest_symbols=symbols_from_settings(settings),
+    )
+
+
+def canonical(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def second_contract_block(heading: str) -> dict[str, Any]:
+    """The second ```json block after ``heading`` (the ``collected`` example of 6.5.8, indented in its bullet)."""
+    text = CONTRACT.read_text(encoding="utf-8")
+    after = text[text.index(heading) :]
+    blocks = re.findall(r"```json\n(.*?)\n\s*```", after, re.DOTALL)
+    found: dict[str, Any] = json.loads("{" + textwrap.dedent(blocks[1]) + "}")
+    return found
+
+
+def test_the_collected_contract_example_is_what_the_server_returns(tmp_path: Path) -> None:
+    """The scenario of the first example, with all ten series open interest symbols of the file."""
+    example = second_contract_block("### 6.5.8 The `open_interest` object")["collected"]
+    outer = contract_example("### 6.5.8 The `open_interest` object", fragment=True)["open_interest"]
+    rows = {(symbol, "5m"): 1792677000000 for symbol in TEN_SYMBOLS}
+    rows[("ETH/USDT:USDT", "5m")] = 1792676700000
+    path = seed(tmp_path / "m.db", rows, conflicts=[("BTC/USDT:USDT", 1792676400000)])
+    universe = tuple(inst(symbol) for symbol in TEN_SYMBOLS)
+
+    found = oi_object(path, universe, outer["as_of_ms"], open_interest_symbols=pairs(universe))
+
+    assert found["collected"] == example
+    assert list(found["collected"]) == list(example) == COLLECTED_KEYS
+    assert list(found["collected"]["behind"][0]) == list(example["behind"][0])
+
+
+def test_an_unlisted_venue_symbol_is_not_configured(tmp_path: Path) -> None:
+    old = slot(100)
+    path = seed(tmp_path / "m.db", {(sym(0), "5m"): old, (sym(1), "5m"): old})
+    universe = (inst(sym(0)), inst(sym(1)))  # both are venue symbols; only sym(0) is listed
+
+    found = oi_object(path, universe, old + TF + E + L + 1, open_interest_symbols=frozenset({(VENUE, sym(0))}))
+
+    assert [(e["symbol"], e["configured"]) for e in found["behind"]] == [(sym(0), True), (sym(1), False)]
+    assert [(e["symbol"], e["configured"]) for e in found["collected"]["behind"]] == [(sym(0), True)]
+
+
+def test_all_keeps_configured_as_before(tmp_path: Path) -> None:
+    """With ``"all"`` the open interest symbols are the venue's: ``configured`` is the pre-A-6 value (from the universe)."""
+    settings = pre_a6_settings_with_all()
+    symbols = settings.venues[0].symbols
+    path = seed(
+        tmp_path / "m.db",
+        {(symbols[0], "5m"): slot(100), ("UNLISTED/USDT:USDT", "5m"): slot(100), (symbols[1], "5m"): slot(999)},
+    )
+
+    found = a6_object(path, settings, PRE_A6_AS_OF)
+
+    before = pairs(settings.instruments())  # what api/app.py computed `configured` from before A-6
+    assert symbols_from_settings(settings) == before
+    assert [(e["symbol"], e["configured"]) for e in found["behind"]] == sorted(
+        [(symbols[0], (VENUE, symbols[0]) in before), ("UNLISTED/USDT:USDT", False)]
+    )
+
+
+def test_retired_series_fill_the_outer_object_but_not_collected(tmp_path: Path) -> None:
+    """The shipped shape: 200 listed series current, the 322 other venue symbols retired and stale."""
+    listed = [sym(i) for i in range(200)]
+    rows = {(symbol, "5m"): slot(999) for symbol in listed}
+    rows.update({(sym(i), "5m"): slot(100) for i in range(200, 522)})
+    path = seed(tmp_path / "m.db", rows)
+    universe = tuple(inst(sym(i)) for i in range(522))
+    as_of = slot(999) + E + 20_000
+
+    found = oi_object(path, universe, as_of, open_interest_symbols=frozenset((VENUE, s) for s in listed))
+
+    assert (found["status"], found["series_count"], found["current"], found["stale"]) == ("behind", 522, 200, 322)
+    assert len(found["behind"]) == HEALTH_BEHIND_MAX and found["truncated"] is True
+    assert not any(e["configured"] for e in found["behind"])
+    collected = found["collected"]
+    assert collected == {
+        "scope": "open_interest_symbols",
+        "symbol_count": 200,
+        "never_stored": 0,
+        "status": "current",
+        "series_count": 200,
+        "current": 200,
+        "due": 0,
+        "stale": 0,
+        "unjudged_series": 0,
+        "conflicted_series": 0,
+        "behind": [],
+        "truncated": False,
+    }
+    assert list(found)[-1] == "collected"
+
+
+def test_a_stale_listed_series_leads_collected_behind(tmp_path: Path) -> None:
+    rows = {(sym(i), "5m"): slot(100) for i in range(100, 160)}  # 60 retired, far behind
+    rows[(sym(0), "5m")] = slot(990)  # listed, stale, a small lag
+    rows[(sym(1), "5m")] = slot(998)  # listed, due
+    rows[(sym(2), "5m")] = slot(999)  # listed, current
+    path = seed(tmp_path / "m.db", rows)
+    listed = frozenset((VENUE, sym(i)) for i in range(3))
+    as_of = slot(999) + E + 20_000
+
+    found = oi_object(path, (), as_of, open_interest_symbols=listed)
+
+    assert sym(0) not in [e["symbol"] for e in found["behind"]]  # masked by the retired series
+    collected = found["collected"]
+    assert [(e["symbol"], e["state"], e["lag_slots"], e["configured"]) for e in collected["behind"]] == [
+        (sym(0), "stale", 9, True),
+        (sym(1), "due", 1, True),
+    ]
+    assert (collected["status"], collected["stale"], collected["due"], collected["current"]) == ("behind", 1, 1, 1)
+    assert collected["truncated"] is False
+
+
+def test_collected_behind_is_cut_at_fifty_in_the_outer_order(tmp_path: Path) -> None:
+    rows = {(sym(i), "5m"): slot(900 - i // 3) for i in range(55)}
+    rows.update({(sym(i), "5m"): slot(100) for i in range(100, 110)})  # retired, stale, larger lag
+    path = seed(tmp_path / "m.db", rows)
+    listed = frozenset((VENUE, sym(i)) for i in range(55))
+
+    found = oi_object(path, (), slot(999) + E + 20_000, open_interest_symbols=listed)
+
+    collected = found["collected"]
+    assert len(collected["behind"]) == HEALTH_BEHIND_MAX and collected["truncated"] is True
+    assert [e["configured"] for e in found["behind"]] == [False] * 10 + [True] * 40  # the retired ones lead outside
+    assert collected["behind"][:40] == found["behind"][10:]  # the same entries in the same order
+    keys = [(-e["lag_slots"], e["symbol"]) for e in collected["behind"]]
+    assert keys == sorted(keys) and all(e["configured"] for e in collected["behind"])
+
+
+def test_never_stored_counts_listed_symbols_without_a_configured_period_row(tmp_path: Path) -> None:
+    path = seed(
+        tmp_path / "m.db",
+        {
+            (sym(0), "5m"): AS_OF,  # listed, current
+            (sym(1), "15m"): AS_OF,  # listed, only another period: never stored for collected
+            (sym(3), "5m"): AS_OF - 1,  # listed, unaligned: unjudged
+            (sym(9), "5m"): AS_OF,  # not listed
+        },
+    )
+    listed = frozenset((VENUE, sym(i)) for i in range(4))  # sym(2) has no row at all
+
+    found = oi_object(path, (), open_interest_symbols=listed)
+
+    collected = found["collected"]
+    assert (collected["symbol_count"], collected["never_stored"], collected["series_count"]) == (4, 2, 2)
+    assert (collected["current"], collected["due"], collected["stale"], collected["unjudged_series"]) == (1, 0, 0, 1)
+    assert collected["series_count"] + collected["never_stored"] == collected["symbol_count"]
+    assert collected["series_count"] == (
+        collected["current"] + collected["due"] + collected["stale"] + collected["unjudged_series"]
+    )
+    assert collected["status"] == "degraded"
+    assert (found["series_count"], found["unjudged_series"]) == (4, 2)  # the 15m series stays counted outside
+
+
+def test_never_stored_does_not_change_the_status_and_no_series_is_judged_on_series_count(tmp_path: Path) -> None:
+    path = seed(tmp_path / "m.db", {(sym(0), "5m"): AS_OF, (sym(9), "5m"): AS_OF})
+
+    some = oi_object(path, (), open_interest_symbols=frozenset({(VENUE, sym(0)), (VENUE, sym(1))}))["collected"]
+    none = oi_object(path, (), open_interest_symbols=frozenset({(VENUE, sym(1))}))["collected"]
+
+    assert (some["status"], some["never_stored"]) == ("current", 1)
+    assert (none["status"], none["series_count"], none["never_stored"], none["symbol_count"]) == ("no_series", 0, 1, 1)
+
+
+def test_a_conflict_on_a_retired_series_counts_only_outside(tmp_path: Path) -> None:
+    path = seed(
+        tmp_path / "m.db",
+        {(sym(0), "5m"): AS_OF, (sym(1), "5m"): AS_OF},
+        conflicts=[(sym(1), AS_OF - TF)],
+    )
+
+    found = oi_object(path, (), open_interest_symbols=frozenset({(VENUE, sym(0))}))
+
+    assert (found["conflicted_series"], found["status"]) == (1, "degraded")
+    assert (found["collected"]["conflicted_series"], found["collected"]["status"]) == (0, "current")
+
+
+def test_a_conflict_on_a_listed_series_counts_in_collected(tmp_path: Path) -> None:
+    path = seed(tmp_path / "m.db", {(sym(0), "5m"): AS_OF}, conflicts=[(sym(0), AS_OF - TF)])
+
+    collected = oi_object(path, (), open_interest_symbols=frozenset({(VENUE, sym(0))}))["collected"]
+
+    assert (collected["conflicted_series"], collected["status"]) == (1, "degraded")
+
+
+def test_outer_fields_with_all_equal_the_pre_a6_golden(tmp_path: Path) -> None:
+    """INV-149: the same file with ``symbols = "all"`` (40 venue symbols, ``c`` = 1 under both formulas)."""
+    settings = pre_a6_settings_with_all()
+    path = pre_a6_golden_database(tmp_path / "m.db", settings.venues[0].symbols)
+    golden = json.loads(PRE_A6_GOLDEN.read_text(encoding="utf-8"))
+
+    found = a6_object(path, settings, PRE_A6_AS_OF)
+
+    outer = {key: value for key, value in found.items() if key != "collected"}
+    assert canonical(outer) == canonical(golden)
+    assert list(outer) == list(golden)  # the key order too
+    assert list(found)[-1] == "collected"
+
+
+def test_all_makes_collected_equal_the_outer_counts(tmp_path: Path) -> None:
+    """Every stored series but the retired one has the venue, a venue symbol and the period: ``collected`` repeats the
+    outer judgment without it."""
+    settings = pre_a6_settings_with_all()
+    path = pre_a6_golden_database(tmp_path / "m.db", settings.venues[0].symbols)
+
+    found = a6_object(path, settings, PRE_A6_AS_OF)
+
+    collected = found["collected"]
+    retired = [e for e in found["behind"] if e["symbol"] == RETIRED]
+    assert [(e["state"], e["configured"]) for e in retired] == [("stale", False)]
+    outer = {key: found[key] for key in COUNT_KEYS}
+    outer.update(series_count=found["series_count"] - 1, stale=found["stale"] - 1)  # the retired series left out
+    assert {key: collected[key] for key in COUNT_KEYS} == outer
+    assert collected["behind"] == [e for e in found["behind"] if e["symbol"] != RETIRED]
+    assert collected["truncated"] == found["truncated"] is False
+    assert (collected["symbol_count"], collected["never_stored"]) == (len(settings.venues[0].symbols), 0)
+
+
+def test_collected_is_absent_when_open_interest_is_null(tmp_path: Path) -> None:
+    path = seed(tmp_path / "m.db", {(sym(0), "5m"): AS_OF})
+
+    body = ingest(path, (inst(sym(0)),), open_interest=None, open_interest_symbols=frozenset())
+    empty = oi_object(make_database(tmp_path / "e.db"), (), open_interest_symbols=frozenset())
+
+    assert body["open_interest"] is None
+    assert '"collected"' not in json.dumps(body)  # no `collected` key anywhere in the body
+    assert empty["collected"]["status"] == "no_series" and empty["collected"]["symbol_count"] == 0

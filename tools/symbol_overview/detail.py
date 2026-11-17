@@ -113,6 +113,11 @@ def part_disabled() -> dict[str, object]:
     return {"status": "disabled", "code": "", "detail": ""}
 
 
+def part_not_collected() -> dict[str, object]:
+    """The API lists the series with ``open_interest_period: null`` (ADR-0003 A-6): not collected, no call was made."""
+    return {"status": "not_collected", "code": "", "detail": ""}
+
+
 def part_error(invalid: Invalid) -> dict[str, object]:
     """The part could not be loaded or validated; it carries no rows (a half-loaded series is never shown)."""
     return {"status": "error", "code": invalid.code, "detail": invalid.detail}

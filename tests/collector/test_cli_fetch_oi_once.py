@@ -1,6 +1,7 @@
 import sqlite3
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -52,8 +53,11 @@ def writer_close(monkeypatch: pytest.MonkeyPatch) -> WriterCloseSpy:
 
 def opener(
     source: FakeOiSource, seen: list[tuple[OpenInterestBudget, ExtensionPause, Clock]] | None = None
-) -> Callable[[OpenInterestBudget, ExtensionPause, Clock], Awaitable[OpenInterestOnceSource]]:
-    async def open_oi_source(budget: OpenInterestBudget, gate: ExtensionPause, clock: Clock) -> OpenInterestOnceSource:
+) -> Callable[..., Awaitable[OpenInterestOnceSource]]:
+    async def open_oi_source(
+        budget: OpenInterestBudget, gate: ExtensionPause, clock: Clock, *, on_hist_request: Any = None
+    ) -> OpenInterestOnceSource:
+        assert on_hist_request is None  # fetch-oi-once writes no measurement line
         if seen is not None:
             seen.append((budget, gate, clock))
         return source
@@ -173,7 +177,9 @@ def test_the_database_is_migrated_before_the_first_request(db: Path) -> None:
     clock = FakeClock()
     seen: list[int] = []
 
-    async def open_oi_source(_: OpenInterestBudget, __: ExtensionPause, ___: Clock) -> OpenInterestOnceSource:
+    async def open_oi_source(
+        _: OpenInterestBudget, __: ExtensionPause, ___: Clock, *, on_hist_request: Any = None
+    ) -> OpenInterestOnceSource:
         conn = sqlite3.connect(db)
         try:
             seen.append(int(conn.execute("SELECT count(*) FROM open_interest").fetchone()[0]))

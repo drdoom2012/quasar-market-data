@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import parse_qsl, urlsplit
 
 import uvicorn
 
@@ -49,8 +50,17 @@ def universe() -> list[Instrument]:
 
 
 @contextmanager
-def serve(db_path: Path, *, open_interest: OpenInterestRule | None) -> Iterator[str]:
-    app = create_app(db_path, rule=SAMPLE_RULE, universe=universe(), now_ms=lambda: AT, open_interest=open_interest)
+def serve(db_path: Path, *, open_interest: OpenInterestRule | None, listed: tuple[str, ...] = SYMBOLS) -> Iterator[str]:
+    app = create_app(
+        db_path,
+        rule=SAMPLE_RULE,
+        universe=universe(),
+        open_interest_symbols=frozenset()
+        if open_interest is None
+        else frozenset((item.venue, item.symbol) for item in universe() if item.symbol in listed),  # default "all"
+        now_ms=lambda: AT,
+        open_interest=open_interest,
+    )
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -131,6 +141,7 @@ def test_the_real_answers_pass_validation_and_are_judged_as_designed(tmp_path: P
         "holes": 1,
         "behind": 0,
         "ok": 3,
+        "not_collected": 0,
     }
 
     full = symbols[FULL]["open_interest"]
@@ -166,3 +177,32 @@ def test_disabled_makes_no_open_interest_call_and_leaves_the_candle_part_as_it_w
         off = {k: v for k, v in by_symbol(disabled)[symbol].items() if k != "open_interest"}
         assert on == off
     assert body_of(enabled)["summary"] == body_of(disabled)["summary"]
+
+
+def test_a_symbol_the_api_does_not_collect_is_not_collected_and_never_asked(tmp_path: Path) -> None:
+    db = tmp_path / "quasar.db"
+    seed(db)
+    with serve(db, open_interest=OI_RULE, listed=(FULL, HOLE)) as url:
+        real = http_fetch(url)
+        asked: list[str] = []
+
+        def fetch(path: str) -> RawResponse:
+            if path.startswith("/v1/open-interest/coverage"):
+                asked.append(path)
+            return real(path)
+
+        snapshot = Overviewer(fetch).get()
+
+    assert snapshot.status == 200
+    symbols = by_symbol(snapshot)
+    states = {s: v["open_interest"]["state"] for s, v in symbols.items()}
+    assert states == {
+        FULL: "ok",
+        HOLE: "holes",
+        YOUNG: "not_collected",
+        UNRECOVERABLE: "not_collected",
+        NONE: "not_collected",
+    }
+    assert sorted(dict(parse_qsl(urlsplit(p).query))["symbol"] for p in asked) == sorted([FULL, HOLE])
+    assert body_of(snapshot)["open_interest"]["summary"]["not_collected"] == 3
+    assert {s: v["state"] for s, v in symbols.items()} == dict.fromkeys(SYMBOLS, "ok")

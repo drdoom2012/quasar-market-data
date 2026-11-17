@@ -13,7 +13,9 @@ gate expires after 60 s, a lower bound only gets more conservative as time passe
 makes no history request at all. Each symbol of the round (``symbols_for_round``) asks for ``[B - 2c * 5 min, B]``; rows
 are parsed all-or-nothing, only eligible rows are written. A row that Binance has not published yet is simply absent:
 not an error, not retried; the symbol's next overlapping request or the catch-up stores it. A request error (not a
-refusal, a pause or a ban) gets one retry after ``RETRY_DELAY_MS`` if that fits before the deadline.
+refusal, a pause or a ban) gets one retry after ``RETRY_DELAY_MS`` if that fits before the deadline and a ticket of the
+round's shared retry reserve, ``min(50, n)``, is left (ADR-0003 A-6); without one the symbol is
+``retry_reserve_exhausted``.
 
 429 / 418. ``ExtensionPaused`` stops the round at once (the remaining symbols are ``paused``) and the task goes on
 with the next round; ``ExtensionStopped`` ends the task. At the round deadline unfinished symbols are cancelled and
@@ -31,7 +33,9 @@ successful page answers without its row is *tried*; after three tries it is not 
 in memory). A failed page is not a try: the symbol backs off 1, 2, 4 windows, then is suspended until restart.
 
 Output is one injected callable ``emit(line)``; the families are ``oi-round``, ``oi-conflict``, ``oi-warning``,
-``oi-error``, ``oi-measurement``, ``oi-reconcile`` and ``oi-catchup``.
+``oi-error``, ``oi-measurement``, ``oi-reconcile`` and ``oi-catchup``. The ``oi-round`` line ends with the round's
+``span_ms`` and ``pace=ok|slow`` (the pace rule of the backfill gate); an ``oi-catchup`` window that the gate stopped
+only because the previous round was counted in full (late or slow) ends ``end=previous-round`` instead of ``budget``.
 """
 
 import asyncio
@@ -63,6 +67,8 @@ from quasar_market_data.domain.open_interest import OpenInterest, select_eligibl
 from quasar_market_data.domain.open_interest_cadence import (
     backfill_share,
     open_interest_cadence,
+    pace_limit_ms,
+    retry_reserve,
     round_cost,
     symbols_for_round,
 )
@@ -124,6 +130,7 @@ class OpenInterestSymbolOutcome(StrEnum):
     STOPPED = "stopped"
     REFUSED = "refused"
     UNTRUSTED = "untrusted"
+    RETRY_RESERVE_EXHAUSTED = "retry_reserve_exhausted"
 
 
 @dataclass(frozen=True)
@@ -177,6 +184,7 @@ class OpenInterestRoundReport:
     pending: int
     skipped_rounds: int
     late_ms: int
+    span_ns: int  # monotonic, from the round's start to its end: the span the backfill gate's pace rule judges
 
     def line(self) -> str:
         counts = {outcome: 0 for outcome in OpenInterestSymbolOutcome}
@@ -191,13 +199,25 @@ class OpenInterestRoundReport:
             f"pending={self.pending}",
             f"skipped_rounds={self.skipped_rounds}",
             f"late_ms={self.late_ms}",
+            f"span_ms={self.span_ns // _NS_PER_MS}",
+            f"pace={'ok' if _on_pace(self.span_ns, len(self.symbols)) else 'slow'}",
         ]
         return " ".join(fields)
+
+
+def _on_pace(span_ns: int, round_size: int) -> bool:
+    """The pace rule of the backfill gate (ADR-0003 P-10, A-6 decision D-7): a span of at most ``pace_limit_ms(n)``.
+
+    An empty round (impossible with the derived cadence, see ``_round``) has no pace limit and counts as on pace.
+    """
+    return round_size < 1 or span_ns <= pace_limit_ms(round_size) * _NS_PER_MS
 
 
 @dataclass
 class _RoundState:
     symbols: tuple[str, ...]
+    retry_limit: int  # the round's shared retry reserve, min(50, n) (ADR-0003 P-10, A-6)
+    retries_taken: int = 0
     outcomes: dict[str, OpenInterestSymbolOutcome] = field(default_factory=dict)
     phases: dict[str, str] = field(default_factory=dict)
     stored: int = 0
@@ -205,6 +225,17 @@ class _RoundState:
     conflicts: int = 0
     pending: int = 0
     paused: bool = False
+
+    def try_take_retry(self) -> bool:
+        """Take one retry ticket if any is left; never given back (INV-148).
+
+        Deliberately synchronous: the check and the increment run with no ``await`` in between, so concurrent symbols of
+        the round (one event loop) can never take more than ``retry_limit`` tickets.
+        """
+        if self.retries_taken < self.retry_limit:
+            self.retries_taken += 1
+            return True
+        return False
 
 
 @dataclass
@@ -268,6 +299,7 @@ class _OpenInterestTask:
         self._last_round_span: tuple[int, int] | None = (
             None  # monotonic ns of the previous round's first and last instant
         )
+        self._last_round_size = 0  # the previous round's symbol count, for its pace limit
         self.holes: dict[str, list[int]] = {}
         self._scanned_newest: dict[str, int] = {}
         self.tries = OpenInterestTryBook(config.period)
@@ -367,13 +399,33 @@ class _OpenInterestTask:
     def _previous_round_if_on_schedule(self, wake_ns: int) -> tuple[int, int] | None:
         """The previous round's span when its starts will have expired, one by one, as the next round makes its own.
 
-        That holds when the previous round began about 300 s before this wake (it ran on schedule). A round that ran
-        late, for instance the first one after a start, is still in the window when the next round begins, so it counts.
+        That holds when the previous round began about 300 s before this wake (it ran on schedule) and ran on pace: its
+        span is at most ``pace_limit_ms(n)``. A round that ran late, for instance the first one after a start, is still
+        in the window when the next round begins, so it counts. So does a slow round (timeouts, slow failures): with the
+        backfill saturated, the next round's starts would wait for its starts to expire one by one and copy its pace on a
+        healthy network, and the round after that would copy it again (ADR-0003 P-10, A-6 decision D-7).
         """
         span = self._last_round_span
-        if span is not None and span[0] + WINDOW_MS * _NS_PER_MS <= wake_ns + ON_SCHEDULE_TOLERANCE_MS * _NS_PER_MS:
-            return span
-        return None
+        if span is None or self._last_round_size < 1:
+            return None
+        on_schedule = span[0] + WINDOW_MS * _NS_PER_MS <= wake_ns + ON_SCHEDULE_TOLERANCE_MS * _NS_PER_MS
+        on_pace = _on_pace(span[1] - span[0], self._last_round_size)
+        return span if on_schedule and on_pace else None
+
+    def _refused_for_the_previous_round(self, now_ns: int, wake_ns: int, excluded: tuple[int, int] | None) -> bool:
+        """The gate refused a page only because the previous round was counted in full (it ran late or slow).
+
+        Observability only (the ``oi-catchup`` end reason ``previous-round``): the gate itself is unchanged.
+        """
+        span = self._last_round_span
+        if excluded is not None or span is None:
+            return False
+        return backfill_may_start(
+            self.budget.committed_at(now_ns),
+            self.budget.committed_at(wake_ns, excluding=span),
+            self.config.budget_per_5min,
+            self.config.round_cost,
+        )
 
     def _grantable_now(self) -> bool:
         return self.budget.committed_at(self.clock.monotonic_ns()) + 1 <= self.config.budget_per_5min
@@ -417,13 +469,15 @@ class _OpenInterestTask:
             if now_ns + PAGE_BUDGET_MS * _NS_PER_MS > deadline_ns:
                 window.end = "deadline"
                 return
+            excluded = self._previous_round_if_on_schedule(wake_ns)
             if not backfill_may_start(
                 self.budget.committed_at(now_ns),
-                self.budget.committed_at(wake_ns, excluding=self._previous_round_if_on_schedule(wake_ns)),
+                self.budget.committed_at(wake_ns, excluding=excluded),
                 config.budget_per_5min,
                 config.round_cost,
             ):
-                window.end = "budget"
+                late_or_slow = self._refused_for_the_previous_round(now_ns, wake_ns, excluded)
+                window.end = "previous-round" if late_or_slow else "budget"
                 return
             page = min(heads.values(), key=lambda head: (head.start_ms, head.symbol))  # oldest first, then by symbol
             status = await self._run_page(page, trust, window)
@@ -638,10 +692,13 @@ class _OpenInterestTask:
     async def _round(self, boundary: int, deadline_ns: int, skipped: int, late_ms: int) -> OpenInterestRoundReport:
         config = self.config
         symbols = symbols_for_round(config.symbols, boundary, config.cadence, config.period)
-        state = _RoundState(symbols)
+        # defensive: the derived cadence keeps c <= S, so a round is never empty; retry_reserve refuses n < 1
+        state = _RoundState(symbols, retry_limit=retry_reserve(len(symbols)) if symbols else 0)
         span_start = self.clock.monotonic_ns()
         status, _ = await self._run_until(self._round_work(boundary, state, deadline_ns), deadline_ns)
-        self._last_round_span = (span_start, self.clock.monotonic_ns())
+        span_end = self.clock.monotonic_ns()
+        self._last_round_span = (span_start, span_end)
+        self._last_round_size = len(symbols)
         if status != "done":
             self._close_unfinished(boundary, state, status)
         return OpenInterestRoundReport(
@@ -654,6 +711,7 @@ class _OpenInterestTask:
             state.pending,
             skipped,
             late_ms,
+            span_end - span_start,
         )
 
     def _close_unfinished(self, boundary: int, state: _RoundState, status: str) -> None:
@@ -737,6 +795,10 @@ class _OpenInterestTask:
                     state.outcomes[symbol] = (
                         OpenInterestSymbolOutcome.PAUSED if state.paused else OpenInterestSymbolOutcome.STOPPED
                     )
+                    return
+                if attempt == 2 and not state.try_take_retry():  # no await between the check and acting on it
+                    state.outcomes[symbol] = OpenInterestSymbolOutcome.RETRY_RESERVE_EXHAUSTED
+                    self.emit(f"oi-warning symbol-not-retried boundary={boundary} symbol={symbol} {problem}")
                     return
                 state.phases[symbol] = "fetching"
                 try:

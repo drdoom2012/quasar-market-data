@@ -76,6 +76,8 @@ class ManualOiSource:
         self.page_error: tuple[str, BaseException] | None = None  # raised for the symbol's catch-up pages only
         self.page_script: list[bool] = []  # per catch-up page call, in order: True fails it (then pages succeed)
         self.fail_first = False  # the first request of every (symbol, range end) raises a SourceError
+        self.fail_symbols: set[str] = set()  # as ``fail_first``, for these symbols only
+        self.fail_delay_ms = 0  # ManualTime ms a failing ``fail_symbols`` request holds its slot before raising
         self._seen: set[tuple[str, int]] = set()
         self.mutate_rows: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None
 
@@ -120,6 +122,13 @@ class ManualOiSource:
             if self.fail_first and (symbol, end_time_ms) not in self._seen:
                 self._seen.add((symbol, end_time_ms))
                 raise SourceError("scripted first-attempt failure")
+            # shares ``_seen`` with ``fail_first``: a (symbol, range end) fails at most once across both
+            if symbol in self.fail_symbols and (symbol, end_time_ms) not in self._seen:
+                self._seen.add((symbol, end_time_ms))
+                await asyncio.sleep(0)  # after the limiter grant, before raising: other failures can interleave here
+                if self.fail_delay_ms:
+                    await self.t.sleep(self.fail_delay_ms)
+                raise SourceError("scripted listed-symbol failure")
             if self.page_script and end_time_ms - start_time_ms != 2 * STEP and self.page_script.pop(0):
                 raise SourceError("scripted page failure")
             if self.page_error is not None and symbol == self.page_error[0] and end_time_ms - start_time_ms != 2 * STEP:

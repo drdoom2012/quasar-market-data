@@ -78,6 +78,49 @@ def test_settle_waits_for_a_job_submitted_to_a_tracked_executor() -> None:
     asyncio.run(scenario())
 
 
+def test_settle_lets_the_task_that_awaits_a_job_finished_during_the_hops_run_until_it_blocks() -> None:
+    """A job that ends near the end of the hops leaves ``pending`` at zero while the task that awaits it has only a few
+    hops left: settle must hop again, or time moves on before that task has run (a request started at the next step
+    instead of at its own instant, on a slower CI machine)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    async def scenario() -> None:
+        t = ManualTime()
+        executor = ThreadPoolExecutor(max_workers=1)
+        t.track_executor(executor)
+        release = threading.Event()
+        job = executor.submit(release.wait, 5)
+        work = asyncio.wrap_future(job)
+        after: list[int] = []
+
+        def block_until_done() -> None:
+            """Block the event loop on purpose until the job's completion callbacks are queued on it."""
+            while not job.done():
+                time.sleep(0.001)
+            time.sleep(0.05)
+
+        async def awaiter() -> None:
+            await work
+            for hop in range(30):  # the work the task does after the job, before it blocks again
+                await asyncio.sleep(0)
+                after.append(hop)
+
+        async def releaser() -> None:
+            for _ in range(80):  # late in the hops of the settle below
+                await asyncio.sleep(0)
+            release.set()
+            block_until_done()  # the completion callbacks are queued before the next hop
+
+        tasks = [asyncio.ensure_future(awaiter()), asyncio.ensure_future(releaser())]
+        await asyncio.sleep(0)
+        await t.settle()
+        assert after == list(range(30)), f"settle returned after {len(after)} of the 30 hops"
+        await asyncio.gather(*tasks)
+        executor.shutdown()
+
+    asyncio.run(scenario())
+
+
 def test_an_untracked_executor_is_not_waited_for() -> None:
     from concurrent.futures import ThreadPoolExecutor
 

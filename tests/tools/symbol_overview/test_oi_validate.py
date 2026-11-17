@@ -33,7 +33,7 @@ from tools.symbol_overview.model import (
     OiHealth,
     OiRule,
 )
-from tools.symbol_overview.validate import open_interest_coverage_result, open_interest_health
+from tools.symbol_overview.validate import instruments_result, open_interest_coverage_result, open_interest_health
 
 JSON = "application/json; charset=utf-8"
 HEALTH = Health(T0, RULE)
@@ -366,3 +366,37 @@ def test_other_failures_keep_their_codes() -> None:
 def test_a_health_body_without_the_object_is_not_mistaken_for_disabled() -> None:
     assert health_doc()  # the existing helper has no open_interest key, like an API without OI-5
     assert isinstance(check_health(json.dumps(health_doc()).encode()), Invalid)
+
+
+# --- open_interest_period of /v1/instruments (ADR-0003 A-6, design 2.5, 2.7) -------------------------------------------
+
+
+def instruments_body(**extra: object) -> bytes:
+    item = {"venue": "binance-usdm", "symbol": "BTC/USDT:USDT", "timeframe": "5m", "newest_open_time_ms": T0 - TF_MS}
+    return json.dumps({"instruments": [{**item, **extra}]}).encode()
+
+
+def test_an_absent_open_interest_period_is_unknown_as_in_an_api_older_than_a6() -> None:
+    result = instruments_result(200, JSON, instruments_body())
+
+    assert isinstance(result, tuple)
+    assert (result[0].open_interest_known, result[0].open_interest_period) == (False, None)
+
+
+def test_a_period_string_is_kept_and_known() -> None:
+    result = instruments_result(200, JSON, instruments_body(open_interest_period="5m"))
+
+    assert isinstance(result, tuple)
+    assert (result[0].open_interest_known, result[0].open_interest_period) == (True, "5m")
+
+
+def test_an_explicit_null_period_is_known_not_collected() -> None:
+    result = instruments_result(200, JSON, instruments_body(open_interest_period=None))
+
+    assert isinstance(result, tuple)
+    assert (result[0].open_interest_known, result[0].open_interest_period) == (True, None)
+
+
+@pytest.mark.parametrize("value", [5, True, ["5m"], {"p": "5m"}])
+def test_a_period_that_is_neither_null_nor_a_string_is_schema(value: object) -> None:
+    assert instruments_result(200, JSON, instruments_body(open_interest_period=value)) == Invalid("schema")
